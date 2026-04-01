@@ -13,6 +13,7 @@
 
   let ws = null, myName = '';
   let pendingRoom = null; // { id, type } for the room being password-entered
+  let pendingCreatePassword = null; // password used when creating a room
 
   function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -30,6 +31,10 @@
       case 'room-list': renderRooms(msg.rooms); break;
       case 'room-created':
         sessionStorage.setItem('arena-name', myName);
+        if (pendingCreatePassword) {
+          sessionStorage.setItem('arena-room-password', pendingCreatePassword);
+          pendingCreatePassword = null;
+        }
         window.location.href = `/${msg.roomType}?room=${msg.roomId}`;
         break;
       case 'error':
@@ -128,6 +133,7 @@
     const gameType = gameTypeSelect.value;
     const maxPlayers = parseInt(maxPlayersSelect.value);
     const password = roomPasswordInput.value.trim() || null;
+    pendingCreatePassword = password;
     wsSend({ type: 'create-room', roomName, gameType, maxPlayers, password });
   });
 
