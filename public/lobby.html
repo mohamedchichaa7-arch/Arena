@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Arena — Lobby</title>
+  <link rel="stylesheet" href="lobby.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- JOIN -->
+<div id="joinScreen" class="screen">
+  <div class="join-card">
+    <h1 class="logo">GAME ARENA</h1>
+    <p class="subtitle">Multiplayer Maze & Tetris Battles</p>
+    <div class="join-form">
+      <input type="text" id="nameInput" placeholder="Enter your name" maxlength="20" autocomplete="off" spellcheck="false">
+      <button class="btn btn-primary btn-lg" id="btnJoin">Enter Lobby</button>
+    </div>
+  </div>
+  <div class="bg-orbs"><div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div></div>
+</div>
+
+<!-- LOBBY -->
+<div id="lobbyScreen" class="screen" style="display:none">
+  <header class="lobby-header">
+    <h1 class="logo logo-sm">GAME ARENA</h1>
+    <span class="user-badge" id="userBadge"></span>
+  </header>
+
+  <div class="create-bar">
+    <input type="text" id="roomNameInput" placeholder="Room name" maxlength="30">
+    <select id="gameTypeSelect">
+      <option value="maze">🏁 Maze</option>
+      <option value="tetris">🎮 Tetris</option>
+    </select>
+    <select id="maxPlayersSelect">
+      <option value="2">2 Players</option>
+      <option value="4" selected>4 Players</option>
+      <option value="6">6 Players</option>
+      <option value="8">8 Players</option>
+    </select>
+    <button class="btn btn-accent" id="btnCreate">Create Room</button>
+  </div>
+
+  <div class="room-grid" id="roomGrid">
+    <div class="empty-state" id="emptyState">
+      <p>No rooms yet — create one to get started!</p>
+    </div>
+  </div>
+</div>
+
+<script src="lobby.js"></script>
+</body>
+</html>
