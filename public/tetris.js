@@ -201,7 +201,11 @@
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}`);
-    ws.onopen = () => wsSend({ type: 'join-room', roomId, name: myName });
+    ws.onopen = () => {
+      const password = sessionStorage.getItem('arena-room-password') || undefined;
+      sessionStorage.removeItem('arena-room-password');
+      wsSend({ type: 'join-room', roomId, name: myName, password });
+    };
     ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch { } };
     ws.onclose = () => { statusEl.textContent = 'Disconnected. Returning to lobby…'; setTimeout(() => location.href = '/', 3000); };
   }

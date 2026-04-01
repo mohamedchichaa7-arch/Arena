@@ -50,7 +50,22 @@
         <option value="6">6 Players</option>
         <option value="8">8 Players</option>
       </select>
+      <input type="password" id="roomPasswordInput" placeholder="🔒 Password (optional)" maxlength="30" autocomplete="off">
       <button class="btn btn-accent" id="btnCreate">Create Room</button>
+    </div>
+
+    <!-- Password prompt modal for locked rooms -->
+    <div id="pwModal" class="pw-modal" style="display:none">
+      <div class="pw-card">
+        <p class="pw-title">🔒 Private Room</p>
+        <p class="pw-sub">Enter the room password to join</p>
+        <input type="password" id="pwInput" placeholder="Password" maxlength="30" autocomplete="off">
+        <div class="pw-actions">
+          <button class="btn btn-accent" id="pwConfirm">Join</button>
+          <button class="btn pw-cancel" id="pwCancel">Cancel</button>
+        </div>
+        <p class="pw-error" id="pwError"></p>
+      </div>
     </div>
 
     <div class="room-grid" id="roomGrid">

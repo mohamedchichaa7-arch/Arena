@@ -360,3 +360,78 @@ input[type=text]:focus {
     padding: .8rem 1rem
   }
 }
+
+/* ── Lock badge ── */
+.room-lock {
+  font-size: .85rem;
+  margin-right: .1rem
+}
+
+/* ── Password modal ── */
+.pw-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 26, .85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  backdrop-filter: blur(6px)
+}
+
+.pw-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(124, 58, 237, .3);
+  border-radius: 20px;
+  padding: 2rem 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: .8rem;
+  min-width: 300px;
+  box-shadow: 0 8px 60px rgba(0, 0, 0, .6)
+}
+
+.pw-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--accent-g)
+}
+
+.pw-sub {
+  font-size: .8rem;
+  color: var(--text-dim);
+  text-align: center
+}
+
+.pw-card input {
+  width: 100%;
+  text-align: center;
+  font-size: .95rem;
+  padding: .6rem 1rem;
+  border-radius: 10px
+}
+
+.pw-actions {
+  display: flex;
+  gap: .6rem;
+  justify-content: center
+}
+
+.pw-cancel {
+  background: rgba(124, 58, 237, .1);
+  color: var(--text-dim);
+  border: 1px solid rgba(124, 58, 237, .2)
+}
+
+.pw-cancel:hover {
+  background: rgba(124, 58, 237, .2)
+}
+
+.pw-error {
+  font-size: .75rem;
+  color: var(--danger);
+  text-align: center;
+  min-height: 1rem
+}

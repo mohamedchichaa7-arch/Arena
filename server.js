@@ -2,6 +2,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
+const { createHmac } = require('crypto');
+
+const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
+function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
 
 const PORT = process.env.PORT || 3007;
 
@@ -84,7 +88,7 @@ function serializeRooms() {
     list.push({
       id, name: r.name, type: r.type,
       players: r.players.size, maxPlayers: r.maxPlayers,
-      status: r.status, // waiting | playing
+      status: r.status, locked: !!r.passwordHash,
     });
   }
   return list;
@@ -192,17 +196,20 @@ wss.on('connection', (ws, req) => {
         const type = msg.gameType === 'tetris' ? 'tetris' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
         const max = Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
+        const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
         const room = {
           id: roomId, type, name, maxPlayers: max,
           players: new Map(), status: 'waiting',
           race: null, battle: null, countdown: null,
+          passwordHash,
         };
         rooms.set(roomId, room);
         // Don't auto-join — the game page will join via its own WS
         send(ws, { type: 'room-created', roomId, roomType: type, roomName: name });
         broadcastLobby();
-        log('info', 'room-created', { id, name: conn.name, ip: conn.ip, roomId, type, maxPlayers: max, roomName: name });
+        log('info', 'room-created', { id, name: conn.name, ip: conn.ip, roomId, type, maxPlayers: max, roomName: name, locked: !!passwordHash });
         break;
       }
 
@@ -210,6 +217,12 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(msg.roomId);
         if (!room) { send(ws, { type: 'error', msg: 'Room not found' }); break; }
         if (room.players.size >= room.maxPlayers) { send(ws, { type: 'error', msg: 'Room full' }); break; }
+        if (room.passwordHash) {
+          const supplied = msg.password ? String(msg.password).trim().slice(0, 30) : '';
+          if (!supplied || hashRoomPw(supplied) !== room.passwordHash) {
+            send(ws, { type: 'error', msg: 'Wrong password' }); break;
+          }
+        }
         // Accept name from game page (new WS connection)
         if (msg.name) conn.name = String(msg.name).slice(0, 20);
         removeFromRoom(conn); // leave any existing room

@@ -5,10 +5,14 @@
   const nameInput = $('nameInput'), btnJoin = $('btnJoin');
   const roomNameInput = $('roomNameInput'), gameTypeSelect = $('gameTypeSelect');
   const maxPlayersSelect = $('maxPlayersSelect'), btnCreate = $('btnCreate');
+  const roomPasswordInput = $('roomPasswordInput');
   const roomGrid = $('roomGrid'), emptyState = $('emptyState');
   const userBadge = $('userBadge');
+  const pwModal = $('pwModal'), pwInput = $('pwInput');
+  const pwConfirm = $('pwConfirm'), pwCancel = $('pwCancel'), pwError = $('pwError');
 
   let ws = null, myName = '';
+  let pendingRoom = null; // { id, type } for the room being password-entered
 
   function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -25,7 +29,6 @@
     switch (msg.type) {
       case 'room-list': renderRooms(msg.rooms); break;
       case 'room-created':
-        // Room created — navigate to the game page (join happens there)
         sessionStorage.setItem('arena-name', myName);
         window.location.href = `/${msg.roomType}?room=${msg.roomId}`;
         break;
@@ -35,8 +38,39 @@
     }
   }
 
+  function navigateToRoom(room, password) {
+    sessionStorage.setItem('arena-name', myName);
+    if (password) sessionStorage.setItem('arena-room-password', password);
+    else sessionStorage.removeItem('arena-room-password');
+    window.location.href = `/${room.type}?room=${room.id}`;
+  }
+
+  function openPwModal(room) {
+    pendingRoom = room;
+    pwInput.value = '';
+    pwError.textContent = '';
+    pwModal.style.display = 'flex';
+    pwInput.focus();
+  }
+
+  function closePwModal() {
+    pwModal.style.display = 'none';
+    pendingRoom = null;
+  }
+
+  pwConfirm.addEventListener('click', confirmPassword);
+  pwInput.addEventListener('keydown', e => { if (e.key === 'Enter') confirmPassword(); if (e.key === 'Escape') closePwModal(); });
+  pwCancel.addEventListener('click', closePwModal);
+  pwModal.addEventListener('click', e => { if (e.target === pwModal) closePwModal(); });
+
+  function confirmPassword() {
+    const pw = pwInput.value.trim();
+    if (!pw) { pwError.textContent = 'Please enter a password.'; return; }
+    if (!pendingRoom) return;
+    navigateToRoom(pendingRoom, pw);
+  }
+
   function renderRooms(rooms) {
-    // Remove old room cards (but keep emptyState)
     roomGrid.querySelectorAll('.room-card').forEach(el => el.remove());
     emptyState.style.display = rooms.length === 0 ? '' : 'none';
 
@@ -46,10 +80,12 @@
       const icon = r.type === 'tetris' ? '🎮' : '🏁';
       const statusCls = r.status === 'playing' ? 'playing' : 'waiting';
       const full = r.players >= r.maxPlayers;
+      const lockBadge = r.locked ? '<span class="room-lock">🔒</span>' : '';
       card.innerHTML = `
       <div class="room-card-header">
         <span class="room-type-icon">${icon}</span>
         <span class="room-name">${escapeHtml(r.name)}</span>
+        ${lockBadge}
         <span class="room-status ${statusCls}">${r.status}</span>
       </div>
       <div class="room-meta">
@@ -57,13 +93,16 @@
         <span class="room-id">${r.id}</span>
       </div>
       <div style="margin-top:.8rem;text-align:right">
-        <button class="btn btn-join-room" ${full ? 'disabled' : ''}>${full ? 'Full' : 'Join'}</button>
+        <button class="btn btn-join-room" ${full ? 'disabled' : ''}>${full ? 'Full' : r.locked ? '🔒 Join' : 'Join'}</button>
       </div>
     `;
       card.querySelector('.btn-join-room').addEventListener('click', () => {
-        // Navigate directly — game page will join via its own WS
         sessionStorage.setItem('arena-name', myName);
-        window.location.href = `/${r.type}?room=${r.id}`;
+        if (r.locked) {
+          openPwModal(r);
+        } else {
+          navigateToRoom(r, null);
+        }
       });
       roomGrid.appendChild(card);
     }
@@ -88,7 +127,8 @@
     const roomName = roomNameInput.value.trim() || myName + "'s Room";
     const gameType = gameTypeSelect.value;
     const maxPlayers = parseInt(maxPlayersSelect.value);
-    wsSend({ type: 'create-room', roomName, gameType, maxPlayers });
+    const password = roomPasswordInput.value.trim() || null;
+    wsSend({ type: 'create-room', roomName, gameType, maxPlayers, password });
   });
 
   nameInput.focus();

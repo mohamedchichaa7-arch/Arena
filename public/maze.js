@@ -846,8 +846,10 @@
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}`);
     ws.onopen = () => {
-      // Join room with our name
-      wsSend({ type: 'join-room', roomId, name: myName });
+      // Join room with our name (and password if this is a locked room)
+      const password = sessionStorage.getItem('arena-room-password') || undefined;
+      sessionStorage.removeItem('arena-room-password');
+      wsSend({ type: 'join-room', roomId, name: myName, password });
     };
     ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch { } };
     ws.onclose = () => { statusEl.textContent = 'Disconnected. Returning to lobby…'; setTimeout(() => location.href = '/', 3000); };
