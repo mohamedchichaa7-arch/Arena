@@ -122,7 +122,8 @@ body::before {
 }
 
 select,
-input[type=text] {
+input[type=text],
+input[type=password] {
   background: var(--bg-card);
   color: var(--text);
   border: 1px solid rgba(124, 58, 237, .25);
@@ -134,7 +135,8 @@ input[type=text] {
 }
 
 select:focus,
-input[type=text]:focus {
+input[type=text]:focus,
+input[type=password]:focus {
   outline: none;
   border-color: var(--accent-g);
   box-shadow: 0 0 12px rgba(124, 58, 237, .15)
