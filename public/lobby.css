@@ -355,11 +355,36 @@ input[type=password]:focus {
   }
 
   .create-bar {
-    padding: 1rem
+    padding: .8rem 1rem;
+    gap: .5rem
+  }
+
+  .create-bar input,
+  .create-bar select {
+    width: 100%;
+    box-sizing: border-box
+  }
+
+  .create-bar .btn {
+    width: 100%
   }
 
   .lobby-header {
     padding: .8rem 1rem
+  }
+
+  .logo {
+    font-size: 2rem
+  }
+
+  .logo-sm {
+    font-size: 1.2rem
+  }
+
+  .join-card {
+    padding: 2rem 1.2rem;
+    margin: 1rem;
+    width: calc(100% - 2rem)
   }
 }
 

@@ -24,8 +24,10 @@
     <main class="main-content">
       <header class="game-header">
         <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
         <h1 class="logo logo-sm">TETRIS BATTLE</h1>
         <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-mobile-toggle" id="btnToggleChat" title="Chat">💬</button>
       </header>
 
       <div class="controls">
@@ -94,6 +96,20 @@
     <button class="btn btn-primary btn-lg" id="btnRestart">Play Again</button>
   </div>
   <canvas id="confetti"></canvas>
+  <div class="panel-backdrop" id="panelBackdrop"></div>
+  <script>
+    (function () {
+      var sidebar = document.querySelector('.sidebar');
+      var chat = document.querySelector('.chat-panel');
+      var backdrop = document.getElementById('panelBackdrop');
+      var btnSidebar = document.getElementById('btnToggleSidebar');
+      var btnChat = document.getElementById('btnToggleChat');
+      function closeAll() { sidebar.classList.remove('open'); chat.classList.remove('open'); backdrop.classList.remove('show'); }
+      btnSidebar.addEventListener('click', function () { var o = sidebar.classList.contains('open'); closeAll(); if (!o) { sidebar.classList.add('open'); backdrop.classList.add('show'); } });
+      btnChat.addEventListener('click', function () { var o = chat.classList.contains('open'); closeAll(); if (!o) { chat.classList.add('open'); backdrop.classList.add('show'); } });
+      backdrop.addEventListener('click', closeAll);
+    })();
+  </script>
   <script src="tetris.js"></script>
 </body>
 
