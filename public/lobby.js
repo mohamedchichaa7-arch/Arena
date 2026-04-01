@@ -137,5 +137,12 @@
     wsSend({ type: 'create-room', roomName, gameType, maxPlayers, password });
   });
 
-  nameInput.focus();
+  // Auto-rejoin lobby if name is already known (e.g. returning from a game)
+  const savedName = sessionStorage.getItem('arena-name');
+  if (savedName) {
+    nameInput.value = savedName;
+    join();
+  } else {
+    nameInput.focus();
+  }
 })();
