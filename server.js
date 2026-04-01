@@ -506,6 +506,8 @@ wss.on('connection', (ws, req) => {
         const takerHand = br.hands.get(takerId);
         if (takerHand) {
           for (const c of br.meldCards) takerHand.push({ num: c.num, suit: c.suit });
+          // Auto-discard any 4-of-a-kind gained from taking the meld
+          autoDiscardFours(room, takerId, br);
         }
         broadcastRoom(room.id, {
           type: 'br-reveal', cards: allCards, announcedNum: br.lastAnnouncedNum,
@@ -513,8 +515,8 @@ wss.on('connection', (ws, req) => {
           takerName: takerConn ? takerConn.name : 'Player',
           takerId,
         });
-        // Send updated hand to the taker
-        if (takerHand) send(conns.get(takerId)?.ws, { type: 'br-hand-update', hand: takerHand });
+        // Send updated hand to the taker (after any auto-discards)
+        if (takerHand) send(conns.get(takerId)?.ws, { type: 'br-hand-update', hand: br.hands.get(takerId) });
         log('info', 'br-challenge', { roomId: room.id, challenger: challengerName, target: targetName, wasBluff, cardsRevealed: allCards.length });
         // Save before clearing
         const prevLastPlayerId = br.lastPlayerId;
@@ -568,6 +570,31 @@ wss.on('connection', (ws, req) => {
 });
 
 // ── Bluff Rummy helpers ─────────────────────────────────────────
+// Remove all 4-of-a-kind sets from a player's hand in-place; broadcast each removal
+function autoDiscardFours(room, pid, br) {
+  const hand = br.hands.get(pid);
+  if (!hand) return;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const counts = {};
+    for (const c of hand) counts[c.num] = (counts[c.num] || 0) + 1;
+    for (const [numStr, cnt] of Object.entries(counts)) {
+      if (cnt >= 4) {
+        const num = parseInt(numStr);
+        let removed = 0;
+        for (let i = hand.length - 1; i >= 0 && removed < 4; i--) {
+          if (hand[i].num === num) { hand.splice(i, 1); removed++; }
+        }
+        broadcastRoom(room.id, { type: 'br-auto-discard', playerId: pid, num });
+        log('info', 'br-auto-discard', { roomId: room.id, playerId: pid, num });
+        changed = true;
+        break;
+      }
+    }
+  }
+}
+
 function startBluffRummy(room) {
   // Build deck: 1-13, 4 suits
   const SUITS = ['♠', '♥', '♦', '♣'];
@@ -589,17 +616,14 @@ function startBluffRummy(room) {
     hands.get(playerIds[idx % playerIds.length]).push(card);
     idx++;
   }
-  // Auto-discard any set of 4 same-number cards
+  // Auto-discard any set of 4 same-number cards (re-read from map each time to avoid stale reference)
   for (const pid of playerIds) {
-    const hand = hands.get(pid);
     const counts = {};
-    for (const c of hand) counts[c.num] = (counts[c.num] || 0) + 1;
+    for (const c of hands.get(pid)) counts[c.num] = (counts[c.num] || 0) + 1;
     for (const [numStr, cnt] of Object.entries(counts)) {
       if (cnt === 4) {
         const num = parseInt(numStr);
-        // Remove all 4
-        const newHand = hand.filter(c => c.num !== num);
-        hands.set(pid, newHand);
+        hands.set(pid, hands.get(pid).filter(c => c.num !== num));
         broadcastRoom(room.id, { type: 'br-auto-discard', playerId: pid, num });
         log('info', 'br-auto-discard', { roomId: room.id, playerId: pid, num });
       }
