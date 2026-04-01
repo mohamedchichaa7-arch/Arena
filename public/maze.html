@@ -1,56 +1,89 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Maze Runner — Game Arena</title>
   <link rel="stylesheet" href="maze.css">
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap"
+    rel="stylesheet">
 </head>
+
 <body>
-<div class="layout">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <h3>Players</h3>
-      <span class="player-count" id="playerCount">1</span>
-    </div>
-    <div class="player-grid" id="playerList"></div>
-  </aside>
-  <main class="main-content">
-    <header class="game-header">
-      <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
-      <h1 class="logo logo-sm">MAZE RUNNER</h1>
-      <span class="room-badge" id="roomBadge"></span>
-    </header>
-    <div class="controls">
-      <label>Size <select id="sizeSelect"><option value="10">10×10</option><option value="15" selected>15×15</option><option value="20">20×20</option><option value="25">25×25</option><option value="30">30×30</option></select></label>
-      <label>Speed <input type="range" id="speedRange" min="1" max="100" value="50"><span id="speedLabel">50</span></label>
-      <button class="btn btn-primary" id="btnGenerate">Generate</button>
-      <div class="race-controls">
-        <select id="raceMode"><option value="same">Race: Same Map</option><option value="individual">Race: Own Maps</option></select>
-        <button class="btn btn-accent" id="btnRace">Start Race</button>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">1</span>
       </div>
-      <div class="race-controls">
-        <select id="aiDifficulty"><option value="easy">AI: Easy</option><option value="medium" selected>AI: Medium</option><option value="hard">AI: Hard</option><option value="godlike">AI: Godlike</option></select>
-        <button class="btn btn-ai" id="btnVsAI">VS AI</button>
+      <div class="player-grid" id="playerList"></div>
+    </aside>
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <h1 class="logo logo-sm">MAZE RUNNER</h1>
+        <span class="room-badge" id="roomBadge"></span>
+      </header>
+      <div class="controls">
+        <label>Size <select id="sizeSelect">
+            <option value="10">10×10</option>
+            <option value="15" selected>15×15</option>
+            <option value="20">20×20</option>
+            <option value="25">25×25</option>
+            <option value="30">30×30</option>
+          </select></label>
+        <label>Speed <input type="range" id="speedRange" min="1" max="100" value="50"><span
+            id="speedLabel">50</span></label>
+        <button class="btn btn-primary" id="btnGenerate">Generate</button>
+        <div class="race-controls">
+          <select id="raceMode">
+            <option value="same">Race: Same Map</option>
+            <option value="individual">Race: Own Maps</option>
+          </select>
+          <button class="btn btn-accent" id="btnRace">Start Race</button>
+        </div>
+        <div class="race-controls">
+          <select id="aiDifficulty">
+            <option value="easy">AI: Easy</option>
+            <option value="medium" selected>AI: Medium</option>
+            <option value="hard">AI: Hard</option>
+            <option value="godlike">AI: Godlike</option>
+          </select>
+          <button class="btn btn-ai" id="btnVsAI">VS AI</button>
+        </div>
       </div>
-    </div>
-    <div class="stats">
-      <div class="stat"><span class="stat-label">Moves</span><span class="stat-value" id="statMoves">0</span></div>
-      <div class="stat"><span class="stat-label">Time</span><span class="stat-value" id="statTime">0:00</span></div>
-      <div class="stat"><span class="stat-label">Cells</span><span class="stat-value" id="statCells">0</span></div>
-    </div>
-    <div class="status" id="status">Connecting…</div>
-    <div class="maze-wrapper"><canvas id="mazeCanvas"></canvas><span id="secretDot"></span></div>
-    <div class="legend">
-      <span>←→↑↓ Move</span><span>🟢 You</span><span>⭐ Goal</span><span>🔴 AI</span>
-    </div>
-  </main>
-</div>
-<div class="overlay" id="countdownOverlay"><div class="countdown-num" id="countdownText">3</div><div class="countdown-sub" id="countdownSub">Race starting…</div></div>
-<div class="overlay" id="winOverlay"><h2 class="win-title" id="winTitle">YOU WIN!</h2><div class="win-stats"><div>Time: <span id="winTime">0:00</span></div><div>Moves: <span id="winMoves">0</span></div></div><button class="btn btn-primary btn-lg" id="btnPlayAgain">Play Again</button></div>
-<div class="overlay" id="raceResultsOverlay"><h2 class="results-title">Race Results</h2><div id="raceResultsList" class="results-list"></div><button class="btn btn-primary btn-lg" id="btnRaceClose">Continue</button></div>
-<canvas id="confetti"></canvas>
-<script src="maze.js"></script>
+      <div class="stats">
+        <div class="stat"><span class="stat-label">Moves</span><span class="stat-value" id="statMoves">0</span></div>
+        <div class="stat"><span class="stat-label">Time</span><span class="stat-value" id="statTime">0:00</span></div>
+        <div class="stat"><span class="stat-label">Cells</span><span class="stat-value" id="statCells">0</span></div>
+      </div>
+      <div class="status" id="status">Connecting…</div>
+      <div class="maze-wrapper"><canvas id="mazeCanvas"></canvas><span id="secretDot"></span></div>
+      <div class="legend">
+        <span>←→↑↓ Move</span><span>🟢 You</span><span>⭐ Goal</span><span>🔴 AI</span>
+      </div>
+    </main>
+  </div>
+  <div class="overlay" id="countdownOverlay">
+    <div class="countdown-num" id="countdownText">3</div>
+    <div class="countdown-sub" id="countdownSub">Race starting…</div>
+  </div>
+  <div class="overlay" id="winOverlay">
+    <h2 class="win-title" id="winTitle">YOU WIN!</h2>
+    <div class="win-stats">
+      <div>Time: <span id="winTime">0:00</span></div>
+      <div>Moves: <span id="winMoves">0</span></div>
+    </div><button class="btn btn-primary btn-lg" id="btnPlayAgain">Play Again</button>
+  </div>
+  <div class="overlay" id="raceResultsOverlay">
+    <h2 class="results-title">Race Results</h2>
+    <div id="raceResultsList" class="results-list"></div><button class="btn btn-primary btn-lg"
+      id="btnRaceClose">Continue</button>
+  </div>
+  <canvas id="confetti"></canvas>
+  <script src="maze.js"></script>
 </body>
+
 </html>
