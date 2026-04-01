@@ -467,7 +467,7 @@
     'recursive-division': genRecursiveDivision
   };
 
-  async function generateMaze(size, speed, seed) {
+  async function generateMaze(size, speed, seed, algo) {
     genAbort = true; await sleep(30); genAbort = false;
     stopTimer(); stopAI();
     aiPos = { r: 0, c: 0 }; aiStep = 0; aiMoves = 0; aiElapsed = 0; aiDone = false;
@@ -479,8 +479,9 @@
     computeSize(); initGrid();
 
     const rng = seed != null ? mulberry32(seed) : mulberry32(Math.floor(Math.random() * 2147483647));
-    const algo = ALGORITHMS[algoSelect.value] || genKruskal;
-    const gen = algo(rng);
+    const algoKey = algo || algoSelect.value;
+    const genFn = ALGORITHMS[algoKey] || genKruskal;
+    const gen = genFn(rng);
 
     player = { r: 0, c: 0 };
     goal = { r: rows - 1, c: cols - 1 };
@@ -913,7 +914,7 @@
         winOverlay.classList.remove('show');
         raceResultsOverlay.classList.remove('show');
         statusEl.textContent = 'RACE! Go go go!';
-        generateMaze(msg.size, msg.speed, msg.mode === 'same' ? msg.seed : null);
+        generateMaze(msg.size, msg.speed, msg.mode === 'same' ? msg.seed : null, msg.algo);
         break;
 
       case 'race-player-finish':
@@ -1041,7 +1042,7 @@
   // ══════════════════════════════════════════════════════════════════
 
   function startRace() {
-    wsSend({ type: 'start-race', mode: raceMode.value, size: parseInt(sizeSelect.value), speed: parseInt(speedRange.value) });
+    wsSend({ type: 'start-race', mode: raceMode.value, size: parseInt(sizeSelect.value), speed: parseInt(speedRange.value), algo: algoSelect.value });
   }
 
   function showRaceResults(rankings) {

@@ -265,21 +265,22 @@ wss.on('connection', (ws, req) => {
         const mode = msg.mode === 'same' ? 'same' : 'individual';
         const size = Math.min(40, Math.max(10, parseInt(msg.size) || 15));
         const speed = Math.min(100, Math.max(1, parseInt(msg.speed) || 50));
+        const algo = String(msg.algo || 'kruskal').slice(0, 30);
         const seed = Math.floor(Math.random() * 2147483647);
-        room.race = { mode, size, speed, seed, started: false, finished: new Map(), startedAt: Date.now() };
+        room.race = { mode, size, speed, seed, algo, started: false, finished: new Map(), startedAt: Date.now() };
         room.status = 'playing';
         broadcastLobby();
-        log('info', 'race-start', { startedBy: conn.name, ip: conn.ip, roomId: room.id, roomName: room.name, mode, size, speed, players: room.players.size });
+        log('info', 'race-start', { startedBy: conn.name, ip: conn.ip, roomId: room.id, roomName: room.name, mode, size, speed, algo, players: room.players.size });
         let count = 3;
-        broadcastRoom(room.id, { type: 'race-countdown', count, mode, size });
+        broadcastRoom(room.id, { type: 'race-countdown', count, mode, size, algo });
         room.countdown = setInterval(() => {
           count--;
           if (count > 0) {
-            broadcastRoom(room.id, { type: 'race-countdown', count, mode, size });
+            broadcastRoom(room.id, { type: 'race-countdown', count, mode, size, algo });
           } else {
             clearInterval(room.countdown); room.countdown = null;
             room.race.started = true;
-            broadcastRoom(room.id, { type: 'race-go', mode, size, speed, seed });
+            broadcastRoom(room.id, { type: 'race-go', mode, size, speed, seed, algo });
           }
         }, 1000);
         break;
