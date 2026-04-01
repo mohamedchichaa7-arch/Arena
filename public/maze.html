@@ -19,14 +19,6 @@
         <span class="player-count" id="playerCount">1</span>
       </div>
       <div class="player-grid" id="playerList"></div>
-      <div class="chat-section">
-        <div class="chat-header">Chat</div>
-        <div class="chat-messages" id="chatMessages"></div>
-        <div class="chat-input-row">
-          <input class="chat-input" id="chatInput" type="text" placeholder="Message…" maxlength="200" autocomplete="off">
-          <button class="btn chat-send-btn" id="chatSend">&uarr;</button>
-        </div>
-      </div>
     </aside>
     <main class="main-content">
       <header class="game-header">
@@ -73,6 +65,14 @@
         <span>←→↑↓ Move</span><span>🟢 You</span><span>⭐ Goal</span><span>🔴 AI</span>
       </div>
     </main>
+    <aside class="chat-panel">
+      <div class="chat-header">Chat</div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" type="text" placeholder="Message…" maxlength="200" autocomplete="off">
+        <button class="btn chat-send-btn" id="chatSend">&uarr;</button>
+      </div>
+    </aside>
   </div>
   <div class="overlay" id="countdownOverlay">
     <div class="countdown-num" id="countdownText">3</div>

@@ -417,22 +417,16 @@ canvas#boardCanvas {
   border-radius: 3px
 }
 
-/* Chat */
-.sidebar {
-  overflow: hidden
-}
-
-.player-grid {
-  max-height: 35vh;
-  overflow-y: auto
-}
-
-.chat-section {
-  flex: 1;
+/* Chat panel (right sidebar) */
+.chat-panel {
+  width: 220px;
+  min-width: 180px;
+  max-width: 280px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  border-top: 1px solid var(--border)
+  overflow: hidden
 }
 
 .chat-header {
@@ -442,7 +436,8 @@ canvas#boardCanvas {
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--dim);
-  border-bottom: 1px solid var(--border)
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0
 }
 
 .chat-messages {
@@ -474,7 +469,8 @@ canvas#boardCanvas {
   display: flex;
   gap: .3rem;
   padding: .4rem;
-  border-top: 1px solid var(--border)
+  border-top: 1px solid var(--border);
+  flex-shrink: 0
 }
 
 .chat-input {

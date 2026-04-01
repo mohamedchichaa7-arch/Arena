@@ -319,7 +319,7 @@ wss.on('connection', (ws, req) => {
         if (conn.mode !== 'room') return;
         const text = String(msg.text || '').trim().slice(0, 200);
         if (!text) return;
-        broadcastRoom(conn.roomId, { type: 'chat', id, name: conn.name, text, ts: Date.now() });
+        broadcastRoom(conn.roomId, { type: 'chat', id, name: conn.name, text, ts: Date.now() }, id);
         log('info', 'chat', { id, name: conn.name, roomId: conn.roomId });
         break;
       }
