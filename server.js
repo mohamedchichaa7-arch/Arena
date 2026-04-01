@@ -31,7 +31,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -193,9 +193,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' ? 2 : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -335,6 +335,70 @@ wss.on('connection', (ws, req) => {
         if (!text) return;
         broadcastRoom(conn.roomId, { type: 'chat', id, name: conn.name, text, ts: Date.now() }, id);
         log('info', 'chat', { id, name: conn.name, roomId: conn.roomId });
+        break;
+      }
+
+      // ── Tic Tac Toe ───────────────────────────────────────
+      case 'ttt-new': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'tictactoe') return;
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2 players' }); return; }
+        const playerIds = [...room.players.keys()];
+        // Alternate who goes first
+        if (room.tttRound == null) room.tttRound = 0;
+        room.tttRound++;
+        const xIdx = room.tttRound % 2 === 1 ? 0 : 1;
+        const xId = playerIds[xIdx], oId = playerIds[1 - xIdx];
+        room.ttt = {
+          board: Array(9).fill(null),
+          xHistory: [], oHistory: [],
+          currentTurn: 'X',
+          xPlayer: xId, oPlayer: oId,
+          active: true
+        };
+        room.status = 'playing';
+        broadcastLobby();
+        // Send each player their perspective (self = 'self')
+        for (const [pid, p] of room.players) {
+          send(p.ws, {
+            type: 'ttt-start',
+            xPlayer: pid === xId ? 'self' : xId,
+            oPlayer: pid === oId ? 'self' : oId,
+          });
+        }
+        log('info', 'ttt-new', { roomId: room.id, xPlayer: room.players.get(xId)?.name, oPlayer: room.players.get(oId)?.name });
+        break;
+      }
+      case 'ttt-move': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.ttt || !room.ttt.active) return;
+        const ttt = room.ttt;
+        const symbol = id === ttt.xPlayer ? 'X' : id === ttt.oPlayer ? 'O' : null;
+        if (!symbol || symbol !== ttt.currentTurn) return;
+        const cell = parseInt(msg.cell);
+        if (cell < 0 || cell > 8 || ttt.board[cell] !== null) return;
+        const history = symbol === 'X' ? ttt.xHistory : ttt.oHistory;
+        // Remove oldest piece if at max
+        if (history.length >= 3) {
+          const oldIdx = history.shift();
+          ttt.board[oldIdx] = null;
+        }
+        ttt.board[cell] = symbol;
+        history.push(cell);
+        ttt.currentTurn = symbol === 'X' ? 'O' : 'X';
+        broadcastRoom(room.id, { type: 'ttt-move', cell, symbol });
+        // Check win
+        const WIN = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+        for (const combo of WIN) {
+          if (combo.every(i => ttt.board[i] === symbol)) {
+            ttt.active = false;
+            room.status = 'waiting';
+            broadcastRoom(room.id, { type: 'ttt-win', winner: symbol, combo });
+            broadcastLobby();
+            log('info', 'ttt-win', { roomId: room.id, winner: symbol });
+            return;
+          }
+        }
         break;
       }
 
