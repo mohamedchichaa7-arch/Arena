@@ -5,6 +5,20 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3007;
 
+// ── Logging ─────────────────────────────────────────────────────
+const startTime = Date.now();
+let totalConnections = 0;
+
+function log(level, event, data = {}) {
+  const ts = new Date().toISOString();
+  const uptime = Math.floor((Date.now() - startTime) / 1000);
+  const parts = [`[${ts}]`, `[${level.toUpperCase()}]`, `[${event}]`];
+  const extras = Object.entries(data).map(([k, v]) => `${k}=${v}`).join(' ');
+  if (extras) parts.push(extras);
+  parts.push(`| uptime=${uptime}s conns=${conns.size} rooms=${rooms.size}`);
+  console.log(parts.join(' '));
+}
+
 // ── Static file server ──────────────────────────────────────────
 const MIME = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
@@ -20,7 +34,11 @@ const httpServer = http.createServer((req, res) => {
   const safePath = path.normalize(ROUTES[urlPath] || urlPath).replace(/^(\.\.[/\\])+/, '');
   const isRoot = safePath === '/' || safePath === '\\' || safePath === '.';
   const filePath = path.join(PUBLIC, isRoot ? 'lobby.html' : safePath);
-  if (!filePath.startsWith(PUBLIC)) { res.writeHead(403); return res.end('Forbidden'); }
+  if (!filePath.startsWith(PUBLIC)) {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
+    log('warn', 'path-traversal', { ip, url: req.url });
+    res.writeHead(403); return res.end('Forbidden');
+  }
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream' });
@@ -146,10 +164,14 @@ function checkBattleEnd(room) {
 // ── WebSocket ───────────────────────────────────────────────────
 const wss = new WebSocketServer({ server: httpServer });
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   const id = String(nextId++);
-  const conn = { id, ws, name: '', mode: 'lobby', roomId: null };
+  const ip = (req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown').replace('::ffff:', '');
+  const userAgent = (req.headers['user-agent'] || 'unknown').slice(0, 80);
+  totalConnections++;
+  const conn = { id, ws, name: '', mode: 'lobby', roomId: null, ip, connectedAt: Date.now() };
   conns.set(id, conn);
+  log('info', 'connect', { id, ip, ua: `"${userAgent}"`, total: totalConnections });
 
   ws.on('message', (raw) => {
     let msg;
@@ -162,6 +184,7 @@ wss.on('connection', (ws) => {
         conn.name = String(msg.name || 'Player').slice(0, 20);
         conn.mode = 'lobby';
         send(ws, { type: 'room-list', rooms: serializeRooms() });
+        log('info', 'lobby-join', { id, name: conn.name, ip: conn.ip });
         break;
       }
 
@@ -179,6 +202,7 @@ wss.on('connection', (ws) => {
         // Don't auto-join — the game page will join via its own WS
         send(ws, { type: 'room-created', roomId, roomType: type, roomName: name });
         broadcastLobby();
+        log('info', 'room-created', { id, name: conn.name, ip: conn.ip, roomId, type, maxPlayers: max, roomName: name });
         break;
       }
 
@@ -198,12 +222,15 @@ wss.on('connection', (ws) => {
         });
         broadcastRoom(room.id, { type: 'player-joined', id, name: conn.name }, id);
         broadcastLobby();
+        log('info', 'room-joined', { id, name: conn.name, ip: conn.ip, roomId: room.id, roomType: room.type, players: room.players.size });
         break;
       }
 
       case 'leave-room': {
+        const leftRoomId = conn.roomId;
         removeFromRoom(conn);
         send(ws, { type: 'room-list', rooms: serializeRooms() });
+        log('info', 'room-left', { id, name: conn.name, ip: conn.ip, roomId: leftRoomId });
         break;
       }
 
@@ -226,9 +253,10 @@ wss.on('connection', (ws) => {
         const size = Math.min(40, Math.max(10, parseInt(msg.size) || 15));
         const speed = Math.min(100, Math.max(1, parseInt(msg.speed) || 50));
         const seed = Math.floor(Math.random() * 2147483647);
-        room.race = { mode, size, speed, seed, started: false, finished: new Map() };
+        room.race = { mode, size, speed, seed, started: false, finished: new Map(), startedAt: Date.now() };
         room.status = 'playing';
         broadcastLobby();
+        log('info', 'race-start', { startedBy: conn.name, ip: conn.ip, roomId: room.id, roomName: room.name, mode, size, speed, players: room.players.size });
         let count = 3;
         broadcastRoom(room.id, { type: 'race-countdown', count, mode, size });
         room.countdown = setInterval(() => {
@@ -252,6 +280,7 @@ wss.on('connection', (ws) => {
         const entry = { id, name: p?.name || '?', time: msg.time, moves: msg.moves, rank };
         room.race.finished.set(id, entry);
         broadcastRoom(room.id, { type: 'race-player-finish', ...entry });
+        log('info', 'race-finish', { id, name: entry.name, ip: conn.ip, roomId: room.id, rank, time: msg.time, moves: msg.moves });
         checkRaceComplete(room);
         break;
       }
@@ -260,9 +289,10 @@ wss.on('connection', (ws) => {
       case 'start-battle': {
         const room = rooms.get(conn.roomId);
         if (!room || room.type !== 'tetris' || room.battle) return;
-        room.battle = { started: false, eliminated: new Set() };
+        room.battle = { started: false, eliminated: new Set(), startedAt: Date.now() };
         room.status = 'playing';
         broadcastLobby();
+        log('info', 'battle-start', { startedBy: conn.name, ip: conn.ip, roomId: room.id, roomName: room.name, players: room.players.size });
         let count = 3;
         broadcastRoom(room.id, { type: 'battle-countdown', count });
         room.countdown = setInterval(() => {
@@ -289,6 +319,8 @@ wss.on('connection', (ws) => {
         const room = rooms.get(conn.roomId);
         if (!room) return;
         broadcastRoom(room.id, { type: 'player-gameover', id, name: conn.name }, id);
+        const elapsedGame = room.battle?.startedAt ? Math.floor((Date.now() - room.battle.startedAt) / 1000) : null;
+        log('info', 'game-over', { id, name: conn.name, ip: conn.ip, roomId: room.id, elapsedSec: elapsedGame });
         if (room.battle && room.battle.started) {
           room.battle.eliminated.add(id);
           checkBattleEnd(room);
@@ -299,6 +331,8 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    const sessionSec = Math.floor((Date.now() - conn.connectedAt) / 1000);
+    log('info', 'disconnect', { id, name: conn.name || '(unnamed)', ip: conn.ip, sessionSec });
     removeFromRoom(conn);
     conns.delete(id);
     broadcastLobby();
@@ -307,4 +341,12 @@ wss.on('connection', (ws) => {
 
 httpServer.listen(PORT, () => {
   console.log(`\n  🎮 Game Arena running at http://localhost:${PORT}\n`);
+  log('info', 'server-start', { port: PORT, node: process.version, pid: process.pid });
 });
+
+// ── Periodic stats ───────────────────────────────────────────────
+setInterval(() => {
+  const uptimeSec = Math.floor((Date.now() - startTime) / 1000);
+  const memMB = (process.memoryUsage().rss / 1024 / 1024).toFixed(1);
+  log('stats', 'heartbeat', { conns: conns.size, rooms: rooms.size, totalConnections, uptimeSec, memMB });
+}, 60_000);
