@@ -40,6 +40,7 @@
   const gameOverOvl = $('gameOverOverlay'), goTitle = $('goTitle'), goScore = $('goScore'), goLines = $('goLines'), goLevel = $('goLevel');
   const btnRestart = $('btnRestart'), confettiCvs = $('confetti'), cctx = confettiCvs.getContext('2d');
   const roomBadge = $('roomBadge'), btnBack = $('btnBack');
+  const chatMessages = $('chatMessages'), chatInput = $('chatInput'), chatSend = $('chatSend');
 
   roomBadge.textContent = 'Room ' + roomId;
 
@@ -233,9 +234,38 @@
         else goTitle.textContent = 'DRAW!';
         goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level;
         gameOverOvl.classList.add('show'); break;
+      case 'chat': appendChat(msg.id === myId ? 'me' : 'other', msg.name, msg.text); break;
       case 'error': statusEl.textContent = msg.msg; break;
     }
   }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  CHAT
+  // ══════════════════════════════════════════════════════════════════
+
+  function appendChat(kind, name, text) {
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + kind;
+    div.innerHTML = kind !== 'system'
+      ? `<span class="cm-name">${escapeHtml(name)}:</span>${escapeHtml(text)}`
+      : escapeHtml(text);
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function sendChat() {
+    const text = chatInput.value.trim();
+    if (!text) return;
+    wsSend({ type: 'chat', text });
+    appendChat('me', myName, text);
+    chatInput.value = '';
+  }
+
+  chatSend.addEventListener('click', sendChat);
+  chatInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); sendChat(); }
+    e.stopPropagation(); // prevent game keys while typing
+  });
 
   // ══════════════════════════════════════════════════════════════════
   //  SIDEBAR — Compact Player Cards

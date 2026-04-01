@@ -315,6 +315,15 @@ wss.on('connection', (ws, req) => {
         }, id);
         break;
       }
+      case 'chat': {
+        if (conn.mode !== 'room') return;
+        const text = String(msg.text || '').trim().slice(0, 200);
+        if (!text) return;
+        broadcastRoom(conn.roomId, { type: 'chat', id, name: conn.name, text, ts: Date.now() });
+        log('info', 'chat', { id, name: conn.name, roomId: conn.roomId });
+        break;
+      }
+
       case 'game-over': {
         const room = rooms.get(conn.roomId);
         if (!room) return;

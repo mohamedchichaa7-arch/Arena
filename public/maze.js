@@ -44,6 +44,9 @@
   const confettiCtx = confettiCanvas.getContext('2d');
   const roomBadge = $('roomBadge');
   const btnBack = $('btnBack');
+  const chatMessages = $('chatMessages');
+  const chatInput = $('chatInput');
+  const chatSend = $('chatSend');
 
   roomBadge.textContent = 'Room ' + roomId;
 
@@ -626,11 +629,44 @@
         showRaceResults(msg.rankings);
         break;
 
+      case 'chat':
+        appendChat(msg.id === myId ? 'me' : 'other', msg.name, msg.text);
+        break;
+
       case 'error':
         statusEl.textContent = msg.msg;
         break;
     }
   }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  CHAT
+  // ══════════════════════════════════════════════════════════════════
+
+  function appendChat(kind, name, text) {
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + kind;
+    div.innerHTML = kind !== 'system'
+      ? `<span class="cm-name">${escapeHtml(name)}:</span>${escapeHtml(text)}`
+      : escapeHtml(text);
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function sendChat() {
+    const text = chatInput.value.trim();
+    if (!text) return;
+    wsSend({ type: 'chat', text });
+    appendChat('me', myName, text);
+    chatInput.value = '';
+  }
+
+  chatSend.addEventListener('click', sendChat);
+  chatInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); sendChat(); }
+    // Prevent game keys from firing while typing
+    e.stopPropagation();
+  });
 
   // ══════════════════════════════════════════════════════════════════
   //  SIDEBAR — Player Cards (compact, side-by-side)
