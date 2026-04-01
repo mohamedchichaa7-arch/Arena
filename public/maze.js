@@ -13,6 +13,7 @@
   // ── DOM refs ─────────────────────────────────────────────────────
   const $ = s => document.getElementById(s);
   const sizeSelect = $('sizeSelect');
+  const algoSelect = $('algoSelect');
   const speedRange = $('speedRange');
   const speedLabel = $('speedLabel');
   const btnGenerate = $('btnGenerate');
@@ -142,7 +143,7 @@
   }
 
   // ══════════════════════════════════════════════════════════════════
-  //  MAZE GENERATION  (Kruskal's, optionally seeded)
+  //  MAZE GENERATION  (multiple algorithms, optionally seeded)
   // ══════════════════════════════════════════════════════════════════
 
   function initGrid() {
@@ -151,17 +152,6 @@
       grid[r] = [];
       for (let c = 0; c < cols; c++) grid[r][c] = { top: true, right: true, bottom: true, left: true };
     }
-  }
-
-  function buildWalls(rng) {
-    const w = [];
-    for (let r = 0; r < rows; r++)
-      for (let c = 0; c < cols; c++) {
-        if (c < cols - 1) w.push({ r1: r, c1: c, r2: r, c2: c + 1 });
-        if (r < rows - 1) w.push({ r1: r, c1: c, r2: r + 1, c2: c });
-      }
-    shuffleWith(w, rng);
-    return w;
   }
 
   function removeWall(r1, c1, r2, c2) {
@@ -173,6 +163,309 @@
       else { grid[r1][c1].top = false; grid[r2][c2].bottom = false; }
     }
   }
+
+  function neighbors(r, c) {
+    const n = [];
+    if (r > 0) n.push([r - 1, c]);
+    if (r < rows - 1) n.push([r + 1, c]);
+    if (c > 0) n.push([r, c - 1]);
+    if (c < cols - 1) n.push([r, c + 1]);
+    return n;
+  }
+
+  // ── 1) Kruskal's ─────────────────────────────────────────────────
+  function* genKruskal(rng) {
+    const w = [];
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++) {
+        if (c < cols - 1) w.push([r, c, r, c + 1]);
+        if (r < rows - 1) w.push([r, c, r + 1, c]);
+      }
+    shuffleWith(w, rng);
+    const uf = new UF(rows * cols);
+    for (const [r1, c1, r2, c2] of w) {
+      if (uf.union(r1 * cols + c1, r2 * cols + c2)) {
+        removeWall(r1, c1, r2, c2);
+        yield { r1, c1, r2, c2 };
+      }
+    }
+  }
+
+  // ── 2) Recursive Backtracker (DFS) ───────────────────────────────
+  function* genDFS(rng) {
+    const vis = Array.from({ length: rows }, () => Array(cols).fill(false));
+    const stack = [[0, 0]]; vis[0][0] = true;
+    while (stack.length) {
+      const [r, c] = stack[stack.length - 1];
+      const nb = neighbors(r, c).filter(([nr, nc]) => !vis[nr][nc]);
+      if (!nb.length) { stack.pop(); continue; }
+      const [nr, nc] = nb[Math.floor(rng() * nb.length)];
+      removeWall(r, c, nr, nc);
+      vis[nr][nc] = true;
+      stack.push([nr, nc]);
+      yield { r1: r, c1: c, r2: nr, c2: nc };
+    }
+  }
+
+  // ── 3) Prim's (randomized) ──────────────────────────────────────
+  function* genPrims(rng) {
+    const inMaze = Array.from({ length: rows }, () => Array(cols).fill(false));
+    inMaze[0][0] = true;
+    let frontier = neighbors(0, 0).map(([r, c]) => [r, c, 0, 0]);
+    while (frontier.length) {
+      const idx = Math.floor(rng() * frontier.length);
+      const [r, c, fr, fc] = frontier[idx];
+      frontier[idx] = frontier[frontier.length - 1]; frontier.pop();
+      if (inMaze[r][c]) continue;
+      inMaze[r][c] = true;
+      removeWall(r, c, fr, fc);
+      yield { r1: fr, c1: fc, r2: r, c2: c };
+      for (const [nr, nc] of neighbors(r, c)) {
+        if (!inMaze[nr][nc]) frontier.push([nr, nc, r, c]);
+      }
+    }
+  }
+
+  // ── 4) Aldous-Broder ────────────────────────────────────────────
+  function* genAldousBroder(rng) {
+    const vis = Array.from({ length: rows }, () => Array(cols).fill(false));
+    let r = 0, c = 0; vis[0][0] = true; let visited = 1;
+    const total = rows * cols;
+    while (visited < total) {
+      const nb = neighbors(r, c);
+      const [nr, nc] = nb[Math.floor(rng() * nb.length)];
+      if (!vis[nr][nc]) {
+        vis[nr][nc] = true; visited++;
+        removeWall(r, c, nr, nc);
+        yield { r1: r, c1: c, r2: nr, c2: nc };
+      }
+      r = nr; c = nc;
+    }
+  }
+
+  // ── 5) Wilson's (loop-erased random walk) ───────────────────────
+  function* genWilson(rng) {
+    const inMaze = Array.from({ length: rows }, () => Array(cols).fill(false));
+    inMaze[0][0] = true;
+    let remaining = rows * cols - 1;
+    for (let sr = 0; sr < rows && remaining > 0; sr++) {
+      for (let sc = 0; sc < cols && remaining > 0; sc++) {
+        if (inMaze[sr][sc]) continue;
+        const dir = Array.from({ length: rows }, () => Array(cols).fill(null));
+        let cr = sr, cc = sc;
+        while (!inMaze[cr][cc]) {
+          const nb = neighbors(cr, cc);
+          const [nr, nc] = nb[Math.floor(rng() * nb.length)];
+          dir[cr][cc] = [nr, nc]; cr = nr; cc = nc;
+        }
+        cr = sr; cc = sc;
+        while (!inMaze[cr][cc]) {
+          const [nr, nc] = dir[cr][cc];
+          inMaze[cr][cc] = true; remaining--;
+          removeWall(cr, cc, nr, nc);
+          yield { r1: cr, c1: cc, r2: nr, c2: nc };
+          cr = nr; cc = nc;
+        }
+      }
+    }
+  }
+
+  // ── 6) Hunt and Kill ────────────────────────────────────────────
+  function* genHuntAndKill(rng) {
+    const vis = Array.from({ length: rows }, () => Array(cols).fill(false));
+    let r = 0, c = 0; vis[0][0] = true;
+    while (true) {
+      const nb = neighbors(r, c).filter(([nr, nc]) => !vis[nr][nc]);
+      if (nb.length) {
+        const [nr, nc] = nb[Math.floor(rng() * nb.length)];
+        vis[nr][nc] = true;
+        removeWall(r, c, nr, nc);
+        yield { r1: r, c1: c, r2: nr, c2: nc };
+        r = nr; c = nc;
+      } else {
+        let found = false;
+        hunt: for (let hr = 0; hr < rows; hr++) {
+          for (let hc = 0; hc < cols; hc++) {
+            if (vis[hr][hc]) continue;
+            const adj = neighbors(hr, hc).filter(([nr, nc]) => vis[nr][nc]);
+            if (adj.length) {
+              const [ar, ac] = adj[Math.floor(rng() * adj.length)];
+              vis[hr][hc] = true;
+              removeWall(hr, hc, ar, ac);
+              yield { r1: ar, c1: ac, r2: hr, c2: hc };
+              r = hr; c = hc; found = true;
+              break hunt;
+            }
+          }
+        }
+        if (!found) break;
+      }
+    }
+  }
+
+  // ── 7) Sidewinder ──────────────────────────────────────────────
+  function* genSidewinder(rng) {
+    for (let r = 0; r < rows; r++) {
+      let runStart = 0;
+      for (let c = 0; c < cols; c++) {
+        if (r === 0 && c < cols - 1) {
+          removeWall(r, c, r, c + 1);
+          yield { r1: r, c1: c, r2: r, c2: c + 1 };
+        } else if (r > 0) {
+          const atEnd = c === cols - 1;
+          const closeRun = atEnd || rng() < 0.5;
+          if (closeRun) {
+            const carveC = runStart + Math.floor(rng() * (c - runStart + 1));
+            removeWall(r, carveC, r - 1, carveC);
+            yield { r1: r, c1: carveC, r2: r - 1, c2: carveC };
+            runStart = c + 1;
+          } else {
+            removeWall(r, c, r, c + 1);
+            yield { r1: r, c1: c, r2: r, c2: c + 1 };
+          }
+        }
+      }
+    }
+  }
+
+  // ── 8) Binary Tree ──────────────────────────────────────────────
+  function* genBinaryTree(rng) {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const canN = r > 0, canW = c > 0;
+        if (!canN && !canW) continue;
+        if (canN && canW) {
+          if (rng() < 0.5) { removeWall(r, c, r - 1, c); yield { r1: r, c1: c, r2: r - 1, c2: c }; }
+          else { removeWall(r, c, r, c - 1); yield { r1: r, c1: c, r2: r, c2: c - 1 }; }
+        } else if (canN) { removeWall(r, c, r - 1, c); yield { r1: r, c1: c, r2: r - 1, c2: c }; }
+        else { removeWall(r, c, r, c - 1); yield { r1: r, c1: c, r2: r, c2: c - 1 }; }
+      }
+    }
+  }
+
+  // ── 9) Eller's ──────────────────────────────────────────────────
+  function* genEller(rng) {
+    let sets = new Int32Array(cols);
+    let nextSet = 1;
+    for (let c = 0; c < cols; c++) sets[c] = nextSet++;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) if (sets[c] === 0) sets[c] = nextSet++;
+      // Horizontal merge
+      for (let c = 0; c < cols - 1; c++) {
+        if (sets[c] === sets[c + 1]) continue;
+        const merge = r === rows - 1 || rng() < 0.5;
+        if (merge) {
+          const old = sets[c + 1]; const rep = sets[c];
+          for (let k = 0; k < cols; k++) if (sets[k] === old) sets[k] = rep;
+          removeWall(r, c, r, c + 1);
+          yield { r1: r, c1: c, r2: r, c2: c + 1 };
+        }
+      }
+      if (r === rows - 1) break;
+      // Vertical connections — each set must have at least one
+      const setMembers = new Map();
+      for (let c = 0; c < cols; c++) {
+        if (!setMembers.has(sets[c])) setMembers.set(sets[c], []);
+        setMembers.get(sets[c]).push(c);
+      }
+      const newSets = new Int32Array(cols);
+      for (const [sid, members] of setMembers) {
+        shuffleWith(members, rng);
+        const cnt = 1 + Math.floor(rng() * members.length);
+        for (let i = 0; i < cnt; i++) {
+          const c = members[i];
+          removeWall(r, c, r + 1, c);
+          yield { r1: r, c1: c, r2: r + 1, c2: c };
+          newSets[c] = sid;
+        }
+      }
+      sets = newSets;
+    }
+  }
+
+  // ── 10) Growing Tree ────────────────────────────────────────────
+  function* genGrowingTree(rng) {
+    const vis = Array.from({ length: rows }, () => Array(cols).fill(false));
+    const active = [[0, 0]]; vis[0][0] = true;
+    while (active.length) {
+      // 50% newest (DFS feel), 50% random (Prim's feel)
+      const idx = rng() < 0.5 ? active.length - 1 : Math.floor(rng() * active.length);
+      const [r, c] = active[idx];
+      const nb = neighbors(r, c).filter(([nr, nc]) => !vis[nr][nc]);
+      if (!nb.length) { active[idx] = active[active.length - 1]; active.pop(); continue; }
+      const [nr, nc] = nb[Math.floor(rng() * nb.length)];
+      vis[nr][nc] = true;
+      removeWall(r, c, nr, nc);
+      active.push([nr, nc]);
+      yield { r1: r, c1: c, r2: nr, c2: nc };
+    }
+  }
+
+  // ── 11) Recursive Division ──────────────────────────────────────
+  function* genRecursiveDivision(rng) {
+    // Start with an open grid, then add walls
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++) grid[r][c] = { top: r === 0, right: c === cols - 1, bottom: r === rows - 1, left: c === 0 };
+    // Add interior passages between adjacent cells (all open)
+    // We need to approach differently: remove all interior walls first
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++) {
+        if (r > 0) { grid[r][c].top = false; }
+        if (r < rows - 1) { grid[r][c].bottom = false; }
+        if (c > 0) { grid[r][c].left = false; }
+        if (c < cols - 1) { grid[r][c].right = false; }
+      }
+    function addWallH(r1, c1, r2, c2) {
+      grid[r1][c1].bottom = true; grid[r2][c2].top = true;
+    }
+    function addWallV(r1, c1, r2, c2) {
+      grid[r1][c1].right = true; grid[r2][c2].left = true;
+    }
+    const stack = [[0, 0, rows - 1, cols - 1]];
+    while (stack.length) {
+      const [tr, lc, br, rc] = stack.pop();
+      const h = br - tr + 1, w = rc - lc + 1;
+      if (h < 2 || w < 2) continue;
+      if (w >= h) {
+        // Vertical wall
+        const wallC = lc + 1 + Math.floor(rng() * (w - 1));
+        const passR = tr + Math.floor(rng() * h);
+        for (let r = tr; r <= br; r++) {
+          if (r === passR) continue;
+          addWallV(r, wallC - 1, r, wallC);
+          yield { r1: r, c1: wallC - 1, r2: r, c2: wallC };
+        }
+        stack.push([tr, lc, br, wallC - 1]);
+        stack.push([tr, wallC, br, rc]);
+      } else {
+        // Horizontal wall
+        const wallR = tr + 1 + Math.floor(rng() * (h - 1));
+        const passC = lc + Math.floor(rng() * w);
+        for (let c = lc; c <= rc; c++) {
+          if (c === passC) continue;
+          addWallH(wallR - 1, c, wallR, c);
+          yield { r1: wallR - 1, c1: c, r2: wallR, c2: c };
+        }
+        stack.push([tr, lc, wallR - 1, rc]);
+        stack.push([wallR, lc, br, rc]);
+      }
+    }
+  }
+
+  // ── Algorithm dispatch ──────────────────────────────────────────
+  const ALGORITHMS = {
+    'kruskal': genKruskal,
+    'dfs': genDFS,
+    'prims': genPrims,
+    'aldous-broder': genAldousBroder,
+    'wilson': genWilson,
+    'hunt-and-kill': genHuntAndKill,
+    'sidewinder': genSidewinder,
+    'binary-tree': genBinaryTree,
+    'eller': genEller,
+    'growing-tree': genGrowingTree,
+    'recursive-division': genRecursiveDivision
+  };
 
   async function generateMaze(size, speed, seed) {
     genAbort = true; await sleep(30); genAbort = false;
@@ -186,8 +479,8 @@
     computeSize(); initGrid();
 
     const rng = seed != null ? mulberry32(seed) : mulberry32(Math.floor(Math.random() * 2147483647));
-    const walls = buildWalls(rng);
-    const uf = new UF(rows * cols);
+    const algo = ALGORITHMS[algoSelect.value] || genKruskal;
+    const gen = algo(rng);
 
     player = { r: 0, c: 0 };
     goal = { r: rows - 1, c: cols - 1 };
@@ -198,18 +491,19 @@
     const perBatch = Math.max(1, Math.floor(spd / 5));
     const delay = Math.max(1, Math.floor(120 - spd * 1.15));
 
-    let wi = 0, removed = 0;
-    const need = rows * cols - 1;
-    while (wi < walls.length && removed < need) {
+    let count = 0;
+    while (true) {
       if (genAbort) return;
       let done = 0;
-      while (done < perBatch && wi < walls.length && removed < need) {
-        const w = walls[wi++];
-        if (uf.union(w.r1 * cols + w.c1, w.r2 * cols + w.c2)) {
-          removeWall(w.r1, w.c1, w.r2, w.c2);
-          removed++; recentlyRemoved.push({ ...w, alpha: 1 }); done++;
-        }
+      while (done < perBatch) {
+        const next = gen.next();
+        if (next.done) { done = -1; break; }
+        const w = next.value;
+        recentlyRemoved.push({ ...w, alpha: 1 });
+        done++; count++;
       }
+      if (done === -1 && count > 0) break;
+      if (done === -1) break;
       recentlyRemoved = recentlyRemoved.map(r => ({ ...r, alpha: r.alpha - 0.15 })).filter(r => r.alpha > 0);
       draw(); throttledBroadcast();
       await sleep(delay);

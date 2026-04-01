@@ -334,8 +334,8 @@ body {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: rgba(139, 92, 246, .15);
-  cursor: pointer
+  background: rgba(139, 92, 246, .01);
+  cursor: pointer;
 }
 
 .legend {
