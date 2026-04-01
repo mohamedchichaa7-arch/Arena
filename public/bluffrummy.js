@@ -400,9 +400,9 @@
 
   btnPlay.addEventListener('click', () => {
     if (!myTurn || selectedIndices.size === 0 || selectedIndices.size > 3) return;
-    const indices = [...selectedIndices].sort((a, b) => a - b);
+    const cards = [...selectedIndices].sort((a, b) => a - b).map(i => ({ num: hand[i].num, suit: hand[i].suit }));
     const num = parseInt(announceNum.value);
-    wsSend({ type: 'br-play', indices, announceNum: num });
+    wsSend({ type: 'br-play', cards, announceNum: num });
     selectedIndices.clear();
   });
 

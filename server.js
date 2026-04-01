@@ -429,20 +429,29 @@ wss.on('connection', (ws, req) => {
         if (!room || !room.br || !room.br.active) return;
         const br = room.br;
         if (br.turnOrder[br.turnIdx] !== id) return; // not your turn
-        const indices = msg.indices;
+        const sentCards = msg.cards;
         const annNum = parseInt(msg.announceNum);
-        if (!Array.isArray(indices) || indices.length < 1 || indices.length > 3) return;
+        if (!Array.isArray(sentCards) || sentCards.length < 1 || sentCards.length > 3) return;
         if (annNum < 1 || annNum > 13) return;
         // If meld exists, announced number must match
         if (br.meldNum !== null && annNum !== br.meldNum) return;
         const playerHand = br.hands.get(id);
         if (!playerHand) return;
-        // Validate indices
-        const sortedIdx = [...new Set(indices)].sort((a, b) => b - a);
-        if (sortedIdx.some(i => i < 0 || i >= playerHand.length)) return;
-        // Extract cards
-        const playedCards = sortedIdx.map(i => playerHand[i]);
-        sortedIdx.forEach(i => playerHand.splice(i, 1));
+        // Find each sent card in the server hand by identity (num+suit)
+        const playedCards = [];
+        const workingHand = [...playerHand];
+        for (const c of sentCards) {
+          const num = parseInt(c.num), suit = String(c.suit);
+          const idx = workingHand.findIndex(h => h.num === num && h.suit === suit);
+          if (idx === -1) return; // card not in hand — reject
+          playedCards.push(workingHand[idx]);
+          workingHand.splice(idx, 1);
+        }
+        // Remove played cards from the actual hand
+        for (const c of playedCards) {
+          const idx = playerHand.findIndex(h => h.num === c.num && h.suit === c.suit);
+          if (idx !== -1) playerHand.splice(idx, 1);
+        }
         // Add to meld
         br.meldCards.push(...playedCards.map(c => ({ ...c, playedBy: id })));
         if (br.meldNum === null) br.meldNum = annNum;
