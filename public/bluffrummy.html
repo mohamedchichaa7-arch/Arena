@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bluff Rummy — Game Arena</title>
+  <link rel="stylesheet" href="bluffrummy.css">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap"
+    rel="stylesheet">
+</head>
+
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">1</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
+        <h1 class="logo logo-sm">BLUFF RUMMY</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-mobile-toggle" id="btnToggleChat" title="Chat">💬</button>
+      </header>
+
+      <div class="controls">
+        <button class="btn btn-primary" id="btnStartGame">Start Game</button>
+      </div>
+
+      <div class="status" id="status">Connecting…</div>
+
+      <!-- Central pile area -->
+      <div class="table-area">
+        <div class="pile-area">
+          <div class="pile-label" id="pileLabel">No meld yet</div>
+          <div class="pile-cards" id="pileCards"></div>
+        </div>
+
+        <!-- Action log -->
+        <div class="action-log" id="actionLog"></div>
+      </div>
+
+      <!-- Play controls -->
+      <div class="play-area" id="playArea" style="display:none">
+        <div class="play-controls">
+          <div class="card-select-row">
+            <span class="play-label">Select cards to play (1-3):</span>
+          </div>
+          <div class="announce-row">
+            <label class="play-label">Announce number:
+              <select id="announceNum">
+                <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+                <option value="10">10</option><option value="11">11</option><option value="12">12</option>
+                <option value="13">13</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" id="btnPlayCards">Play Cards</button>
+            <button class="btn btn-challenge" id="btnChallenge" style="display:none">🤥 Challenge!</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Your hand -->
+      <div class="hand-area">
+        <div class="hand-label">Your Hand (<span id="handCount">0</span>)</div>
+        <div class="hand-cards" id="handCards"></div>
+      </div>
+    </main>
+
+    <aside class="chat-panel">
+      <div class="chat-header">Chat</div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" type="text" placeholder="Message…" maxlength="200" autocomplete="off">
+        <button class="btn chat-send-btn" id="chatSend">&uarr;</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- OVERLAYS -->
+  <div class="overlay" id="revealOverlay">
+    <h2 class="reveal-title" id="revealTitle">Cards Revealed!</h2>
+    <div class="reveal-cards" id="revealCards"></div>
+    <div class="reveal-result" id="revealResult"></div>
+    <button class="btn btn-primary btn-lg" id="btnRevealClose">Continue</button>
+  </div>
+  <div class="overlay" id="gameOverOverlay">
+    <h2 class="go-title" id="goTitle">🏆 WINNER!</h2>
+    <div class="go-rankings" id="goRankings"></div>
+    <button class="btn btn-primary btn-lg" id="btnPlayAgain">Play Again</button>
+  </div>
+  <canvas id="confetti"></canvas>
+  <div class="panel-backdrop" id="panelBackdrop"></div>
+  <script>
+    (function () {
+      var sidebar = document.querySelector('.sidebar');
+      var chat = document.querySelector('.chat-panel');
+      var backdrop = document.getElementById('panelBackdrop');
+      var btnSidebar = document.getElementById('btnToggleSidebar');
+      var btnChat = document.getElementById('btnToggleChat');
+      function closeAll() { sidebar.classList.remove('open'); chat.classList.remove('open'); backdrop.classList.remove('show'); }
+      btnSidebar.addEventListener('click', function () { var o = sidebar.classList.contains('open'); closeAll(); if (!o) { sidebar.classList.add('open'); backdrop.classList.add('show'); } });
+      btnChat.addEventListener('click', function () { var o = chat.classList.contains('open'); closeAll(); if (!o) { chat.classList.add('open'); backdrop.classList.add('show'); } });
+      backdrop.addEventListener('click', closeAll);
+    })();
+  </script>
+  <script src="bluffrummy.js"></script>
+</body>
+
+</html>

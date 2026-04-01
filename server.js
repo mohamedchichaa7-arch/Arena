@@ -31,7 +31,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -124,6 +124,20 @@ function removeFromRoom(conn) {
       if (room.countdown) { clearInterval(room.countdown); room.countdown = null; }
     } else checkBattleEnd(room);
   }
+  if (room.br && room.br.active) {
+    // Remove player from bluff rummy
+    room.br.turnOrder = room.br.turnOrder.filter(pid => pid !== conn.id);
+    room.br.hands.delete(conn.id);
+    if (room.br.turnIdx >= room.br.turnOrder.length) room.br.turnIdx = 0;
+    if (room.players.size === 0) {
+      room.br = null;
+    } else if (room.br.turnOrder.length <= 1) {
+      endBluffRummy(room);
+    } else {
+      broadcastBrPlayerUpdate(room);
+      sendBrTurn(room);
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -193,9 +207,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' ? 2 : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -402,6 +416,124 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
+      // ── Bluff Rummy ─────────────────────────────────────────
+      case 'br-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'bluffrummy') return;
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2-4 players' }); return; }
+        startBluffRummy(room);
+        break;
+      }
+      case 'br-play': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.br || !room.br.active) return;
+        const br = room.br;
+        if (br.turnOrder[br.turnIdx] !== id) return; // not your turn
+        const indices = msg.indices;
+        const annNum = parseInt(msg.announceNum);
+        if (!Array.isArray(indices) || indices.length < 1 || indices.length > 3) return;
+        if (annNum < 1 || annNum > 13) return;
+        // If meld exists, announced number must match
+        if (br.meldNum !== null && annNum !== br.meldNum) return;
+        const playerHand = br.hands.get(id);
+        if (!playerHand) return;
+        // Validate indices
+        const sortedIdx = [...new Set(indices)].sort((a, b) => b - a);
+        if (sortedIdx.some(i => i < 0 || i >= playerHand.length)) return;
+        // Extract cards
+        const playedCards = sortedIdx.map(i => playerHand[i]);
+        sortedIdx.forEach(i => playerHand.splice(i, 1));
+        // Add to meld
+        br.meldCards.push(...playedCards.map(c => ({ ...c, playedBy: id })));
+        if (br.meldNum === null) br.meldNum = annNum;
+        br.lastPlayerId = id;
+        br.lastPlayerCards = playedCards;
+        br.lastAnnouncedNum = annNum;
+        // Broadcast play
+        broadcastRoom(room.id, {
+          type: 'br-play', playerId: id, count: playedCards.length,
+          announcedNum: annNum, meldSize: br.meldCards.length, meldNum: br.meldNum,
+          cardCount: playerHand.length,
+        });
+        // Send updated hand to the player
+        send(ws, { type: 'br-hand-update', hand: playerHand });
+        // Check if this player is now out of cards
+        if (playerHand.length === 0) {
+          br.finishOrder.push(id);
+          const rank = br.finishOrder.length;
+          broadcastRoom(room.id, { type: 'br-eliminate', playerId: id, rank });
+          log('info', 'br-eliminate', { roomId: room.id, playerId: id, name: conn.name, rank });
+          // Remove from turn order
+          br.turnOrder = br.turnOrder.filter(pid => pid !== id);
+          if (br.turnOrder.length <= 1) { endBluffRummy(room); return; }
+          // Fix turn index
+          br.turnIdx = br.turnIdx % br.turnOrder.length;
+        } else {
+          advanceBrTurn(room);
+        }
+        sendBrTurn(room);
+        break;
+      }
+      case 'br-challenge': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.br || !room.br.active) return;
+        const br = room.br;
+        if (br.turnOrder[br.turnIdx] !== id) return;
+        if (!br.lastPlayerId || br.lastPlayerId === id) return; // can't challenge self or if no play
+        const challengerName = conn.name;
+        const targetConn = conns.get(br.lastPlayerId);
+        const targetName = targetConn ? targetConn.name : 'Player';
+        broadcastRoom(room.id, { type: 'br-challenge', challengerName, targetName });
+        // Reveal all cards in the meld
+        const allCards = br.meldCards.map(c => ({ num: c.num, suit: c.suit }));
+        const wasBluff = br.lastPlayerCards.some(c => c.num !== br.lastAnnouncedNum);
+        let takerId;
+        if (wasBluff) {
+          takerId = br.lastPlayerId; // bluffer takes cards
+        } else {
+          takerId = id; // challenger takes cards
+        }
+        const takerConn = conns.get(takerId);
+        const takerHand = br.hands.get(takerId);
+        if (takerHand) {
+          for (const c of br.meldCards) takerHand.push({ num: c.num, suit: c.suit });
+        }
+        broadcastRoom(room.id, {
+          type: 'br-reveal', cards: allCards, announcedNum: br.lastAnnouncedNum,
+          wasBluff, challengerName, targetName,
+          takerName: takerConn ? takerConn.name : 'Player',
+          takerId,
+        });
+        // Send updated hand to the taker
+        if (takerHand) send(conns.get(takerId)?.ws, { type: 'br-hand-update', hand: takerHand });
+        log('info', 'br-challenge', { roomId: room.id, challenger: challengerName, target: targetName, wasBluff, cardsRevealed: allCards.length });
+        // Save before clearing
+        const prevLastPlayerId = br.lastPlayerId;
+        // Reset meld
+        br.meldCards = [];
+        br.meldNum = null;
+        br.lastPlayerId = null;
+        br.lastPlayerCards = null;
+        br.lastAnnouncedNum = null;
+        // Winner of challenge starts new meld: if bluff, challenger was right → challenger starts. If honest, target was right → target starts.
+        const newStarterId = wasBluff ? id : prevLastPlayerId;
+        // Find them in turnOrder
+        // If the starter got eliminated, advance
+        let starterIdx = br.turnOrder.indexOf(newStarterId !== undefined ? newStarterId : id);
+        if (starterIdx === -1) starterIdx = br.turnIdx % br.turnOrder.length;
+        br.turnIdx = starterIdx;
+        // Broadcast new meld
+        const starterConn = conns.get(br.turnOrder[br.turnIdx]);
+        broadcastRoom(room.id, { type: 'br-new-meld', starterName: starterConn?.name || 'Player' });
+        // Check if anyone got eliminated in the process or game ended
+        brCheckEliminations(room);
+        if (br.turnOrder.length <= 1) { endBluffRummy(room); return; }
+        sendBrTurn(room);
+        // Broadcast player updates
+        broadcastBrPlayerUpdate(room);
+        break;
+      }
+
       case 'game-over': {
         const room = rooms.get(conn.roomId);
         if (!room) return;
@@ -425,6 +557,181 @@ wss.on('connection', (ws, req) => {
     broadcastLobby();
   });
 });
+
+// ── Bluff Rummy helpers ─────────────────────────────────────────
+function startBluffRummy(room) {
+  // Build deck: 1-13, 4 suits
+  const SUITS = ['♠', '♥', '♦', '♣'];
+  const deck = [];
+  for (let num = 1; num <= 13; num++) {
+    for (const suit of SUITS) deck.push({ num, suit });
+  }
+  // Shuffle (Fisher-Yates)
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  // Distribute cards
+  const playerIds = [...room.players.keys()];
+  const hands = new Map();
+  for (const pid of playerIds) hands.set(pid, []);
+  let idx = 0;
+  for (const card of deck) {
+    hands.get(playerIds[idx % playerIds.length]).push(card);
+    idx++;
+  }
+  // Auto-discard any set of 4 same-number cards
+  for (const pid of playerIds) {
+    const hand = hands.get(pid);
+    const counts = {};
+    for (const c of hand) counts[c.num] = (counts[c.num] || 0) + 1;
+    for (const [numStr, cnt] of Object.entries(counts)) {
+      if (cnt === 4) {
+        const num = parseInt(numStr);
+        // Remove all 4
+        const newHand = hand.filter(c => c.num !== num);
+        hands.set(pid, newHand);
+        broadcastRoom(room.id, { type: 'br-auto-discard', playerId: pid, num });
+        log('info', 'br-auto-discard', { roomId: room.id, playerId: pid, num });
+      }
+    }
+  }
+  // Random starting player
+  const startIdx = Math.floor(Math.random() * playerIds.length);
+  // Create turn order (only players with cards)
+  const turnOrder = [...playerIds];
+  const finishOrder = [];
+
+  room.br = {
+    hands,
+    turnOrder,
+    turnIdx: startIdx,
+    meldCards: [],
+    meldNum: null,
+    lastPlayerId: null,
+    lastPlayerCards: null,
+    lastAnnouncedNum: null,
+    finishOrder,
+    active: true,
+  };
+  room.status = 'playing';
+  broadcastLobby();
+
+  // Send initial hands
+  for (const [pid, p] of room.players) {
+    const hand = hands.get(pid);
+    send(p.ws, { type: 'br-dealt', hand });
+  }
+
+  // Send full state to everyone
+  sendBrFullState(room);
+  sendBrTurn(room);
+  log('info', 'br-start', { roomId: room.id, players: playerIds.length });
+}
+
+function sendBrFullState(room) {
+  const br = room.br;
+  for (const [pid, p] of room.players) {
+    const playersList = [];
+    for (const [otherId,] of room.players) {
+      const hand = br.hands.get(otherId);
+      const rank = br.finishOrder.indexOf(otherId);
+      playersList.push({
+        id: otherId,
+        name: room.players.get(otherId)?.name || 'Player',
+        cardCount: hand ? hand.length : 0,
+        eliminated: rank >= 0,
+        rank: rank >= 0 ? rank + 1 : null,
+      });
+    }
+    const currentTurnId = br.turnOrder[br.turnIdx];
+    send(p.ws, {
+      type: 'br-state',
+      yourId: pid,
+      hand: br.hands.get(pid) || [],
+      active: br.active,
+      currentTurn: currentTurnId,
+      canChallenge: currentTurnId === pid && br.lastPlayerId && br.lastPlayerId !== pid,
+      meldNum: br.meldNum,
+      meldSize: br.meldCards.length,
+      players: playersList,
+      rankings: br.active ? [] : br.finishOrder.map((fid, i) => ({
+        id: fid, name: room.players.get(fid)?.name || 'Player', rank: i + 1,
+      })),
+    });
+  }
+}
+
+function sendBrTurn(room) {
+  const br = room.br;
+  if (!br || !br.active || br.turnOrder.length === 0) return;
+  const currentTurnId = br.turnOrder[br.turnIdx];
+  for (const [pid, p] of room.players) {
+    send(p.ws, {
+      type: 'br-turn',
+      currentTurn: currentTurnId,
+      canChallenge: currentTurnId === pid && br.lastPlayerId != null && br.lastPlayerId !== pid,
+      meldNum: br.meldNum,
+    });
+  }
+}
+
+function advanceBrTurn(room) {
+  const br = room.br;
+  br.turnIdx = (br.turnIdx + 1) % br.turnOrder.length;
+}
+
+function brCheckEliminations(room) {
+  const br = room.br;
+  // Check for any player with 0 cards still in turnOrder
+  for (const pid of [...br.turnOrder]) {
+    const hand = br.hands.get(pid);
+    if (hand && hand.length === 0 && !br.finishOrder.includes(pid)) {
+      br.finishOrder.push(pid);
+      const rank = br.finishOrder.length;
+      broadcastRoom(room.id, { type: 'br-eliminate', playerId: pid, rank });
+      br.turnOrder = br.turnOrder.filter(p => p !== pid);
+      if (br.turnIdx >= br.turnOrder.length) br.turnIdx = 0;
+    }
+  }
+}
+
+function broadcastBrPlayerUpdate(room) {
+  const br = room.br;
+  const playersList = [];
+  for (const [pid,] of room.players) {
+    const hand = br.hands.get(pid);
+    const rank = br.finishOrder.indexOf(pid);
+    playersList.push({
+      id: pid,
+      name: room.players.get(pid)?.name || 'Player',
+      cardCount: hand ? hand.length : 0,
+      eliminated: rank >= 0,
+      rank: rank >= 0 ? rank + 1 : null,
+    });
+  }
+  broadcastRoom(room.id, { type: 'br-player-update', players: playersList });
+}
+
+function endBluffRummy(room) {
+  const br = room.br;
+  // Last player standing is the loser
+  for (const pid of br.turnOrder) {
+    if (!br.finishOrder.includes(pid)) {
+      br.finishOrder.push(pid); // loser
+    }
+  }
+  br.active = false;
+  room.status = 'waiting';
+  const rankings = br.finishOrder.map((pid, i) => ({
+    id: pid,
+    name: room.players.get(pid)?.name || 'Player',
+    rank: i + 1,
+  }));
+  broadcastRoom(room.id, { type: 'br-gameover', rankings });
+  broadcastLobby();
+  log('info', 'br-gameover', { roomId: room.id, winner: rankings[0]?.name });
+}
 
 httpServer.listen(PORT, () => {
   console.log(`\n  🎮 Game Arena running at http://localhost:${PORT}\n`);

@@ -82,7 +82,7 @@
     for (const r of rooms) {
       const card = document.createElement('div');
       card.className = 'room-card';
-      const icon = r.type === 'tetris' ? '🎮' : r.type === 'tictactoe' ? '⭕' : '🏁';
+      const icon = r.type === 'tetris' ? '🎮' : r.type === 'tictactoe' ? '⭕' : r.type === 'bluffrummy' ? '🃏' : '🏁';
       const statusCls = r.status === 'playing' ? 'playing' : 'waiting';
       const full = r.players >= r.maxPlayers;
       const lockBadge = r.locked ? '<span class="room-lock">🔒</span>' : '';
