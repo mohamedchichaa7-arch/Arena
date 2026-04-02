@@ -114,6 +114,7 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy']);
 const LOWER_IS_BETTER = new Set(['maze']);
 const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy']);
 
