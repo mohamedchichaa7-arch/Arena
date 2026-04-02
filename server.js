@@ -248,7 +248,7 @@ const httpServer = http.createServer((req, res) => {
   if (req.method === 'GET' && urlPath === '/api/skins') {
     if (!firestoreReady) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ equippedSkin: 'classic', bestScore: 0, unlockedSkins: ['classic'] }));
+      return res.end(JSON.stringify({ equippedSkin: 'sprites', bestScore: 0, unlockedSkins: ['sprites', 'classic', 'pixel'] }));
     }
     const authHeader = req.headers['authorization'] || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -258,7 +258,11 @@ const httpServer = http.createServer((req, res) => {
     }
     (async () => {
       try {
-        const SKIN_UNLOCK_SCORES = { classic: 0, neon: 1000, pastel: 5000, retro: 15000, galaxy: 30000, fire: 75000, ice: 150000 };
+        const SKIN_UNLOCK_SCORES = {
+          sprites: 0, classic: 0, pixel: 500, neon: 2000, candy: 3500, glass: 6000,
+          pastel: 8000, metal: 12000, retro: 18000, wireframe: 25000, galaxy: 38000,
+          diamond: 55000, fire: 80000, hologram: 110000, lava: 140000, ice: 175000, matrix: 250000,
+        };
         const decoded = await admin.auth().verifyIdToken(token);
         const uid = decoded.uid;
         const [scoreDoc, prefsDoc] = await Promise.all([
@@ -266,11 +270,13 @@ const httpServer = http.createServer((req, res) => {
           db.collection('user_prefs').doc(uid).get(),
         ]);
         const bestScore = scoreDoc.exists ? (scoreDoc.data().score || 0) : 0;
-        const equippedSkin = (prefsDoc.exists && prefsDoc.data().equippedSkin) || 'classic';
-        const unlockedSkins = Object.entries(SKIN_UNLOCK_SCORES)
-          .filter(([, s]) => bestScore >= s).map(([id]) => id);
+        const isTester  = !!(prefsDoc.exists && prefsDoc.data().tester);
+        const equippedSkin = (prefsDoc.exists && prefsDoc.data().equippedSkin) || 'sprites';
+        const unlockedSkins = isTester
+          ? Object.keys(SKIN_UNLOCK_SCORES)
+          : Object.entries(SKIN_UNLOCK_SCORES).filter(([, s]) => bestScore >= s).map(([id]) => id);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ equippedSkin, bestScore, unlockedSkins }));
+        res.end(JSON.stringify({ equippedSkin, bestScore, unlockedSkins, isTester }));
       } catch (err) {
         log('warn', 'skins-get-error', { err: err.message });
         res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -290,7 +296,11 @@ const httpServer = http.createServer((req, res) => {
     req.on('data', chunk => { if (body.length < 1024) body += chunk; });
     req.on('end', async () => {
       try {
-        const SKIN_UNLOCK_SCORES = { classic: 0, neon: 1000, pastel: 5000, retro: 15000, galaxy: 30000, fire: 75000, ice: 150000 };
+        const SKIN_UNLOCK_SCORES = {
+          sprites: 0, classic: 0, pixel: 500, neon: 2000, candy: 3500, glass: 6000,
+          pastel: 8000, metal: 12000, retro: 18000, wireframe: 25000, galaxy: 38000,
+          diamond: 55000, fire: 80000, hologram: 110000, lava: 140000, ice: 175000, matrix: 250000,
+        };
         const { skin } = JSON.parse(body);
         const authHeader = req.headers['authorization'] || '';
         const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -300,13 +310,17 @@ const httpServer = http.createServer((req, res) => {
         }
         const decoded = await admin.auth().verifyIdToken(token);
         const uid = decoded.uid;
-        const scoreDoc = await db.collection('leaderboard').doc(`${uid}_tetris`).get();
+        const [scoreDoc, prefsDoc] = await Promise.all([
+          db.collection('leaderboard').doc(`${uid}_tetris`).get(),
+          db.collection('user_prefs').doc(uid).get(),
+        ]);
+        const isTester  = !!(prefsDoc.exists && prefsDoc.data().tester);
         const bestScore = scoreDoc.exists ? (scoreDoc.data().score || 0) : 0;
-        if (bestScore < SKIN_UNLOCK_SCORES[skin]) {
+        if (!isTester && bestScore < SKIN_UNLOCK_SCORES[skin]) {
           res.writeHead(403, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Skin not unlocked' }));
         }
         await db.collection('user_prefs').doc(uid).set({ equippedSkin: skin }, { merge: true });
-        log('info', 'skin-equipped', { uid, skin });
+        log('info', 'skin-equipped', { uid, skin, tester: isTester });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (err) {
