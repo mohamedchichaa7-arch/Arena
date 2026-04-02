@@ -234,7 +234,7 @@
         startGame(); statusEl.textContent = 'BATTLE! Clear lines to send garbage!'; break;
       case 'battle-end':
         inBattle = false;
-        if (msg.winner) { goTitle.textContent = msg.winner.id === myId ? 'YOU WIN!' : msg.winner.name + ' WINS!'; if (msg.winner.id === myId) launchConfetti(); }
+        if (msg.winner) { goTitle.textContent = msg.winner.id === myId ? 'YOU WIN!' : msg.winner.name + ' WINS!'; if (msg.winner.id === myId) { launchConfetti(); if (typeof reportScore === 'function') reportScore('tetris', game.score); } }
         else goTitle.textContent = 'DRAW!';
         goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level;
         gameOverOvl.classList.add('show'); break;
@@ -335,7 +335,7 @@
     game.state = 'gameover';
     if (inBattle) { wsSend({ type: 'game-over' }); statusEl.textContent = 'Game Over! Waiting…'; }
     else if (aiActive && aiEngine && aiEngine.state === 'playing') { goTitle.textContent = 'AI WINS!'; goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level; gameOverOvl.classList.add('show'); }
-    else { goTitle.textContent = 'GAME OVER'; goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level; gameOverOvl.classList.add('show'); }
+    else { goTitle.textContent = 'GAME OVER'; goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level; gameOverOvl.classList.add('show'); if (typeof reportScore === 'function') reportScore('tetris', game.score); }
     btnStart.disabled = false; broadcastState();
   }
 

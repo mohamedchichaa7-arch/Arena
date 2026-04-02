@@ -1,28 +1,44 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Game Arena — Lobby</title>
+  <title>Game Arena - Lobby</title>
   <link rel="stylesheet" href="lobby.css">
-  <link
-    href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap"
-    rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
 </head>
 
 <body>
 
-  <!-- JOIN -->
-  <div id="joinScreen" class="screen">
-    <div class="join-card">
+  <!-- AUTH SCREEN -->
+  <div id="authScreen" class="screen">
+    <div class="auth-card">
       <h1 class="logo">GAME ARENA</h1>
-      <p class="subtitle">Multiplayer Maze & Tetris Battles</p>
-      <div class="join-form">
-        <input type="text" id="nameInput" placeholder="Enter your name" maxlength="20" autocomplete="off"
-          spellcheck="false">
-        <button class="btn btn-primary btn-lg" id="btnJoin">Enter Lobby</button>
+      <p class="subtitle">Multiplayer Maze, Tetris &amp; More</p>
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabLogin">Login</button>
+        <button class="auth-tab" id="tabRegister">Register</button>
       </div>
+      <div id="loginForm" class="auth-form">
+        <input type="email" id="loginEmail" placeholder="Email" autocomplete="email">
+        <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
+        <button class="btn btn-primary btn-lg" id="btnEmailLogin">Login</button>
+        <div class="auth-divider"><span>or</span></div>
+        <button class="btn btn-google" id="btnGoogleLogin">&#x1F4BB; Sign in with Google</button>
+      </div>
+      <div id="registerForm" class="auth-form" style="display:none">
+        <input type="text" id="registerName" placeholder="Display name" maxlength="20" autocomplete="nickname">
+        <input type="email" id="registerEmail" placeholder="Email" autocomplete="email">
+        <input type="password" id="registerPassword" placeholder="Password (min 6 chars)" autocomplete="new-password">
+        <button class="btn btn-primary btn-lg" id="btnRegister">Create Account</button>
+        <div class="auth-divider"><span>or</span></div>
+        <button class="btn btn-google" id="btnGoogleRegister">&#x1F4BB; Continue with Google</button>
+      </div>
+      <p class="auth-error" id="authError"></p>
     </div>
     <div class="bg-orbs">
       <div class="orb orb-1"></div>
@@ -35,16 +51,20 @@
   <div id="lobbyScreen" class="screen" style="display:none">
     <header class="lobby-header">
       <h1 class="logo logo-sm">GAME ARENA</h1>
-      <span class="user-badge" id="userBadge"></span>
+      <div class="lobby-header-right">
+        <button class="btn btn-leaderboard" id="btnLeaderboard">&#x1F3C6; Leaderboard</button>
+        <span class="user-badge" id="userBadge"></span>
+        <button class="btn btn-signout" id="btnSignOut">Sign Out</button>
+      </div>
     </header>
 
     <div class="create-bar">
       <input type="text" id="roomNameInput" placeholder="Room name" maxlength="30">
       <select id="gameTypeSelect">
-        <option value="maze">🏁 Maze</option>
-        <option value="tetris">🎮 Tetris</option>
-        <option value="tictactoe">⭕ Tic Tac Toe</option>
-        <option value="bluffrummy">🃏 Bluff Rummy</option>
+        <option value="maze">&#x1F3C1; Maze</option>
+        <option value="tetris">&#x1F3AE; Tetris</option>
+        <option value="tictactoe">&#x2B55; Tic Tac Toe</option>
+        <option value="bluffrummy">&#x1F0CF; Bluff Rummy</option>
       </select>
       <select id="maxPlayersSelect">
         <option value="2">2 Players</option>
@@ -52,14 +72,14 @@
         <option value="6">6 Players</option>
         <option value="8">8 Players</option>
       </select>
-      <input type="password" id="roomPasswordInput" placeholder="🔒 Password (optional)" maxlength="30" autocomplete="off">
+      <input type="password" id="roomPasswordInput" placeholder="&#x1F512; Password (optional)" maxlength="30" autocomplete="off">
       <button class="btn btn-accent" id="btnCreate">Create Room</button>
     </div>
 
-    <!-- Password prompt modal for locked rooms -->
+    <!-- Password modal -->
     <div id="pwModal" class="pw-modal" style="display:none">
       <div class="pw-card">
-        <p class="pw-title">🔒 Private Room</p>
+        <p class="pw-title">&#x1F512; Private Room</p>
         <p class="pw-sub">Enter the room password to join</p>
         <input type="password" id="pwInput" placeholder="Password" maxlength="30" autocomplete="off">
         <div class="pw-actions">
@@ -72,8 +92,26 @@
 
     <div class="room-grid" id="roomGrid">
       <div class="empty-state" id="emptyState">
-        <p>No rooms yet — create one to get started!</p>
+        <p>No rooms yet - create one to get started!</p>
       </div>
+    </div>
+  </div>
+
+  <!-- LEADERBOARD MODAL -->
+  <div id="lbModal" class="lb-modal" style="display:none">
+    <div class="lb-card">
+      <div class="lb-header">
+        <h2 class="lb-title">&#x1F3C6; Leaderboard</h2>
+        <button class="lb-close" id="lbClose">&#x2715;</button>
+      </div>
+      <div class="lb-tabs">
+        <button class="lb-tab active" data-game="maze">&#x1F3C1; Maze</button>
+        <button class="lb-tab" data-game="tetris">&#x1F3AE; Tetris</button>
+        <button class="lb-tab" data-game="tictactoe">&#x2B55; Tic Tac Toe</button>
+        <button class="lb-tab" data-game="bluffrummy">&#x1F0CF; Bluff Rummy</button>
+      </div>
+      <div class="lb-subtitle" id="lbSubtitle">Fastest race finish time</div>
+      <div class="lb-list" id="lbList"><div class="lb-loading">Loading...</div></div>
     </div>
   </div>
 
