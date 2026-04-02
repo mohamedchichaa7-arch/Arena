@@ -48,6 +48,7 @@
 
   //  Firebase Auth 
   fbAuth.onAuthStateChanged(async user => {
+    document.getElementById('authLoading').style.display = 'none';
     if (user) {
       myToken = await user.getIdToken();
       sessionStorage.setItem('arena-token', myToken);
@@ -92,7 +93,15 @@
   function googleSignIn() {
     setAuthError('');
     const provider = new firebase.auth.GoogleAuthProvider();
-    fbAuth.signInWithPopup(provider).catch(e => setAuthError(e.message));
+    fbAuth.signInWithPopup(provider).catch(e => {
+      if (e.code === 'auth/configuration-not-found') {
+        setAuthError('Google Sign-In is not enabled. Please use email/password login.');
+      } else if (e.code === 'auth/popup-blocked') {
+        setAuthError('Popup was blocked. Please allow popups for this site and try again.');
+      } else {
+        setAuthError(e.message);
+      }
+    });
   }
 
   btnEmailLogin.addEventListener('click', () => {

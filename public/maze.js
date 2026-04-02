@@ -538,6 +538,7 @@
     if (inRace && !raceFinished) {
       raceFinished = true;
       wsSend({ type: 'race-finish', time: elapsed, moves });
+      if (typeof reportScore === 'function') reportScore('maze', elapsed);
       statusEl.textContent = 'Finished! Waiting for others…';
     } else if (aiActive && !aiDone) {
       winOverlay.classList.add('show');
@@ -877,7 +878,7 @@
   function handleMsg(msg) {
     switch (msg.type) {
       case 'room-joined':
-        myId = 'self';     // we don't get a numeric id from room-joined, use marker
+        myId = msg.myId || 'self';
         addPlayerCard('self', myName, true);
         for (const p of msg.players) {
           addPlayerCard(p.id, p.name, false);

@@ -216,7 +216,7 @@
   function handleMsg(msg) {
     switch (msg.type) {
       case 'room-joined':
-        myId = 'self';
+        myId = msg.myId || 'self';
         addPlayerCard('self', myName, true);
         for (const p of msg.players) { addPlayerCard(p.id, p.name, false); if (p.state) updateOtherState(p.id, p.state); }
         updatePlayerCount();

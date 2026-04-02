@@ -4,6 +4,6 @@
   "description": "Multiplayer Game Arena — Maze & Tetris with lobby matchmaking",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
-  "dependencies": { "ws": "^8.16.0" },
+  "dependencies": { "ws": "^8.16.0", "firebase-admin": "^12.0.0" },
   "engines": { "node": ">=20.0.0" }
 }

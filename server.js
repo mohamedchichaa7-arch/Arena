@@ -3,11 +3,30 @@ const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const { createHmac } = require('crypto');
+const admin = require('firebase-admin');
+
+// ── Firebase Admin SDK ──────────────────────────────────────────
+let serviceAccount;
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} else {
+  serviceAccount = require('./service-account.json');
+}
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+const db = admin.firestore();
+
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy']);
+// For maze: lower score (time) is better. For all others: higher is better.
+const LOWER_IS_BETTER = new Set(['maze']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
 
-const PORT = process.env.PORT || 3007;
+const PORT = process.env.PORT || 3008;
 
 // ── Logging ─────────────────────────────────────────────────────
 const startTime = Date.now();
@@ -35,12 +54,106 @@ const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
+
+  // ── API: GET /api/leaderboard?game=X ────────────────────────
+  if (req.method === 'GET' && urlPath === '/api/leaderboard') {
+    const params = new URLSearchParams(req.url.split('?')[1] || '');
+    const game = params.get('game') || 'maze';
+    if (!VALID_GAMES.has(game)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Invalid game' }));
+    }
+    const order = LOWER_IS_BETTER.has(game) ? 'asc' : 'desc';
+    db.collection('leaderboard')
+      .where('game', '==', game)
+      .orderBy('score', order)
+      .limit(20)
+      .get()
+      .then(snap => {
+        const entries = snap.docs.map((doc, i) => ({
+          rank: i + 1,
+          uid: doc.data().uid,
+          displayName: doc.data().displayName,
+          score: doc.data().score,
+        }));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(entries));
+      })
+      .catch(err => {
+        log('error', 'leaderboard-fetch', { game, err: err.message });
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
+      });
+    return;
+  }
+
+  // ── API: POST /api/score ─────────────────────────────────────
+  if (req.method === 'POST' && urlPath === '/api/score') {
+    let body = '';
+    req.on('data', chunk => { if (body.length < 4096) body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { game, score } = JSON.parse(body);
+        const authHeader = req.headers['authorization'] || '';
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        if (!token) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Unauthorized' }));
+        }
+        if (!VALID_GAMES.has(game) || typeof score !== 'number' || !isFinite(score) || score < 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Invalid payload' }));
+        }
+        const decoded = await admin.auth().verifyIdToken(token);
+        const uid = decoded.uid;
+        const displayName = decoded.name || decoded.email?.split('@')[0] || 'Player';
+        const docRef = db.collection('leaderboard').doc(`${uid}_${game}`);
+        if (WIN_INCREMENT_GAMES.has(game)) {
+          // Increment wins counter
+          await docRef.set({
+            uid, displayName, game,
+            score: admin.firestore.FieldValue.increment(1),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+        } else {
+          // Keep personal best only
+          const doc = await docRef.get();
+          if (!doc.exists) {
+            await docRef.set({ uid, displayName, game, score, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+          } else {
+            const current = doc.data().score;
+            const isBetter = LOWER_IS_BETTER.has(game) ? score < current : score > current;
+            if (isBetter) {
+              await docRef.update({ score, displayName, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+            }
+          }
+        }
+        log('info', 'score-saved', { uid, game, score });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        const status = err.code === 'auth/argument-error' || err.code === 'auth/id-token-expired' ? 401 : 500;
+        log('warn', 'score-error', { err: err.message });
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // ── Static files ─────────────────────────────────────────────
   const safePath = path.normalize(ROUTES[urlPath] || urlPath).replace(/^(\.\.[/\\])+/, '');
   const isRoot = safePath === '/' || safePath === '\\' || safePath === '.';
   const filePath = path.join(PUBLIC, isRoot ? 'lobby.html' : safePath);
+  // Block any attempt to reach files outside the public directory
   if (!filePath.startsWith(PUBLIC)) {
     const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
     log('warn', 'path-traversal', { ip, url: req.url });
+    res.writeHead(403); return res.end('Forbidden');
+  }
+  // Explicitly block sensitive file types even if somehow inside public
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.json' && !filePath.endsWith('manifest.json')) {
     res.writeHead(403); return res.end('Forbidden');
   }
   fs.readFile(filePath, (err, data) => {
@@ -245,7 +358,7 @@ wss.on('connection', (ws, req) => {
         room.players.set(id, { ws, name: conn.name, gameState: null });
         send(ws, {
           type: 'room-joined', roomId: room.id, roomType: room.type,
-          roomName: room.name, players: roomPlayerList(room, id),
+          roomName: room.name, myId: id, players: roomPlayerList(room, id),
         });
         broadcastRoom(room.id, { type: 'player-joined', id, name: conn.name }, id);
         broadcastLobby();

@@ -385,7 +385,10 @@
     }
     goTitle.textContent = winnerIsMe ? '🏆 YOU WIN!' : '🏆 GAME OVER';
     gameOverOverlay.classList.add('show');
-    if (winnerIsMe) fireConfetti();
+    if (winnerIsMe) {
+      fireConfetti();
+      if (typeof reportScore === 'function') reportScore('bluffrummy', 1);
+    }
   }
 
   btnPlayAgain.addEventListener('click', () => {

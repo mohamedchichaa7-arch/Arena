@@ -14,8 +14,13 @@
 
 <body>
 
+  <!-- LOADING OVERLAY — shown until Firebase confirms auth state -->
+  <div id="authLoading">
+    <div class="auth-loading-spinner"></div>
+  </div>
+
   <!-- AUTH SCREEN -->
-  <div id="authScreen" class="screen">
+  <div id="authScreen" class="screen" style="display:none">
     <div class="auth-card">
       <h1 class="logo">GAME ARENA</h1>
       <p class="subtitle">Multiplayer Maze, Tetris &amp; More</p>

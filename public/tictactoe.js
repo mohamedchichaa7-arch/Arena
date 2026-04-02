@@ -67,7 +67,7 @@
   function handleMsg(msg) {
     switch (msg.type) {
       case 'room-joined':
-        myId = 'self';
+        myId = msg.myId || 'self';
         addPlayerCard('self', myName, true);
         for (const p of msg.players) addPlayerCard(p.id, p.name, false);
         updatePlayerCount();
@@ -229,7 +229,10 @@
       if (combo) {
         for (const i of combo) cells[i].classList.add('win-cell');
       }
-      if (mySymbol === winner) launchConfetti();
+      if (mySymbol === winner) {
+        launchConfetti();
+        if (typeof reportScore === 'function') reportScore('tictactoe', 1);
+      }
     }
     scoreXEl.textContent = scores.X;
     scoreOEl.textContent = scores.O;
