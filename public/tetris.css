@@ -404,6 +404,191 @@ canvas#boardCanvas {
   z-index: 200
 }
 
+/* ── Skin button ── */
+.btn-skin {
+  background: linear-gradient(135deg, #7c3aed, #ec4899);
+  color: #fff;
+  padding: .35rem .8rem;
+  font-size: .7rem
+}
+
+.btn-skin:hover {
+  opacity: .85
+}
+
+/* ── Skin modal ── */
+.skin-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 26, .88);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 300
+}
+
+.skin-modal.show {
+  display: flex
+}
+
+.skin-modal-card {
+  background: #12122a;
+  border: 1px solid rgba(124, 58, 237, .25);
+  border-radius: 16px;
+  padding: 1.5rem;
+  width: min(520px, calc(100vw - 2rem));
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 60px rgba(0, 0, 0, .6)
+}
+
+.skin-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .5rem
+}
+
+.skin-modal-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #a78bfa, #06b6d4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent
+}
+
+.skin-modal-close {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: .2rem .4rem;
+  border-radius: .3rem
+}
+
+.skin-modal-close:hover { color: var(--text) }
+
+.skin-modal-sub {
+  font-size: .7rem;
+  color: var(--dim);
+  margin-bottom: 1rem
+}
+
+.skin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: .7rem
+}
+
+.skin-item {
+  background: #1a1a3e;
+  border: 2px solid #2a2a5a;
+  border-radius: 10px;
+  padding: .7rem .5rem .5rem;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color .2s, transform .15s, box-shadow .2s;
+  position: relative
+}
+
+.skin-item:hover:not(.locked) {
+  border-color: #7c3aed;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(124, 58, 237, .3)
+}
+
+.skin-item.equipped {
+  border-color: #22c55e;
+  box-shadow: 0 0 16px rgba(34, 197, 94, .35)
+}
+
+.skin-item.locked {
+  opacity: .45;
+  cursor: not-allowed
+}
+
+.skin-item-icon {
+  font-size: 1.5rem;
+  margin-bottom: .3rem;
+  display: block
+}
+
+.skin-item-name {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .6rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: .35rem
+}
+
+.skin-preview {
+  display: flex;
+  gap: 2px;
+  justify-content: center;
+  margin-bottom: .35rem
+}
+
+.skin-preview-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px
+}
+
+.skin-item-lock {
+  font-size: .55rem;
+  color: var(--dim)
+}
+
+.skin-item-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: #22c55e;
+  color: #fff;
+  font-size: .45rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'Orbitron', sans-serif
+}
+
+/* ── Board shake on garbage ── */
+@keyframes boardShake {
+  0%   { transform: translateX(0) }
+  20%  { transform: translateX(-5px) }
+  40%  { transform: translateX(5px) }
+  60%  { transform: translateX(-3px) }
+  80%  { transform: translateX(3px) }
+  100% { transform: translateX(0) }
+}
+
+.board-wrap.shake {
+  animation: boardShake .3s ease
+}
+
+/* ── Countdown pulse ── */
+@keyframes countdownPop {
+  0%   { transform: scale(1.6); opacity: .5 }
+  100% { transform: scale(1);   opacity: 1 }
+}
+
+.countdown-num {
+  animation: countdownPop .35s ease forwards
+}
+
+/* ── Level-up board flash ── */
+@keyframes boardLevelFlash {
+  0%   { box-shadow: 0 0 0 3px #fbbf24, 0 0 40px rgba(251,191,36,.5) }
+  100% { box-shadow: 0 0 40px rgba(124, 58, 237, .12) }
+}
+
+canvas#boardCanvas.level-up {
+  animation: boardLevelFlash .6s ease forwards
+}
+
 ::-webkit-scrollbar {
   width: 6px
 }

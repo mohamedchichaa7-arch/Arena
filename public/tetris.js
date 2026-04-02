@@ -13,7 +13,30 @@
   // ── Constants ────────────────────────────────────────────────────
   const ROWS = 20, COLS = 10;
   const COLORS = ['', '#06b6d4', '#eab308', '#a855f7', '#22c55e', '#ef4444', '#3b82f6', '#f97316', '#94a3b8'];
-  const GLOW = ['', '#67e8f9', '#fde047', '#c084fc', '#4ade80', '#f87171', '#60a5fa', '#fb923c', '#cbd5e1'];
+  const GLOW   = ['', '#67e8f9', '#fde047', '#c084fc', '#4ade80', '#f87171', '#60a5fa', '#fb923c', '#cbd5e1'];
+
+  // ── Skins ────────────────────────────────────────────────────────────────────
+  const SKINS = {
+    classic: { name: 'Classic', icon: '🎮', unlockScore: 0,      style: 'solid',
+      colors: ['', '#06b6d4', '#eab308', '#a855f7', '#22c55e', '#ef4444', '#3b82f6', '#f97316', '#94a3b8'] },
+    neon:    { name: 'Neon',    icon: '⚡',  unlockScore: 1000,   style: 'glow',
+      colors: ['', '#00ffff', '#ffff00', '#ff00ff', '#00ff88', '#ff3366', '#66aaff', '#ff8800', '#aaaaaa'] },
+    pastel:  { name: 'Pastel',  icon: '🌸', unlockScore: 5000,   style: 'soft',
+      colors: ['', '#7ec8e3', '#ffe0a3', '#c3aed6', '#a8e6cf', '#ffb3b3', '#a3c4f3', '#ffd6a0', '#d4d4d4'] },
+    retro:   { name: 'Retro',   icon: '👾', unlockScore: 15000,  style: 'flat',
+      colors: ['', '#55cc22', '#ccaa00', '#aa33cc', '#22cc55', '#cc2233', '#2233cc', '#cc6600', '#888888'] },
+    galaxy:  { name: 'Galaxy',  icon: '🌌', unlockScore: 30000,  style: 'gradient',
+      colors: ['', '#818cf8', '#c084fc', '#f472b6', '#34d399', '#fb7185', '#60a5fa', '#fb923c', '#94a3b8'] },
+    fire:    { name: 'Fire',    icon: '🔥', unlockScore: 75000,  style: 'glow',
+      colors: ['', '#fbbf24', '#f97316', '#ef4444', '#fcd34d', '#b91c1c', '#fb923c', '#dc2626', '#6b6b6b'] },
+    ice:     { name: 'Ice',     icon: '❄️',  unlockScore: 150000, style: 'soft',
+      colors: ['', '#bae6fd', '#e0f2fe', '#c7d2fe', '#ccfbf1', '#dbeafe', '#a5f3fc', '#e0f7fa', '#f1f5f9'] },
+  };
+
+  let activeSkinColors = [...COLORS];
+  let activeSkinStyle  = 'solid';
+  let equippedSkinId   = 'classic';
+  let unlockedSkins    = ['classic'];
   const TYPES = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
   const SHAPES = { I: [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]], O: [[1, 1], [1, 1]], T: [[0, 1, 0], [1, 1, 1], [0, 0, 0]], S: [[0, 1, 1], [1, 1, 0], [0, 0, 0]], Z: [[1, 1, 0], [0, 1, 1], [0, 0, 0]], J: [[1, 0, 0], [1, 1, 1], [0, 0, 0]], L: [[0, 0, 1], [1, 1, 1], [0, 0, 0]] };
   const COLOR_IDX = { I: 1, O: 2, T: 3, S: 4, Z: 5, J: 6, L: 7 };
@@ -49,7 +72,7 @@
   // ══════════════════════════════════════════════════════════════════
   class TetrisEngine {
     constructor() { this.reset(); }
-    reset() { this.board = Array.from({ length: ROWS }, () => Array(COLS).fill(0)); this.piece = null; this.holdType = null; this.holdUsed = false; this.bag = []; this.score = 0; this.level = 1; this.lines = 0; this.combo = -1; this.state = 'idle'; this.dropCounter = 0; this.lockCounter = 0; this.lockLimit = 500; this.clearingRows = []; this.clearTimer = 0; this.pendingGarbage = 0; this.garbageSent = 0; }
+    reset() { this.board = Array.from({ length: ROWS }, () => Array(COLS).fill(0)); this.piece = null; this.holdType = null; this.holdUsed = false; this.bag = []; this.score = 0; this.level = 1; this.lines = 0; this.combo = -1; this.state = 'idle'; this.dropCounter = 0; this.lockCounter = 0; this.lockLimit = 500; this.clearingRows = []; this.clearTimer = 0; this.pendingGarbage = 0; this.garbageSent = 0; this.lockedPiece = null; this.clearingStarted = false; this.lastClearInfo = null; }
     start() { this.reset(); this.state = 'playing'; this.spawnPiece(); }
     fillBag() { const b = [...TYPES]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[b[i], b[j]] = [b[j], b[i]]; } this.bag.push(...b); }
     nextType() { if (this.bag.length < 7) this.fillBag(); return this.bag.shift(); }
@@ -64,8 +87,8 @@
     rotate(dir) { if (!this.piece || this.state !== 'playing') return false; const nr = (this.piece.rotation + dir + 4) % 4; const ns = ROTATIONS[this.piece.type][nr]; const kicks = this.piece.type === 'I' ? [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2], [2, 0], [-1, 0], [2, 1], [-1, -2]] : [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, 1], [-1, 1], [1, 1]]; for (const [dx, dy] of kicks) if (!this.collides(ns, this.piece.x + dx, this.piece.y + dy)) { this.piece.x += dx; this.piece.y += dy; this.piece.rotation = nr; this.piece.shape = ns; this.lockCounter = 0; return true; } return false; }
     doHold() { if (!this.piece || this.holdUsed || this.state !== 'playing') return; const t = this.piece.type; if (this.holdType) { const s = this.holdType; this.holdType = t; this.piece = { type: s, colorIdx: COLOR_IDX[s], rotation: 0, shape: ROTATIONS[s][0], x: SPAWN_X[s], y: SPAWN_Y[s] }; } else { this.holdType = t; this.spawnPiece(); } this.holdUsed = true; this.lockCounter = 0; }
     ghostY() { if (!this.piece) return 0; let gy = this.piece.y; while (!this.collides(this.piece.shape, this.piece.x, gy + 1)) gy++; return gy; }
-    lock() { if (!this.piece) return 0; const { shape, x, y, colorIdx } = this.piece; for (let r = 0; r < shape.length; r++)for (let c = 0; c < shape[r].length; c++) { if (!shape[r][c]) continue; const br = y + r, bc = x + c; if (br < 0) { this.state = 'gameover'; return 0; } this.board[br][bc] = colorIdx; } this.piece = null; const full = []; for (let r = 0; r < ROWS; r++)if (this.board[r].every(c => c !== 0)) full.push(r); if (full.length > 0) { this.clearingRows = full; this.clearTimer = 0; this.state = 'clearing'; return 0; } this.combo = -1; this.applyGarbage(); this.spawnPiece(); return 0; }
-    finishClear() { const count = this.clearingRows.length; const sorted = [...this.clearingRows].sort((a, b) => b - a); for (const r of sorted) { this.board.splice(r, 1); } for (let i = 0; i < count; i++) { this.board.unshift(Array(COLS).fill(0)); } this.lines += count; this.combo++; const lvl = Math.floor(this.lines / 10) + 1; if (lvl > this.level) this.level = lvl; this.score += (LINE_SCORES[count] || 0) * this.level; if (this.combo > 0) this.score += 50 * this.combo * this.level; this.clearingRows = []; this.state = 'playing'; let garbage = 0; if (count === 2) garbage = 1; else if (count === 3) garbage = 2; else if (count >= 4) garbage = 4; garbage += Math.max(0, this.combo - 1); const cancel = Math.min(garbage, this.pendingGarbage); this.pendingGarbage -= cancel; garbage -= cancel; this.applyGarbage(); this.spawnPiece(); this.garbageSent = garbage; return garbage; }
+    lock() { if (!this.piece) return 0; const { shape, x, y, colorIdx } = this.piece; this.lockedPiece = { shape: shape.map(r => [...r]), x, y, colorIdx }; for (let r = 0; r < shape.length; r++)for (let c = 0; c < shape[r].length; c++) { if (!shape[r][c]) continue; const br = y + r, bc = x + c; if (br < 0) { this.state = 'gameover'; return 0; } this.board[br][bc] = colorIdx; } this.piece = null; const full = []; for (let r = 0; r < ROWS; r++)if (this.board[r].every(c => c !== 0)) full.push(r); if (full.length > 0) { this.clearingRows = full; this.clearTimer = 0; this.state = 'clearing'; this.clearingStarted = true; return 0; } this.combo = -1; this.applyGarbage(); this.spawnPiece(); return 0; }
+    finishClear() { const count = this.clearingRows.length; const sorted = [...this.clearingRows].sort((a, b) => b - a); for (const r of sorted) { this.board.splice(r, 1); } for (let i = 0; i < count; i++) { this.board.unshift(Array(COLS).fill(0)); } this.lines += count; this.combo++; const lvl = Math.floor(this.lines / 10) + 1; const leveledUp = lvl > this.level; if (leveledUp) this.level = lvl; const scoreBefore = this.score; this.score += (LINE_SCORES[count] || 0) * this.level; if (this.combo > 0) this.score += 50 * this.combo * this.level; this.lastClearInfo = { count, rows: [...sorted], combo: this.combo, scoreGain: this.score - scoreBefore, leveledUp }; this.clearingRows = []; this.state = 'playing'; let garbage = 0; if (count === 2) garbage = 1; else if (count === 3) garbage = 2; else if (count >= 4) garbage = 4; garbage += Math.max(0, this.combo - 1); const cancel = Math.min(garbage, this.pendingGarbage); this.pendingGarbage -= cancel; garbage -= cancel; this.applyGarbage(); this.spawnPiece(); this.garbageSent = garbage; return garbage; }
     applyGarbage() { if (this.pendingGarbage <= 0) return; const lines = Math.min(this.pendingGarbage, ROWS - 4); this.pendingGarbage -= lines; for (let i = 0; i < lines; i++) { this.board.shift(); const row = Array(COLS).fill(8); row[Math.floor(Math.random() * COLS)] = 0; this.board.push(row); } }
     addGarbage(n) { this.pendingGarbage += n; }
     getDropInterval() { return Math.max(40, 1000 - (this.level - 1) * 80); }
@@ -123,7 +146,24 @@
     for (let r = 1; r < ROWS; r++) { bctx.beginPath(); bctx.moveTo(0, r * cs); bctx.lineTo(w, r * cs); bctx.stroke(); }
     for (let c = 1; c < COLS; c++) { bctx.beginPath(); bctx.moveTo(c * cs, 0); bctx.lineTo(c * cs, h); bctx.stroke(); }
     for (let r = 0; r < ROWS; r++)for (let c = 0; c < COLS; c++)if (game.board[r][c]) drawBlock(bctx, c * cs, r * cs, cs, game.board[r][c]);
-    if (game.state === 'clearing') { const flash = Math.sin(game.clearTimer / 250 * Math.PI) * .6; bctx.fillStyle = `rgba(255,255,255,${flash})`; for (const row of game.clearingRows) bctx.fillRect(0, row * cs, w, cs); }
+    if (game.state === 'clearing') {
+      const progress = game.clearTimer / 250;
+      const flash = Math.sin(progress * Math.PI) * .75;
+      const count = game.clearingRows.length;
+      const flashColor = count >= 4 ? `rgba(251,191,36,${flash})` : count >= 3 ? `rgba(249,115,22,${flash})` : count >= 2 ? `rgba(6,182,212,${flash})` : `rgba(255,255,255,${flash})`;
+      bctx.fillStyle = flashColor;
+      for (const row of game.clearingRows) bctx.fillRect(0, row * cs, w, cs);
+      // Shimmer effect on clearing rows
+      if (progress > .3) {
+        for (const row of game.clearingRows) {
+          const shimGrad = bctx.createLinearGradient(0, row * cs, w, row * cs);
+          shimGrad.addColorStop(0, 'transparent');
+          shimGrad.addColorStop((progress - .3) % 1, 'rgba(255,255,255,.35)');
+          shimGrad.addColorStop(1, 'transparent');
+          bctx.fillStyle = shimGrad; bctx.fillRect(0, row * cs, w, cs);
+        }
+      }
+    }
     if (game.piece && game.state === 'playing') { const gy = game.ghostY(); drawPieceAt(bctx, game.piece.shape, game.piece.x, gy, cs, game.piece.colorIdx, .18); }
     if (game.piece && (game.state === 'playing' || game.state === 'clearing')) drawPieceAt(bctx, game.piece.shape, game.piece.x, game.piece.y, cs, game.piece.colorIdx, 1);
     if (game.pendingGarbage > 0) { const gH = Math.min(game.pendingGarbage, ROWS) * cs; const gg = bctx.createLinearGradient(0, h - gH, 0, h); gg.addColorStop(0, 'rgba(239,68,68,0.1)'); gg.addColorStop(1, 'rgba(239,68,68,0.5)'); bctx.fillStyle = gg; bctx.fillRect(0, h - gH, 4, gH); bctx.fillStyle = '#ef4444'; bctx.fillRect(0, h - gH, 3, gH); }
@@ -131,11 +171,42 @@
   }
 
   function drawBlock(ctx, x, y, s, colorIdx) {
-    const g = 1, color = COLORS[colorIdx] || COLORS[1];
-    ctx.fillStyle = color + '30'; ctx.fillRect(x, y, s, s);
-    ctx.fillStyle = color; ctx.fillRect(x + g, y + g, s - g * 2, s - g * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x + g, y + g, s - g * 2, Math.max(1, s * .12)); ctx.fillRect(x + g, y + g, Math.max(1, s * .12), s - g * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x + g, y + s - g - Math.max(1, s * .1), s - g * 2, Math.max(1, s * .1)); ctx.fillRect(x + s - g - Math.max(1, s * .1), y + g, Math.max(1, s * .1), s - g * 2);
+    const color = activeSkinColors[colorIdx] || activeSkinColors[1];
+    const style = activeSkinStyle;
+    if (style === 'glow') {
+      ctx.shadowColor = color; ctx.shadowBlur = Math.max(6, s * .4);
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+      ctx.fillStyle = color;
+      ctx.fillRect(x + 1, y + 1, s - 2, 3); ctx.fillRect(x + 1, y + s - 4, s - 2, 3);
+      ctx.fillRect(x + 1, y + 1, 3, s - 2); ctx.fillRect(x + s - 4, y + 1, 3, s - 2);
+      ctx.fillStyle = color + '35'; ctx.fillRect(x + 4, y + 4, s - 8, s - 8);
+      ctx.shadowBlur = 0;
+    } else if (style === 'flat') {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = color; ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(x + 1, y + 1, s - 2, 2); ctx.fillRect(x + 1, y + 1, 2, s - 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(x + 1, y + s - 3, s - 2, 2); ctx.fillRect(x + s - 3, y + 1, 2, s - 2);
+    } else if (style === 'soft') {
+      const r = Math.min(4, s / 5);
+      ctx.fillStyle = color + '25'; ctx.fillRect(x, y, s, s);
+      ctx.beginPath(); ctx.roundRect(x + 1, y + 1, s - 2, s - 2, r); ctx.fillStyle = color; ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(x + 2, y + 2, s - 4, Math.max(2, s * .18));
+      ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(x + 2, y + s - Math.max(2, s * .18) - 2, s - 4, Math.max(2, s * .18));
+    } else if (style === 'gradient') {
+      const gr = ctx.createLinearGradient(x, y, x + s, y + s);
+      gr.addColorStop(0, color + 'ee'); gr.addColorStop(1, color + '88');
+      ctx.fillStyle = color + '22'; ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = gr; ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(x + 1, y + 1, s - 2, Math.max(2, s * .15));
+      ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(x + 1, y + s - Math.max(2, s * .15) - 1, s - 2, Math.max(2, s * .15));
+    } else {
+      // solid (classic)
+      const g = 1;
+      ctx.fillStyle = color + '30'; ctx.fillRect(x, y, s, s);
+      ctx.fillStyle = color; ctx.fillRect(x + g, y + g, s - g * 2, s - g * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x + g, y + g, s - g * 2, Math.max(1, s * .12)); ctx.fillRect(x + g, y + g, Math.max(1, s * .12), s - g * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x + g, y + s - g - Math.max(1, s * .1), s - g * 2, Math.max(1, s * .1)); ctx.fillRect(x + s - g - Math.max(1, s * .1), y + g, Math.max(1, s * .1), s - g * 2);
+    }
   }
 
   function drawPieceAt(ctx, shape, px, py, cs, colorIdx, alpha) {
@@ -162,6 +233,108 @@
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  //  PARTICLE & EFFECTS SYSTEM
+  // ══════════════════════════════════════════════════════════════════
+
+  const particles    = [];
+  const floatingTexts = [];
+
+  function spawnLockParticles(piece) {
+    const color = activeSkinColors[piece.colorIdx] || activeSkinColors[1];
+    for (let r = 0; r < piece.shape.length; r++) {
+      for (let c = 0; c < piece.shape[r].length; c++) {
+        if (!piece.shape[r][c]) continue;
+        const br = piece.y + r; if (br < 0) continue;
+        const px = (piece.x + c + .5) * cellSize, py = (br + .5) * cellSize;
+        for (let i = 0; i < 5; i++) {
+          const ang = Math.random() * Math.PI * 2, spd = Math.random() * 2.5 + .8;
+          particles.push({ x: px, y: py, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - .5, color, size: Math.random() * 3.5 + 1.5, life: 1, decay: .05 + Math.random() * .04 });
+        }
+      }
+    }
+  }
+
+  function spawnClearParticles(rows, count) {
+    const palette = count >= 4
+      ? ['#fbbf24', '#ef4444', '#a855f7', '#06b6d4', '#22c55e', '#f97316']
+      : count >= 2 ? [activeSkinColors[1] || '#06b6d4', activeSkinColors[3] || '#a855f7'] : [activeSkinColors[1] || '#94a3b8'];
+    const perCell = count >= 4 ? 7 : 4;
+    for (const row of rows) {
+      for (let c = 0; c < COLS; c++) {
+        const px = (c + .5) * cellSize, py = (row + .5) * cellSize;
+        for (let i = 0; i < perCell; i++) {
+          const ang = Math.random() * Math.PI * 2, spd = Math.random() * (count >= 4 ? 7 : 4) + 1.5;
+          particles.push({ x: px, y: py, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 1.5, color: palette[Math.floor(Math.random() * palette.length)], size: Math.random() * 4 + 2, life: 1, decay: .022 + Math.random() * .018 });
+        }
+      }
+    }
+  }
+
+  function spawnFloatingText(text, boardX, boardY, color) {
+    floatingTexts.push({ text, x: boardX, y: boardY, vy: -1.4, life: 1, decay: .017, color: color || '#fbbf24', size: Math.max(11, cellSize * .75) });
+  }
+
+  function updateEffects(delta) {
+    const f = delta / 16;
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i]; p.x += p.vx * f; p.y += p.vy * f; p.vy += .12 * f; p.life -= p.decay * f;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+    for (let i = floatingTexts.length - 1; i >= 0; i--) {
+      const t = floatingTexts[i]; t.y += t.vy * f; t.life -= t.decay * f;
+      if (t.life <= 0) floatingTexts.splice(i, 1);
+    }
+  }
+
+  function drawEffects() {
+    for (const p of particles) {
+      bctx.globalAlpha = Math.max(0, p.life);
+      bctx.fillStyle = p.color;
+      bctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    for (const t of floatingTexts) {
+      bctx.globalAlpha = Math.max(0, t.life);
+      bctx.font = `bold ${t.size}px Orbitron, sans-serif`;
+      bctx.textAlign = 'center';
+      bctx.shadowColor = t.color; bctx.shadowBlur = 8;
+      bctx.fillStyle = t.color;
+      bctx.fillText(t.text, t.x, t.y);
+      bctx.shadowBlur = 0;
+    }
+    bctx.globalAlpha = 1; bctx.textAlign = 'left';
+  }
+
+  // ── Process engine event flags ───────────────────────────────────
+  function consumeEngineEvents(g, isPlayer) {
+    if (g.lockedPiece) {
+      spawnLockParticles(g.lockedPiece);
+      g.lockedPiece = null;
+    }
+    if (g.clearingStarted) {
+      g.clearingStarted = false;
+      spawnClearParticles(g.clearingRows, g.clearingRows.length);
+    }
+    if (g.lastClearInfo) {
+      const { count, scoreGain, combo, leveledUp } = g.lastClearInfo;
+      g.lastClearInfo = null;
+      if (isPlayer) {
+        const cx = COLS * cellSize / 2;
+        const clearLabels = ['', 'SINGLE', 'DOUBLE', 'TRIPLE', 'TETRIS!'];
+        const label = clearLabels[count] || `${count} LINES`;
+        const color = count >= 4 ? '#fbbf24' : count >= 3 ? '#f97316' : '#06b6d4';
+        spawnFloatingText(label, cx, ROWS * cellSize * .35, color);
+        if (scoreGain > 0) spawnFloatingText(`+${scoreGain}`, cx, ROWS * cellSize * .45, '#a78bfa');
+        if (combo > 0) spawnFloatingText(`COMBO \u00d7${combo + 1}`, cx, ROWS * cellSize * .55, '#22c55e');
+        if (leveledUp) {
+          boardCanvas.classList.add('level-up');
+          setTimeout(() => boardCanvas.classList.remove('level-up'), 700);
+          spawnFloatingText(`LEVEL ${g.level}!`, cx, ROWS * cellSize * .25, '#fbbf24');
+        }
+      }
+    }
+  }
+
   function drawMiniBoard(cvs, data, pState) {
     const c = cvs.getContext('2d'), w = cvs.width, h = cvs.height; c.clearRect(0, 0, w, h); c.fillStyle = '#0f0f2e'; c.fillRect(0, 0, w, h);
     if (!data) return; const cs = Math.floor(Math.min(w / COLS, h / ROWS)); const ox = Math.floor((w - COLS * cs) / 2), oy = Math.floor((h - ROWS * cs) / 2);
@@ -177,17 +350,24 @@
   // ══════════════════════════════════════════════════════════════════
 
   function gameLoop(time) {
-    const delta = time - lastTime; lastTime = time;
+    const delta = Math.min(time - lastTime, 100); lastTime = time;
     if (game.state === 'playing' || game.state === 'clearing') {
       const garbage = game.update(delta);
-      if (garbage > 0 && (inBattle || aiActive)) { if (inBattle) wsSend({ type: 'garbage', lines: garbage }); if (aiActive && aiEngine) aiEngine.addGarbage(garbage); }
+      consumeEngineEvents(game, true);
+      if (garbage > 0 && (inBattle || aiActive)) {
+        if (inBattle) wsSend({ type: 'garbage', lines: garbage });
+        if (aiActive && aiEngine) aiEngine.addGarbage(garbage);
+        boardCanvas.parentElement.classList.add('shake');
+        setTimeout(() => boardCanvas.parentElement.classList.remove('shake'), 350);
+      }
       if (game.state === 'gameover') onGameOver();
     }
     if (aiActive && aiEngine) {
-      if (aiEngine.state === 'playing' || aiEngine.state === 'clearing') { const ag = aiEngine.update(delta); if (ag > 0) game.addGarbage(ag); if (aiEngine.state === 'gameover') onAIGameOver(); }
+      if (aiEngine.state === 'playing' || aiEngine.state === 'clearing') { const ag = aiEngine.update(delta); consumeEngineEvents(aiEngine, false); if (ag > 0) game.addGarbage(ag); if (aiEngine.state === 'gameover') onAIGameOver(); }
       if (aiCtrl && aiEngine.state === 'playing') aiCtrl.update(delta);
     }
-    drawBoard(); drawHold(); drawNext(); updatePanels(); throttledBroadcast(); updateMyCard();
+    updateEffects(delta);
+    drawBoard(); drawHold(); drawNext(); drawEffects(); updatePanels(); throttledBroadcast(); updateMyCard();
     if (aiActive && aiEngine) updateAICard();
     requestAnimationFrame(gameLoop);
   }
@@ -209,6 +389,83 @@
     ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch { } };
     ws.onclose = () => { statusEl.textContent = 'Disconnected. Returning to lobby…'; setTimeout(() => location.href = '/', 3000); };
   }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  SKINS — load & apply
+  // ══════════════════════════════════════════════════════════════════
+
+  function applySkin(skinId) {
+    const skin = SKINS[skinId] || SKINS.classic;
+    activeSkinColors = [...skin.colors];
+    activeSkinStyle  = skin.style;
+    equippedSkinId   = skinId;
+  }
+
+  async function loadUserSkins() {
+    try {
+      const token = sessionStorage.getItem('arena-token') ||
+        (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+      if (!token) return;
+      const res = await fetch('/api/skins', { headers: { 'Authorization': 'Bearer ' + token } });
+      if (!res.ok) return;
+      const data = await res.json();
+      unlockedSkins = data.unlockedSkins || ['classic'];
+      applySkin(data.equippedSkin || 'classic');
+    } catch {}
+  }
+
+  async function equipSkin(skinId) {
+    applySkin(skinId);
+    try {
+      const token = sessionStorage.getItem('arena-token') ||
+        (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+      if (!token) return;
+      await fetch('/api/skins/equip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ skin: skinId }),
+      });
+    } catch {}
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  SKIN MODAL
+  // ══════════════════════════════════════════════════════════════════
+
+  const skinModal = $('skinModal'), skinClose = $('skinClose'), skinGrid = $('skinGrid'), skinSub = $('skinSub'), btnSkin = $('btnSkin');
+
+  function openSkinModal() {
+    skinGrid.innerHTML = '';
+    const skinEntries = Object.entries(SKINS);
+    skinSub.textContent = `${unlockedSkins.length} of ${skinEntries.length} skins unlocked`;
+    for (const [id, skin] of skinEntries) {
+      const locked   = !unlockedSkins.includes(id);
+      const equipped = id === equippedSkinId;
+      const item = document.createElement('div');
+      item.className = 'skin-item' + (locked ? ' locked' : '') + (equipped ? ' equipped' : '');
+      // Color preview swatches (show piece colors 1-7)
+      const swatches = skin.colors.slice(1, 8).map(c => `<div class="skin-preview-swatch" style="background:${c}"></div>`).join('');
+      item.innerHTML = `
+        ${equipped ? '<div class="skin-item-badge">ON</div>' : ''}
+        <span class="skin-item-icon">${skin.icon}</span>
+        <div class="skin-item-name">${skin.name}</div>
+        <div class="skin-preview">${swatches}</div>
+        <div class="skin-item-lock">${locked ? '🔒 ' + skin.unlockScore.toLocaleString() + ' pts' : equipped ? '✓ Equipped' : 'Click to use'}</div>
+      `;
+      if (!locked) {
+        item.addEventListener('click', async () => {
+          await equipSkin(id);
+          openSkinModal(); // re-render to show new equipped state
+        });
+      }
+      skinGrid.appendChild(item);
+    }
+    skinModal.classList.add('show');
+  }
+
+  btnSkin.addEventListener('click', openSkinModal);
+  skinClose.addEventListener('click', () => skinModal.classList.remove('show'));
+  skinModal.addEventListener('click', e => { if (e.target === skinModal) skinModal.classList.remove('show'); });
   function wsSend(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
   function broadcastState() { wsSend({ type: 'state', data: game.getState() }); }
   function throttledBroadcast() { if (stateThrottle) return; stateThrottle = setTimeout(() => { stateThrottle = null; broadcastState(); }, 100); }
@@ -228,7 +485,11 @@
       case 'garbage': game.addGarbage(msg.lines); break;
       case 'player-gameover': { const p = others.get(msg.id); if (p) { const t = p.el.querySelector('.pc-timer'); t.textContent = 'K.O.'; t.style.color = '#ef4444'; } break; }
       case 'battle-countdown':
-        inBattle = true; countdownOvl.classList.add('show'); countdownText.textContent = msg.count; break;
+        inBattle = true; countdownOvl.classList.add('show');
+        countdownText.textContent = msg.count;
+        countdownText.style.animation = 'none';
+        requestAnimationFrame(() => { countdownText.style.animation = ''; });
+        break;
       case 'battle-go':
         countdownOvl.classList.remove('show'); gameOverOvl.classList.remove('show');
         startGame(); statusEl.textContent = 'BATTLE! Clear lines to send garbage!'; break;
@@ -385,6 +646,7 @@
   // ══════════════════════════════════════════════════════════════════
 
   sizeCanvases();
+  loadUserSkins();
   connect();
   requestAnimationFrame(gameLoop);
 

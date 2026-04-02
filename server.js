@@ -13,12 +13,106 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   serviceAccount = require('./service-account.json');
 }
 
+const appCredential = admin.credential.cert(serviceAccount);
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: appCredential,
 });
 const db = admin.firestore();
 
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy']);
+// ── Firestore auto-provisioning ─────────────────────────────────
+let firestoreReady = false;
+
+async function tryCreateFirestoreDatabase() {
+  try {
+    const tokenObj = await appCredential.getAccessToken();
+    const projectId = serviceAccount.project_id;
+    const createUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases?databaseId=(default)`;
+    const createRes = await fetch(createUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${tokenObj.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'FIRESTORE_NATIVE', locationId: 'eur3' }),
+    });
+    if (createRes.ok || createRes.status === 409) {
+      log('info', 'firestore-created', { status: createRes.status });
+      await new Promise(r => setTimeout(r, 4000));
+      return true;
+    }
+    const body = await createRes.text();
+    log('error', 'firestore-create-failed', { status: createRes.status, body });
+    return false;
+  } catch (createErr) {
+    log('warn', 'firestore-create-skipped', { err: createErr.message.split('\n')[0] });
+    return false;
+  }
+}
+
+async function ensureFirestoreDatabase() {
+  try {
+    await db.listCollections();
+    firestoreReady = true;
+    log('info', 'firestore-ready', {});
+    return true;
+  } catch (err) {
+    const notFound = err.code === 5 || (err.message && (err.message.includes('NOT_FOUND') || err.message.includes('does not exist')));
+    if (!notFound) {
+      log('warn', 'firestore-warn', { err: err.message.split('\n')[0] });
+      // Still mark ready — may succeed on actual requests
+      firestoreReady = true;
+      return true;
+    }
+    log('warn', 'firestore-creating', { msg: 'Firestore database not found — attempting auto-create…' });
+    const created = await tryCreateFirestoreDatabase();
+    if (created) {
+      try { await db.listCollections(); firestoreReady = true; return true; } catch {}
+    }
+    // Auto-create failed (e.g. local SSL proxy). Retry silently in background every 30s.
+    log('warn', 'firestore-manual-setup', {
+      msg: 'Auto-create failed. Go to https://console.firebase.google.com/project/' +
+           serviceAccount.project_id + '/firestore → click "Create database" → choose Native mode → nam5 region. Server will detect it automatically.',
+    });
+    const retryInterval = setInterval(async () => {
+      try {
+        await db.listCollections();
+        firestoreReady = true;
+        clearInterval(retryInterval);
+        log('info', 'firestore-ready', { msg: 'Firestore is now ready!' });
+      } catch {}
+    }, 30_000);
+    return false;
+  }
+}
+
+async function ensureFirestoreIndexes() {
+  try {
+    const tokenObj = await appCredential.getAccessToken();
+    const projectId = serviceAccount.project_id;
+    const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/collectionGroups/leaderboard/indexes`;
+    const headers = { 'Authorization': `Bearer ${tokenObj.access_token}`, 'Content-Type': 'application/json' };
+
+    const needed = [
+      // maze: game ASC + score ASC
+      { queryScope: 'COLLECTION', fields: [{ fieldPath: 'game', order: 'ASCENDING' }, { fieldPath: 'score', order: 'ASCENDING' }, { fieldPath: '__name__', order: 'ASCENDING' }] },
+      // tetris/tictactoe/bluffrummy: game ASC + score DESC
+      { queryScope: 'COLLECTION', fields: [{ fieldPath: 'game', order: 'ASCENDING' }, { fieldPath: 'score', order: 'DESCENDING' }, { fieldPath: '__name__', order: 'DESCENDING' }] },
+    ];
+
+    for (const index of needed) {
+      const r = await fetch(base, { method: 'POST', headers, body: JSON.stringify(index) });
+      if (r.ok) {
+        log('info', 'firestore-index-creating', { fields: index.fields.map(f => f.fieldPath + ':' + f.order).join(',') });
+      } else if (r.status === 409) {
+        // Already exists — fine
+      } else {
+        const body = await r.text();
+        log('warn', 'firestore-index-warn', { status: r.status, body });
+      }
+    }
+  } catch (err) {
+    log('warn', 'firestore-index-skip', { err: err.message.split('\n')[0] });
+  }
+}
+
+
 // For maze: lower score (time) is better. For all others: higher is better.
 const LOWER_IS_BETTER = new Set(['maze']);
 const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy']);
@@ -57,6 +151,10 @@ const httpServer = http.createServer((req, res) => {
 
   // ── API: GET /api/leaderboard?game=X ────────────────────────
   if (req.method === 'GET' && urlPath === '/api/leaderboard') {
+    if (!firestoreReady) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Database not ready yet', entries: [] }));
+    }
     const params = new URLSearchParams(req.url.split('?')[1] || '');
     const game = params.get('game') || 'maze';
     if (!VALID_GAMES.has(game)) {
@@ -89,6 +187,10 @@ const httpServer = http.createServer((req, res) => {
 
   // ── API: POST /api/score ─────────────────────────────────────
   if (req.method === 'POST' && urlPath === '/api/score') {
+    if (!firestoreReady) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Database not ready yet' }));
+    }
     let body = '';
     req.on('data', chunk => { if (body.length < 4096) body += chunk; });
     req.on('end', async () => {
@@ -135,6 +237,80 @@ const httpServer = http.createServer((req, res) => {
         const status = err.code === 'auth/argument-error' || err.code === 'auth/id-token-expired' ? 401 : 500;
         log('warn', 'score-error', { err: err.message });
         res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // ── API: GET /api/skins ────────────────────────────────────────────────────
+  if (req.method === 'GET' && urlPath === '/api/skins') {
+    if (!firestoreReady) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ equippedSkin: 'classic', bestScore: 0, unlockedSkins: ['classic'] }));
+    }
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!token) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Unauthorized' }));
+    }
+    (async () => {
+      try {
+        const SKIN_UNLOCK_SCORES = { classic: 0, neon: 1000, pastel: 5000, retro: 15000, galaxy: 30000, fire: 75000, ice: 150000 };
+        const decoded = await admin.auth().verifyIdToken(token);
+        const uid = decoded.uid;
+        const [scoreDoc, prefsDoc] = await Promise.all([
+          db.collection('leaderboard').doc(`${uid}_tetris`).get(),
+          db.collection('user_prefs').doc(uid).get(),
+        ]);
+        const bestScore = scoreDoc.exists ? (scoreDoc.data().score || 0) : 0;
+        const equippedSkin = (prefsDoc.exists && prefsDoc.data().equippedSkin) || 'classic';
+        const unlockedSkins = Object.entries(SKIN_UNLOCK_SCORES)
+          .filter(([, s]) => bestScore >= s).map(([id]) => id);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ equippedSkin, bestScore, unlockedSkins }));
+      } catch (err) {
+        log('warn', 'skins-get-error', { err: err.message });
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid token' }));
+      }
+    })();
+    return;
+  }
+
+  // ── API: POST /api/skins/equip ─────────────────────────────────────────────
+  if (req.method === 'POST' && urlPath === '/api/skins/equip') {
+    if (!firestoreReady) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Database not ready yet' }));
+    }
+    let body = '';
+    req.on('data', chunk => { if (body.length < 1024) body += chunk; });
+    req.on('end', async () => {
+      try {
+        const SKIN_UNLOCK_SCORES = { classic: 0, neon: 1000, pastel: 5000, retro: 15000, galaxy: 30000, fire: 75000, ice: 150000 };
+        const { skin } = JSON.parse(body);
+        const authHeader = req.headers['authorization'] || '';
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        if (!token) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+        if (!Object.prototype.hasOwnProperty.call(SKIN_UNLOCK_SCORES, skin)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Invalid skin' }));
+        }
+        const decoded = await admin.auth().verifyIdToken(token);
+        const uid = decoded.uid;
+        const scoreDoc = await db.collection('leaderboard').doc(`${uid}_tetris`).get();
+        const bestScore = scoreDoc.exists ? (scoreDoc.data().score || 0) : 0;
+        if (bestScore < SKIN_UNLOCK_SCORES[skin]) {
+          res.writeHead(403, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Skin not unlocked' }));
+        }
+        await db.collection('user_prefs').doc(uid).set({ equippedSkin: skin }, { merge: true });
+        log('info', 'skin-equipped', { uid, skin });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        log('warn', 'skins-equip-error', { err: err.message });
+        res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
     });
@@ -879,9 +1055,17 @@ function endBluffRummy(room) {
   log('info', 'br-gameover', { roomId: room.id, winner: rankings[0]?.name });
 }
 
-httpServer.listen(PORT, () => {
-  console.log(`\n  🎮 Game Arena running at http://localhost:${PORT}\n`);
-  log('info', 'server-start', { port: PORT, node: process.version, pid: process.pid });
+// ── Start ───────────────────────────────────────────────────────
+ensureFirestoreDatabase().then(async dbReady => {
+  if (!dbReady) {
+    log('warn', 'firestore-unavailable', { msg: 'Leaderboard/skins will not work until Firestore is ready' });
+  } else {
+    await ensureFirestoreIndexes();
+  }
+  httpServer.listen(PORT, () => {
+    console.log(`\n  🎮 Game Arena running at http://localhost:${PORT}\n`);
+    log('info', 'server-start', { port: PORT, node: process.version, pid: process.pid });
+  });
 });
 
 // ── Periodic stats ───────────────────────────────────────────────
