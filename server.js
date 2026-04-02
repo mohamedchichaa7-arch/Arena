@@ -100,8 +100,8 @@ async function ensureFirestoreIndexes() {
       const r = await fetch(base, { method: 'POST', headers, body: JSON.stringify(index) });
       if (r.ok) {
         log('info', 'firestore-index-creating', { fields: index.fields.map(f => f.fieldPath + ':' + f.order).join(',') });
-      } else if (r.status === 409) {
-        // Already exists — fine
+      } else if (r.status === 409 || r.status === 403) {
+        // 409 = already exists, 403 = service account lacks index-create IAM role (indexes exist or must be created manually) — both are fine
       } else {
         const body = await r.text();
         log('warn', 'firestore-index-warn', { status: r.status, body });
