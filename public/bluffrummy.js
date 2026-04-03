@@ -120,7 +120,7 @@
       hand = msg.hand || [];
       gameActive = msg.active;
       myTurn = msg.currentTurn === myId;
-      canChallenge = msg.canChallenge && msg.currentTurn === myId;
+      canChallenge = msg.canChallenge;
       currentMeldNum = msg.meldNum;
       currentTurnId = msg.currentTurn || null;
       rankings = msg.rankings || [];
@@ -165,7 +165,7 @@
 
     'br-turn'(msg) {
       myTurn = msg.currentTurn === myId;
-      canChallenge = msg.canChallenge && myTurn;
+      canChallenge = msg.canChallenge;
       currentMeldNum = msg.meldNum;
       currentTurnId = msg.currentTurn;
       const turnPlayer = players.get(msg.currentTurn);
@@ -248,6 +248,44 @@
     'chat'(msg) {
       appendChat(msg.name, msg.text, 'other');
     },
+
+    // ── Disconnect / vote ────────────────────────────────────
+    'br-player-disconnect'(msg) {
+      addLog(`⚡ <span class="feed-name">${escapeHtml(msg.name)}</span> disconnected — waiting ${msg.voteTimeoutMs/1000}s`, 'challenge');
+      const ov = $('disconnectVoteOverlay');
+      if (!ov) return;
+      $('dvTitle').textContent = `⚡ ${msg.name} disconnected`;
+      $('dvSubtitle').textContent = 'Vote: redistribute their cards or wait for reconnect?';
+      $('dvVoteCounts').innerHTML = '<span class="dv-vote">♻ <strong id="dvRedistCount">0</strong></span><span class="dv-vote">⏳ <strong id="dvWaitCount">0</strong></span>';
+      const fill = $('dvTimerFill');
+      fill.style.transition = 'none'; fill.style.width = '100%';
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        fill.style.transition = `width ${msg.voteTimeoutMs}ms linear`; fill.style.width = '0%';
+      }));
+      ov.classList.add('show');
+    },
+
+    'br-vote-update'(msg) {
+      const rc = $('dvRedistCount'), wc = $('dvWaitCount');
+      if (rc) rc.textContent = msg.redistribute;
+      if (wc) wc.textContent = msg.wait;
+    },
+
+    'br-vote-result'(msg) {
+      const ov = $('disconnectVoteOverlay');
+      if (ov) ov.classList.remove('show');
+      if (msg.choice === 'redistribute') {
+        addLog('♻️ Cards redistributed — game continues!', 'meld');
+      } else {
+        addLog(`⏳ Waiting ${msg.waitMs/1000}s for reconnect…`, 'info');
+      }
+    },
+
+    'br-reconnected'(msg) {
+      const ov = $('disconnectVoteOverlay');
+      if (ov) ov.classList.remove('show');
+      addLog(`✅ <span class="feed-name">${escapeHtml(msg.name)}</span> reconnected!`, 'honest');
+    },
   };
 
   // ── UI Rendering ──────────────────────────────────────────────
@@ -269,7 +307,8 @@
       div.innerHTML = `
         <span class="pc-dot" style="background:${colors[ci]}"></span>
         <span class="pc-name">${escapeHtml(p.name)}${pid === myId ? ' (You)' : ''}</span>
-        <span class="pc-cards">${badge}</span>`;
+        <span class="pc-cards">${badge}</span>
+        ${pid === currentTurnId && gameActive && !p.eliminated ? '<span class="pc-turn-arrow">▶</span>' : ''}`;
       playerList.appendChild(div);
     }
     playerCount.textContent = count;
@@ -315,9 +354,11 @@
   function renderPile(size, num) {
     pileCards.innerHTML = '';
     if (num) {
-      pileLabel.textContent = `🏦 Meld: “${cardLabel(num)}s”`;
+      const suits = [['\u2660','black'],['\u2665','red'],['\u2666','red'],['\u2663','black']];
+      const suitSpans = suits.map(([s,c]) => `<span class="pile-suit-tag ${c}">${cardLabel(num)}${s}</span>`).join('');
+      pileLabel.innerHTML = `🏖 MELD: ${suitSpans} <span class="pile-count-inline">×${size}</span>`;
     } else {
-      pileLabel.textContent = 'No meld yet';
+      pileLabel.innerHTML = '<span class="pile-no-meld">No active meld</span>';
     }
     // Show up to 5 stacked face-down cards + a count badge
     const show = Math.min(size, 5);
@@ -343,6 +384,7 @@
     playArea.style.display = '';
     btnPlay.disabled = !myTurn;
     btnChallenge.style.display = canChallenge ? '' : 'none';
+    btnChallenge.disabled = !canChallenge;
 
     // Rebuild announce-number select, excluding already-discarded numbers
     const discardedNums = new Set(discardHistory.map(d => d.num));
@@ -378,8 +420,9 @@
     text.innerHTML = html;
     div.appendChild(icon);
     div.appendChild(text);
-    actionLog.insertBefore(div, actionLog.firstChild);
-    while (actionLog.children.length > 40) actionLog.removeChild(actionLog.lastChild);
+    actionLog.appendChild(div);
+    actionLog.scrollTop = actionLog.scrollHeight;
+    while (actionLog.children.length > 60) actionLog.removeChild(actionLog.firstChild);
   }
 
   // ── Reveal banner (auto-dismisses after ~4.5 s) ────────────────
@@ -606,6 +649,15 @@
     wsSend({ type: 'br-start' });
   });
 
+  $('btnVoteRedist')?.addEventListener('click', () => {
+    wsSend({ type: 'br-vote', choice: 'redistribute' });
+    $('disconnectVoteOverlay')?.classList.remove('show');
+  });
+  $('btnVoteWait')?.addEventListener('click', () => {
+    wsSend({ type: 'br-vote', choice: 'wait' });
+    $('disconnectVoteOverlay')?.classList.remove('show');
+  });
+
   // ── Actions ───────────────────────────────────────────────────
   btnStart.addEventListener('click', () => {
     wsSend({ type: 'br-start' });
@@ -621,7 +673,7 @@
   });
 
   btnChallenge.addEventListener('click', () => {
-    if (!myTurn || !canChallenge) return;
+    if (!canChallenge) return;
     wsSend({ type: 'br-challenge' });
   });
 

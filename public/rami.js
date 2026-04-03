@@ -62,6 +62,7 @@
   let selectedIndices = new Set();
   let selectedMeldId  = -1;
   let gameActive = false;
+  let lastSortedRound = 0;
 
   // ── Helpers ───────────────────────────────────────────────────
   function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -158,6 +159,23 @@
     'rami-state'(msg) {
       myId         = myId || msg.myId;
       hand         = msg.hand || [];
+      if (!msg.drawnThisTurn) {
+        // Auto-sort at round start: by suit then rank, jokers last
+        const suitOrder = {'\u2660':0,'\u2665':1,'\u2666':2,'\u2663':3};
+        hand.sort((a, b) => {
+          if (a.isJoker && b.isJoker) return 0;
+          if (a.isJoker) return 1;
+          if (b.isJoker) return -1;
+          const sd = (suitOrder[a.suit]||0) - (suitOrder[b.suit]||0);
+          return sd !== 0 ? sd : a.num - b.num;
+        });
+      }
+      if (pileDragLive) {
+        pileDrewReceived = true; // hand now contains the drawn card
+      } else if (pilePendingDropIdx >= 0 && hand.length > 0) {
+        applyPileDrop(pilePendingDropIdx); // user dropped before this state arrived
+        pilePendingDropIdx = -1; pileDrewReceived = false;
+      }
       melds        = msg.melds || [];
       players      = msg.players || [];
       currentTurnId= msg.turnId;
@@ -199,9 +217,31 @@
     },
 
     'rami-drew'(msg) {
-      if (msg.card && !hand.some(c => c === msg.card)) hand.push(msg.card);
+      if (msg.card) hand.push(msg.card);
       hasDrawn = true;
-      renderHand();
+      if (pileDragLive) {
+        pileDrewReceived = true;
+        // Upgrade draw-pile ghost from card-back to real card face
+        if (pileDragSource === 'draw' && pileDragGhost && msg.card) {
+          const cc = colorClass(msg.card);
+          pileDragGhost.className = 'game-card drag-ghost ' + cc;
+          if (msg.card.isJoker) {
+            pileDragGhost.innerHTML = jokerImg(msg.card);
+          } else {
+            pileDragGhost.innerHTML = '<span class="card-corner">'+rankLabel(msg.card.num)+'<br>'+msg.card.suit+'</span>'+
+              '<span class="card-num">'+rankLabel(msg.card.num)+'</span>'+
+              '<span class="card-suit">'+msg.card.suit+'</span>';
+          }
+        }
+        // Don't renderHand — user is still dragging
+      } else if (pilePendingDropIdx >= 0) {
+        // User released before server responded — apply now, keep pending for rami-state re-apply
+        applyPileDrop(pilePendingDropIdx);
+        pileDrewReceived = false;
+        renderHand();
+      } else {
+        renderHand();
+      }
       updateButtons();
       if (myTurn) setStatus('Meld, add to melds, swap, or discard to end your turn.');
     },
@@ -250,8 +290,25 @@
   };
 
   // ── Rendering ─────────────────────────────────────────────────
+  // Keep client hand order in sync with server without clobbering user's sort/reorder
+  function syncHand(serverHand) {
+    if (serverHand.length === 0) { hand = []; return; }
+    const serverSet = new Set(serverHand.map(c => c.cid));
+    const serverMap = new Map(serverHand.map(c => [c.cid, c]));
+    hand = hand.filter(c => serverSet.has(c.cid));           // remove melded/discarded
+    for (const c of serverHand) {                            // append newly arrived cards
+      if (!hand.some(h => h.cid === c.cid)) hand.push(c);
+    }
+    hand = hand.map(c => serverMap.get(c.cid) || c);         // refresh props (e.g. joker tags)
+  }
+
+  function jokerImg(card) {
+    const f = card.jokerColor === 'red' ? 'red_joker.svg' : 'black_joker.svg';
+    return `<img src="/assets/cards/${f}" alt="Joker" class="card-img">`;
+  }
+
   function renderAll(animate) {
-    renderHand(animate);
+    if (!pileDragLive) renderHand(animate);
     renderTable();
     renderDiscard();
     renderDraw();
@@ -273,7 +330,8 @@
       el.dataset.idx = String(i);
 
       if (card.isJoker) {
-        el.innerHTML = `<span class="card-num">🃏</span><span class="card-suit">Joker</span>`;
+        el.innerHTML = jokerImg(card);
+        el.classList.add('joker');
       } else {
         el.innerHTML = `<span class="card-corner">${rankLabel(card.num)}<br>${card.suit}</span>`+
           `<span class="card-num">${rankLabel(card.num)}</span><span class="card-suit">${card.suit}</span>`;
@@ -309,9 +367,12 @@
       for (const card of meld.cards) {
         const el = document.createElement('div');
         el.className = 'table-card '+colorClass(card);
-        el.innerHTML = card.isJoker
-          ? `<span class="tc-num">🃏</span>`
-          : `<span class="tc-num">${rankLabel(card.num)}</span><span class="tc-suit">${card.suit}</span>`;
+        if (card.isJoker) {
+          el.innerHTML = jokerImg(card);
+          el.classList.add('joker');
+        } else {
+          el.innerHTML = `<span class="tc-num">${rankLabel(card.num)}</span><span class="tc-suit">${card.suit}</span>`;
+        }
         group.appendChild(el);
       }
       group.addEventListener('click', () => {
@@ -330,10 +391,12 @@
       return;
     }
     const cc = colorClass(discardTopCard);
-    discardTop.className = 'discard-top has-card '+cc;
-    discardTop.innerHTML = discardTopCard.isJoker
-      ? `<span class="dt-num">🃏</span>`
-      : `<span class="dt-num">${rankLabel(discardTopCard.num)}</span><span class="dt-suit">${discardTopCard.suit}</span>`;
+    discardTop.className = 'discard-top has-card ' + cc;
+    if (discardTopCard.isJoker) {
+      discardTop.innerHTML = jokerImg(discardTopCard);
+    } else {
+      discardTop.innerHTML = `<span class="dt-num">${rankLabel(discardTopCard.num)}</span><span class="dt-suit">${discardTopCard.suit}</span>`;
+    }
   }
 
   function renderDraw() { drawCount.textContent = deckCount; }
@@ -474,22 +537,48 @@
     ghostEl.style.left = (e.clientX - ptrOffX) + 'px';
     ghostEl.style.top  = (e.clientY - ptrOffY - 8) + 'px';
 
-    // Find insert position
-    const cards = [...handCards.querySelectorAll('.game-card:not(.dragging)')];
-    let newDrop = hand.length - 1;
-    for (const c of cards) {
-      const r = c.getBoundingClientRect();
-      if (e.clientX < r.left + r.width * 0.5) {
-        newDrop = parseInt(c.dataset.idx);
-        break;
+    // Check if hovering over discard pile (to discard the card)
+    if (myTurn && hasDrawn && gameActive) {
+      const dr = discardPileEl.getBoundingClientRect();
+      const overDiscard = e.clientX >= dr.left && e.clientX <= dr.right &&
+                          e.clientY >= dr.top  && e.clientY <= dr.bottom;
+      discardPileEl.classList.toggle('drop-target', overDiscard);
+      if (overDiscard) {
+        handCards.querySelectorAll('.game-card:not(.dragging)').forEach(c => {
+          c.style.transform = ''; c.style.transition = '';
+        });
+        dropIdx = -2; // sentinel: discard pile
+        return;
       }
     }
+    discardPileEl.classList.remove('drop-target');
+    const cards = [...handCards.querySelectorAll('.game-card:not(.dragging)')];
+    let newDrop = hand.length;
+    let nearCard = null;
+
+    if (cards.length > 0) {
+      let minDist = Infinity;
+      for (const c of cards) {
+        const r = c.getBoundingClientRect();
+        const dist = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+        if (dist < minDist) { minDist = dist; nearCard = c; }
+      }
+      const nr = nearCard.getBoundingClientRect();
+      const ni = parseInt(nearCard.dataset.idx);
+      newDrop = e.clientX < nr.left + nr.width * 0.5 ? ni : ni + 1;
+      newDrop = Math.max(0, Math.min(newDrop, hand.length));
+    }
+
     if (newDrop !== dropIdx) {
       dropIdx = newDrop;
+      // Only shift cards on the same visual row as the nearest card
+      const baseY = nearCard ? nearCard.getBoundingClientRect().top : -999;
       cards.forEach(c => {
         const ci = parseInt(c.dataset.idx);
+        const cr = c.getBoundingClientRect();
+        const sameRow = Math.abs(cr.top - baseY) < 10;
         c.style.transition = 'transform 0.15s ease';
-        c.style.transform  = ci >= newDrop ? 'translateX(68px)' : '';
+        c.style.transform  = (sameRow && ci >= newDrop) ? 'translateX(68px)' : '';
       });
     }
   }
@@ -506,17 +595,134 @@
     });
 
     if (ghostEl) { ghostEl.remove(); ghostEl = null; }
+    discardPileEl.classList.remove('drop-target');
 
-    if (dragLive && dragIdx !== -1 && dropIdx !== -1 && dragIdx !== dropIdx) {
-      const card = hand.splice(dragIdx, 1)[0];
-      const target = Math.min(dropIdx, hand.length);
-      hand.splice(target, 0, card);
-      selectedIndices.clear();
-      renderHand();
-      updateButtons();
+    if (dragLive && dragIdx !== -1) {
+      if (dropIdx === -2 && myTurn && hasDrawn && gameActive) {
+        // Dropped on discard pile
+        wsSend({type:'rami-discard', cardIdx: dragIdx});
+        selectedIndices.clear();
+      } else if (dropIdx !== -1 && dropIdx !== -2) {
+        // Reorder within hand
+        const effectiveTarget = dropIdx > dragIdx ? dropIdx - 1 : dropIdx;
+        if (effectiveTarget !== dragIdx) {
+          const card = hand.splice(dragIdx, 1)[0];
+          hand.splice(Math.min(effectiveTarget, hand.length), 0, card);
+          selectedIndices.clear();
+          renderHand();
+          updateButtons();
+        }
+      }
     }
 
     dragIdx = -1; dropIdx = -1; dragLive = false;
+  }
+
+  // ── Pile drag (draw/discard pile → hand) ──────────────────────
+  let pileDragSource     = null;  // 'draw' | 'discard'
+  let pileDragGhost      = null;
+  let pileDragLive       = false;
+  let pileDrewReceived   = false;
+  let pileStartX = 0, pileStartY = 0;
+  let pileDropIdx        = 0;
+  let pilePendingDropIdx = -1;
+
+  function applyPileDrop(targetIdx) {
+    if (hand.length === 0) return;
+    const last = hand.length - 1;
+    const to   = Math.max(0, Math.min(targetIdx, last));
+    if (last !== to) { const c = hand.splice(last, 1)[0]; hand.splice(to, 0, c); }
+  }
+
+  function onPilePointerDown(e, source) {
+    if (e.button && e.button !== 0) return;
+    if (!myTurn || hasDrawn || !gameActive) return;
+    if (source === 'discard' && !discardTopCard) return;
+    pileDragSource = source; pileDragGhost = null; pileDragLive = false;
+    pileDrewReceived = false; pileDropIdx = hand.length;
+    pileStartX = e.clientX; pileStartY = e.clientY;
+    document.addEventListener('pointermove', onPilePtrMove, {passive:false});
+    document.addEventListener('pointerup',   onPilePtrUp);
+    document.addEventListener('pointercancel', onPilePtrUp);
+  }
+
+  function onPilePtrMove(e) {
+    e.preventDefault();
+    if (!pileDragLive) {
+      if (Math.hypot(e.clientX - pileStartX, e.clientY - pileStartY) < 8) return;
+      pileDragLive = true;
+      wsSend(pileDragSource === 'draw' ? {type:'rami-draw'} : {type:'rami-pick-discard'});
+      hasDrawn = true; updateButtons();
+      (pileDragSource === 'discard' ? discardPileEl : drawPileEl).style.opacity = '0.35';
+      // Build ghost card
+      const ref = handCards.querySelector('.game-card');
+      const rw  = ref ? ref.getBoundingClientRect().width  : 58;
+      const rh  = ref ? ref.getBoundingClientRect().height : 84;
+      pileDragGhost = document.createElement('div');
+      if (pileDragSource === 'discard' && discardTopCard && discardTopCard.isJoker) {
+        pileDragGhost.className = 'game-card drag-ghost joker';
+        pileDragGhost.innerHTML = jokerImg(discardTopCard);
+      } else if (pileDragSource === 'discard' && discardTopCard) {
+        pileDragGhost.className = 'game-card drag-ghost ' + colorClass(discardTopCard);
+        pileDragGhost.innerHTML = '<span class="card-corner">'+rankLabel(discardTopCard.num)+'<br>'+discardTopCard.suit+'</span>'+
+          '<span class="card-num">'+rankLabel(discardTopCard.num)+'</span>'+
+          '<span class="card-suit">'+discardTopCard.suit+'</span>';
+      } else {
+        // Draw pile: show card back until rami-drew arrives with the real card
+        pileDragGhost.className = 'game-card drag-ghost black';
+        pileDragGhost.style.background = 'linear-gradient(145deg,#1a1a2e,#0d0d22)';
+        pileDragGhost.style.borderColor = 'rgba(139,92,246,.5)';
+      }
+      pileDragGhost.style.width  = rw + 'px';
+      pileDragGhost.style.height = rh + 'px';
+      document.body.appendChild(pileDragGhost);
+    }
+    if (!pileDragGhost) return;
+    const gw = pileDragGhost.offsetWidth || 58, gh = pileDragGhost.offsetHeight || 84;
+    pileDragGhost.style.left = (e.clientX - gw / 2) + 'px';
+    pileDragGhost.style.top  = (e.clientY - gh / 2 - 8) + 'px';
+    // Find nearest hand card and compute drop index
+    const hcards = [...handCards.querySelectorAll('.game-card')];
+    let nearCard = null;
+    if (hcards.length > 0) {
+      let minD = Infinity;
+      for (const c of hcards) {
+        const rr = c.getBoundingClientRect();
+        const d  = Math.hypot(e.clientX - (rr.left + rr.width/2), e.clientY - (rr.top + rr.height/2));
+        if (d < minD) { minD = d; nearCard = c; }
+      }
+      const nr = nearCard.getBoundingClientRect(), ni = parseInt(nearCard.dataset.idx);
+      pileDropIdx = Math.max(0, Math.min(ni + (e.clientX < nr.left + nr.width*0.5 ? 0 : 1), hand.length));
+    } else {
+      pileDropIdx = 0;
+    }
+    const baseY = nearCard ? nearCard.getBoundingClientRect().top : -999;
+    hcards.forEach(c => {
+      const ci = parseInt(c.dataset.idx), cr = c.getBoundingClientRect();
+      c.style.transition = 'transform 0.15s ease';
+      c.style.transform  = (Math.abs(cr.top - baseY) < 10 && ci >= pileDropIdx) ? 'translateX(68px)' : '';
+    });
+  }
+
+  function onPilePtrUp() {
+    document.removeEventListener('pointermove', onPilePtrMove);
+    document.removeEventListener('pointerup',   onPilePtrUp);
+    document.removeEventListener('pointercancel', onPilePtrUp);
+    discardPileEl.style.opacity = ''; drawPileEl.style.opacity = '';
+    handCards.querySelectorAll('.game-card').forEach(c => { c.style.transform = ''; c.style.transition = ''; });
+    if (pileDragGhost) { pileDragGhost.remove(); pileDragGhost = null; }
+    if (!pileDragLive) { pileDragSource = null; return; } // was a tap, not a drag
+    pileDragLive = false;
+    if (pileDrewReceived) {
+      // Card already in hand — reorder and render now
+      applyPileDrop(pileDropIdx);
+      renderHand();
+      pileDrewReceived = false;
+    } else {
+      // Still waiting for server — defer to rami-drew / rami-state
+      pilePendingDropIdx = pileDropIdx;
+    }
+    pileDragSource = null;
   }
 
   // ── Action buttons ────────────────────────────────────────────
@@ -538,29 +744,32 @@
     if (indices.length < 3) return;
     const result = validateMeldClient(indices.map(i => hand[i]));
     if (!result.valid) { showErrorToast(result.reason); return; }
-    wsSend({type:'rami-meld', indices});
+    const cids = indices.map(i => hand[i].cid);
+    wsSend({type:'rami-meld', cids});
     selectedIndices.clear();
   });
 
   btnAddToMeld.addEventListener('click', () => {
     if (!myTurn || !hasDrawn || !gameActive || !myHasOpened || selectedMeldId < 0) return;
     if (selectedIndices.size !== 1) return;
-    wsSend({type:'rami-add-to-meld', cardIdx:[...selectedIndices][0], meldId:selectedMeldId});
+    const cardCid = hand[[...selectedIndices][0]].cid;
+    wsSend({type:'rami-add-to-meld', cardCid, meldId:selectedMeldId});
     selectedIndices.clear();
   });
 
   btnSwapJoker.addEventListener('click', () => {
     if (!myTurn || !hasDrawn || !gameActive || !myHasOpened || selectedMeldId < 0) return;
     if (selectedIndices.size !== 1) return;
-    wsSend({type:'rami-swap-joker', cardIdx:[...selectedIndices][0], meldId:selectedMeldId});
+    const cardCid = hand[[...selectedIndices][0]].cid;
+    wsSend({type:'rami-swap-joker', cardCid, meldId:selectedMeldId});
     selectedIndices.clear();
   });
 
   btnDiscard.addEventListener('click', () => {
     if (!myTurn || !hasDrawn || !gameActive) return;
     if (selectedIndices.size !== 1) return;
-    const cardIdx = [...selectedIndices][0];
-    wsSend({type:'rami-discard', cardIdx});
+    const cardCid = hand[[...selectedIndices][0]].cid;
+    wsSend({type:'rami-discard', cardCid});
     selectedIndices.clear();
   });
 
@@ -569,12 +778,14 @@
     wsSend({type:'rami-draw'});
     hasDrawn = true; updateButtons();
   });
+  drawPileEl.addEventListener('pointerdown', e => onPilePointerDown(e, 'draw'));
 
   discardPileEl.addEventListener('click', () => {
     if (!myTurn || hasDrawn || !gameActive || !discardTopCard) return;
     wsSend({type:'rami-pick-discard'});
     hasDrawn = true; updateButtons();
   });
+  discardPileEl.addEventListener('pointerdown', e => onPilePointerDown(e, 'discard'));
 
   btnStartGame.addEventListener('click', () => {
     const aiCount      = parseInt($('aiCountSel')?.value ?? 3);

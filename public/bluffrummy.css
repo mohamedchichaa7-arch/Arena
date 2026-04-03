@@ -108,6 +108,18 @@ body {
   box-shadow: 0 0 12px rgba(251, 191, 36, .25)
 }
 
+/* Animated turn indicator arrow inside active player card */
+.pc-turn-arrow {
+  color: var(--gold);
+  font-size: .7rem;
+  flex-shrink: 0;
+  animation: turn-arrow-pulse .8s ease-in-out infinite;
+}
+@keyframes turn-arrow-pulse {
+  0%, 100% { opacity: .5; transform: translateX(0); }
+  50%       { opacity: 1; transform: translateX(3px); }
+}
+
 .player-card.eliminated {
   opacity: .4
 }
@@ -385,8 +397,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: .22rem;
-  padding: .3rem
+  padding: .3rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(139,92,246,.4) transparent
 }
+.game-feed::-webkit-scrollbar { width: 4px }
+.game-feed::-webkit-scrollbar-track { background: transparent }
+.game-feed::-webkit-scrollbar-thumb { background: rgba(139,92,246,.4); border-radius: 2px }
+.game-feed::-webkit-scrollbar-thumb:hover { background: rgba(139,92,246,.7) }
 
 .feed-entry {
   display: flex;
@@ -1305,3 +1323,31 @@ body {
     gap: .2rem
   }
 }
+/*  Pile label suit tags  */
+.pile-suit-tag { font-family:'Orbitron',sans-serif; font-size:.62rem; font-weight:700; padding:.05rem .2rem; border-radius:.2rem; }
+.pile-suit-tag.red   { color:#dc2626 }
+.pile-suit-tag.black { color:#1a1a2e; background:rgba(255,255,255,.9) }
+.pile-count-inline   { font-family:'Orbitron',sans-serif; font-size:.62rem; color:var(--accent); margin-left:.3rem }
+.pile-no-meld        { color:var(--dim); font-size:.7rem }
+
+/*  Overlay card (used by game-over + vote)  */
+.overlay-card {
+  background: linear-gradient(160deg,#0d200d 0%,#13132e 50%,#0d0d22 100%);
+  border: 2px solid rgba(139,92,246,.55);
+  border-radius: 1rem;
+  padding: 1.5rem 2rem;
+  min-width: 320px; max-width: 460px;
+  text-align: center;
+  box-shadow: 0 28px 70px rgba(0,0,0,.85), 0 0 50px rgba(139,92,246,.2)
+}
+
+/*  Disconnect vote overlay  */
+.dv-card { user-select: none }
+.dv-subtitle { font-size: .78rem; color: var(--dim); margin: -.3rem 0 1rem }
+.dv-vote-counts { display: flex; gap: 2rem; justify-content: center; margin-bottom: 1rem; font-size: .8rem }
+.dv-vote { display: flex; flex-direction: column; align-items: center; gap: .25rem }
+.dv-vote strong { font-family:'Orbitron',sans-serif; font-size: 1.6rem; font-weight: 900; color: var(--gold) }
+.dv-buttons { display: flex; gap: .8rem; justify-content: center; flex-wrap: wrap; margin-bottom: .8rem }
+.dv-btn { padding: .4rem 1rem; font-size: .7rem }
+.dv-timer-bar { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden }
+.dv-timer-fill { height: 100%; background: linear-gradient(90deg,var(--gold),var(--red)); border-radius: 2px; width: 100% }

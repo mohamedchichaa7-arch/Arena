@@ -130,6 +130,20 @@
     <div class="go-rankings" id="goRankings"></div>
     <button class="btn btn-primary btn-lg" id="btnPlayAgain">Play Again</button>
   </div>
+
+  <!-- Disconnect vote overlay -->
+  <div class="overlay" id="disconnectVoteOverlay">
+    <div class="overlay-card dv-card">
+      <h2 class="go-title" id="dvTitle">⚡ Player Disconnected</h2>
+      <p class="dv-subtitle" id="dvSubtitle">Vote: redistribute their cards or wait for reconnect?</p>
+      <div class="dv-vote-counts" id="dvVoteCounts"></div>
+      <div class="dv-buttons">
+        <button class="btn btn-challenge dv-btn" id="btnVoteRedist">♻ Redistribute Cards</button>
+        <button class="btn dv-btn" id="btnVoteWait">⏳ Wait for Reconnect</button>
+      </div>
+      <div class="dv-timer-bar"><div class="dv-timer-fill" id="dvTimerFill"></div></div>
+    </div>
+  </div>
   <canvas id="confetti"></canvas>
   <div class="panel-backdrop" id="panelBackdrop"></div>
   <script>
