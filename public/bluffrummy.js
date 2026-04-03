@@ -383,7 +383,7 @@
   // ── Pile rendering ────────────────────────────────────────
   function renderPile(size, num) {
     pileCards.innerHTML = '';
-    pileLabel.textContent = num ? `MELD: "${cardLabel(num)}s"` : 'No meld yet';
+    pileLabel.textContent = num ? `MELD: "${cardLabel(num)}"` : 'No meld yet';
 
     const show = Math.min(size, 5);
     for (let i = 0; i < show; i++) {
@@ -425,16 +425,26 @@
     text.innerHTML = html;
     div.appendChild(icon);
     div.appendChild(text);
-    actionLog.insertBefore(div, actionLog.firstChild);
-    while (actionLog.children.length > 40) actionLog.removeChild(actionLog.lastChild);
+    actionLog.appendChild(div);
+    actionLog.scrollTop = actionLog.scrollHeight;
+    while (actionLog.children.length > 40) actionLog.removeChild(actionLog.firstChild);
   }
 
   // ── Play modal ────────────────────────────────────────────
   function openPlayModal() {
     if (selectedIndices.size === 0 || selectedIndices.size > 3) return;
 
+    // If meld is active, skip modal — play immediately with the locked number
+    if (currentMeldNum) {
+      const cards = [...selectedIndices].sort((a, b) => a - b).map(i => ({ num: hand[i].num, suit: hand[i].suit }));
+      showLastPlayed(cards, currentMeldNum);
+      wsSend({ type: 'br-play', cards, announceNum: currentMeldNum });
+      selectedIndices.clear();
+      return;
+    }
+
     const selectedCards = [...selectedIndices].sort((a, b) => a - b).map(i => hand[i]);
-    modalAnnounceNum = currentMeldNum || null;
+    modalAnnounceNum = null;
 
     // Render selected cards in modal
     modalCards.innerHTML = '';
@@ -800,7 +810,7 @@
     canvas.width = innerWidth;
     canvas.height = innerHeight;
     const particles = [];
-    const colors = ['#c9a84c', '#e8c75a', '#8b5cf6', '#06b6d4', '#22c55e', '#ef4444', '#f472b6'];
+    const colors = ['#8b5cf6', '#a78bfa', '#c4b5fd', '#06b6d4', '#22c55e', '#ef4444', '#f472b6'];
     for (let i = 0; i < 150; i++) {
       particles.push({
         x: Math.random() * canvas.width,
