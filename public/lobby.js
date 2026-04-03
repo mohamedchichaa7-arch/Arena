@@ -38,6 +38,8 @@
   const lbClose       = $('lbClose');
   const lbList        = $('lbList');
   const lbSubtitle    = $('lbSubtitle');
+  const onlineList    = $('onlineList');
+  const onlineCount   = $('onlineCount');
 
   let ws = null, myName = '', myToken = null;
   let pendingRoom = null;
@@ -140,14 +142,21 @@
     ws = new WebSocket(`${proto}://${location.host}`);
     ws.onopen = () => ws.send(JSON.stringify({ type: 'lobby', name: myName }));
     ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch {} };
-    ws.onclose = () => {};
+    ws.onclose = () => { setTimeout(() => { if (lobbyScreen.style.display !== 'none') connect(); }, 3000); };
+    // Auto-refresh room list and online users every 20 s
+    setInterval(() => {
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'lobby', name: myName }));
+    }, 20000);
   }
 
   function wsSend(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
 
   function handleMsg(msg) {
     switch (msg.type) {
-      case 'room-list': renderRooms(msg.rooms); break;
+      case 'room-list':
+        renderRooms(msg.rooms);
+        if (msg.onlineUsers) renderOnlineUsers(msg.onlineUsers);
+        break;
       case 'room-created':
         sessionStorage.setItem('arena-name', myName);
         if (pendingCreatePassword) {
@@ -184,7 +193,18 @@
   pwCancel.addEventListener('click', closePwModal);
   pwModal.addEventListener('click', e => { if (e.target === pwModal) closePwModal(); });
 
-  //  Room list 
+  function renderOnlineUsers(users) {
+    onlineCount.textContent = users.length;
+    onlineList.innerHTML = '';
+    for (const name of users) {
+      const el = document.createElement('div');
+      el.className = 'online-user' + (name === myName ? ' is-me' : '');
+      el.innerHTML = `<span class="ou-dot"></span>${escapeHtml(name)}${name === myName ? ' <em style="opacity:.5;font-style:normal">(you)</em>' : ''}`;
+      onlineList.appendChild(el);
+    }
+  }
+
+  //  Room list
   function renderRooms(rooms) {
     roomGrid.querySelectorAll('.room-card').forEach(el => el.remove());
     emptyState.style.display = rooms.length === 0 ? '' : 'none';

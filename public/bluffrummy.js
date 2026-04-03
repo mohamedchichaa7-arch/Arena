@@ -134,6 +134,7 @@
       renderPlayers();
       renderHand();
       renderPile(msg.meldSize || 0, msg.meldNum);
+      if (msg.discards) { discardHistory = msg.discards; updateDiscardDeck(); }
       updateControls();
 
       if (!gameActive && rankings.length === 0) {
@@ -147,7 +148,7 @@
       hand = msg.hand;
       gameActive = true;
       btnStart.style.display = 'none';
-      discardHistory = [];
+      discardHistory = msg.discards || [];
       updateDiscardDeck();
       renderHand(true);
       addLog('Cards dealt! Game started.', 'info');
@@ -341,11 +342,26 @@
     playArea.style.display = '';
     btnPlay.disabled = !myTurn;
     btnChallenge.style.display = canChallenge ? '' : 'none';
+
+    // Rebuild announce-number select, excluding already-discarded numbers
+    const discardedNums = new Set(discardHistory.map(d => d.num));
+    const prevVal = announceNum.value;
+    announceNum.innerHTML = '';
+    for (let n = 1; n <= 13; n++) {
+      if (discardedNums.has(n)) continue;
+      const opt = document.createElement('option');
+      opt.value = String(n);
+      const labels = { 1:'A — Ace', 11:'J — Jack', 12:'Q — Queen', 13:'K — King' };
+      opt.textContent = labels[n] || String(n);
+      announceNum.appendChild(opt);
+    }
+
     if (currentMeldNum) {
       announceNum.value = String(currentMeldNum);
       announceNum.disabled = true;
     } else {
-      announceNum.disabled = false;
+      if (announceNum.querySelector(`option[value="${prevVal}"]`)) announceNum.value = prevVal;
+      announceNum.disabled = !myTurn;
     }
   }
 

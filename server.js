@@ -371,7 +371,9 @@ function send(ws, msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); 
 
 function broadcastLobby() {
   const list = serializeRooms();
-  const raw = JSON.stringify({ type: 'room-list', rooms: list });
+  const onlineUsers = [];
+  for (const [, c] of conns) { if (c.name) onlineUsers.push(c.name); }
+  const raw = JSON.stringify({ type: 'room-list', rooms: list, onlineUsers });
   for (const [, c] of conns) {
     if (c.mode === 'lobby' && c.ws.readyState === 1) c.ws.send(raw);
   }
@@ -505,7 +507,9 @@ wss.on('connection', (ws, req) => {
       case 'lobby': {
         conn.name = String(msg.name || 'Player').slice(0, 20);
         conn.mode = 'lobby';
-        send(ws, { type: 'room-list', rooms: serializeRooms() });
+        const onlineUsersNow = [];
+        for (const [, c] of conns) { if (c.name) onlineUsersNow.push(c.name); }
+        send(ws, { type: 'room-list', rooms: serializeRooms(), onlineUsers: onlineUsersNow });
         log('info', 'lobby-join', { id, name: conn.name, ip: conn.ip });
         break;
       }
@@ -890,6 +894,8 @@ function autoDiscardFours(room, pid, br) {
         for (let i = hand.length - 1; i >= 0 && removed < 4; i--) {
           if (hand[i].num === num) { hand.splice(i, 1); removed++; }
         }
+        if (!br.discards) br.discards = [];
+        br.discards.push({ playerName: room.players.get(pid)?.name || 'Player', num });
         broadcastRoom(room.id, { type: 'br-auto-discard', playerId: pid, num });
         log('info', 'br-auto-discard', { roomId: room.id, playerId: pid, num });
         changed = true;
@@ -949,15 +955,25 @@ function startBluffRummy(room) {
     lastPlayerCards: null,
     lastAnnouncedNum: null,
     finishOrder,
+    discards: [],
     active: true,
   };
   room.status = 'playing';
   broadcastLobby();
 
-  // Send initial hands
+  // Record initial auto-discards (done before sending hands)
+  for (const pid of playerIds) {
+    const counts = {};
+    for (const c of hands.get(pid)) counts[c.num] = (counts[c.num] || 0) + 1;
+    for (const [numStr, cnt] of Object.entries(counts)) if (cnt >= 4) {
+      room.br.discards.push({ playerName: room.players.get(pid)?.name || 'Player', num: parseInt(numStr) });
+    }
+  }
+
+  // Send initial hands (include discard list so client shows deck immediately)
   for (const [pid, p] of room.players) {
     const hand = hands.get(pid);
-    send(p.ws, { type: 'br-dealt', hand });
+    send(p.ws, { type: 'br-dealt', hand, discards: room.br.discards });
   }
 
   // Send full state to everyone
@@ -992,6 +1008,7 @@ function sendBrFullState(room) {
       meldNum: br.meldNum,
       meldSize: br.meldCards.length,
       players: playersList,
+      discards: br.discards || [],
       rankings: br.active ? [] : br.finishOrder.map((fid, i) => ({
         id: fid, name: room.players.get(fid)?.name || 'Player', rank: i + 1,
       })),
