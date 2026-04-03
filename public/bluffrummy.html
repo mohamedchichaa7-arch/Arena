@@ -92,6 +92,13 @@
         </div>
       </div>
 
+      <!-- Last played indicator (persistent, shown after playing until new meld) -->
+      <div class="last-played-bar" id="lastPlayedBar" style="display:none">
+        <span class="lp-label">You played:</span>
+        <div class="lp-cards" id="lpCards"></div>
+        <span class="lp-as">claimed as <strong id="lpAnnounced"></strong></span>
+      </div>
+
       <!-- Your hand -->
       <div class="hand-area">
         <div class="hand-label">Your Hand (<span id="handCount">0</span>)</div>

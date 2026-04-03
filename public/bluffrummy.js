@@ -150,6 +150,7 @@
       btnStart.style.display = 'none';
       discardHistory = msg.discards || [];
       updateDiscardDeck();
+      clearLastPlayed();
       renderHand(true);
       addLog('Cards dealt! Game started.', 'info');
     },
@@ -180,11 +181,10 @@
     'br-play'(msg) {
       const p = players.get(msg.playerId);
       if (p) p.cardCount = msg.cardCount;
-      addLog(`<span class="log-name">${escapeHtml(p?.name || '?')}</span> played ${msg.count} card(s) as "${cardLabel(msg.announcedNum)}s"`);
+      addLog(`<span class="feed-name">${escapeHtml(p?.name || '?')}</span> played ${msg.count} card${msg.count !== 1 ? 's' : ''} as <strong>“${cardLabel(msg.announcedNum)}s”</strong>`, 'play');
+      if (msg.playerId === myId) animateCardFly(msg.count);
       renderPile(msg.meldSize, msg.meldNum);
       renderPlayers();
-
-      // If it was us, remove played cards from hand
       if (msg.playerId === myId) {
         hand = msg.newHand || hand;
         selectedIndices.clear();
@@ -240,6 +240,7 @@
       pileCards.innerHTML = '';
       pileLabel.textContent = '🔀 New meld — ' + (msg.starterName || 'Someone') + ' starts';
       addLog(`New meld started by <span class="feed-name">${escapeHtml(msg.starterName || '?')}</span>`, 'meld');
+      clearLastPlayed();
       flashPileArea();
     },
 
@@ -405,11 +406,11 @@
     if (wasBluff) {
       revealTitle.className   = 'reveal-banner-title bluff';
       revealTitle.textContent = 'BLUFF CAUGHT!';
-      revealResult.innerHTML  = `<span style="color:var(--green)">${challengerName}</span> was right!<br><span style="color:var(--red)">${targetName}</span> takes ${msg.cards.length} card${msg.cards.length !== 1 ? 's' : ''}!`;
+      revealResult.innerHTML  = `<span style="color:var(--green)">${challengerName}</span> was right!<br><span style="color:var(--red)">${targetName}</span> takes ${msg.totalCards || msg.cards.length} card${(msg.totalCards || msg.cards.length) !== 1 ? 's' : ''}!`;
     } else {
       revealTitle.className   = 'reveal-banner-title honest';
       revealTitle.textContent = 'HONEST PLAY!';
-      revealResult.innerHTML  = `<span style="color:var(--green)">${targetName}</span> was telling the truth!<br><span style="color:var(--red)">${challengerName}</span> takes ${msg.cards.length} card${msg.cards.length !== 1 ? 's' : ''}!`;
+      revealResult.innerHTML  = `<span style="color:var(--green)">${targetName}</span> was telling the truth!<br><span style="color:var(--red)">${challengerName}</span> takes ${msg.totalCards || msg.cards.length} card${(msg.totalCards || msg.cards.length) !== 1 ? 's' : ''}!`;
     }
 
     const banner = $('revealOverlay');
@@ -438,6 +439,27 @@
     el.classList.remove('meld-flash'); void el.offsetWidth;
     el.classList.add('meld-flash');
     setTimeout(() => el.classList.remove('meld-flash'), 600);
+  }
+
+  // ── Last-played display ────────────────────────────────────
+  function showLastPlayed(cards, announcedNum) {
+    const bar    = $('lastPlayedBar');
+    const lpCrds = $('lpCards');
+    const lpAnn  = $('lpAnnounced');
+    if (!bar) return;
+    lpCrds.innerHTML = '';
+    for (const card of cards) {
+      const el = document.createElement('div');
+      el.className = `lp-card ${SUIT_COLORS[card.suit] || 'black'}`;
+      el.innerHTML = `<span class="lp-num">${cardLabel(card.num)}</span><span class="lp-suit">${card.suit}</span>`;
+      lpCrds.appendChild(el);
+    }
+    lpAnn.textContent = `${cardLabel(announcedNum)}s`;
+    bar.style.display = 'flex';
+  }
+  function clearLastPlayed() {
+    const bar = $('lastPlayedBar');
+    if (bar) bar.style.display = 'none';
   }
 
   // ── Discard animation system ─────────────────────────────────
@@ -593,6 +615,7 @@
     if (!myTurn || selectedIndices.size === 0 || selectedIndices.size > 3) return;
     const cards = [...selectedIndices].sort((a, b) => a - b).map(i => ({ num: hand[i].num, suit: hand[i].suit }));
     const num = parseInt(announceNum.value);
+    showLastPlayed(cards, num);
     wsSend({ type: 'br-play', cards, announceNum: num });
     selectedIndices.clear();
   });

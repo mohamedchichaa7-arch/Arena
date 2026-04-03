@@ -801,8 +801,9 @@ wss.on('connection', (ws, req) => {
         const targetConn = conns.get(br.lastPlayerId);
         const targetName = targetConn ? targetConn.name : 'Player';
         broadcastRoom(room.id, { type: 'br-challenge', challengerName, targetName });
-        // Reveal all cards in the meld
-        const allCards = br.meldCards.map(c => ({ num: c.num, suit: c.suit }));
+        // Reveal only the last-played cards (the ones being challenged) — never expose full meld to prevent sniffing
+        const revealCards = br.lastPlayerCards.map(c => ({ num: c.num, suit: c.suit }));
+        const totalMeldCards = br.meldCards.length; // full meld goes to taker
         const wasBluff = br.lastPlayerCards.some(c => c.num !== br.lastAnnouncedNum);
         let takerId;
         if (wasBluff) {
@@ -818,14 +819,15 @@ wss.on('connection', (ws, req) => {
           autoDiscardFours(room, takerId, br);
         }
         broadcastRoom(room.id, {
-          type: 'br-reveal', cards: allCards, announcedNum: br.lastAnnouncedNum,
+          type: 'br-reveal', cards: revealCards, totalCards: totalMeldCards,
+          announcedNum: br.lastAnnouncedNum,
           wasBluff, challengerName, targetName,
           takerName: takerConn ? takerConn.name : 'Player',
           takerId,
         });
         // Send updated hand to the taker (after any auto-discards)
         if (takerHand) send(conns.get(takerId)?.ws, { type: 'br-hand-update', hand: br.hands.get(takerId) });
-        log('info', 'br-challenge', { roomId: room.id, challenger: challengerName, target: targetName, wasBluff, cardsRevealed: allCards.length });
+        log('info', 'br-challenge', { roomId: room.id, challenger: challengerName, target: targetName, wasBluff, cardsRevealed: totalMeldCards });
         // Save before clearing
         const prevLastPlayerId = br.lastPlayerId;
         // Reset meld
@@ -926,7 +928,8 @@ function startBluffRummy(room) {
     hands.get(playerIds[idx % playerIds.length]).push(card);
     idx++;
   }
-  // Auto-discard any set of 4 same-number cards (re-read from map each time to avoid stale reference)
+  // Auto-discard any set of 4 same-number cards
+  const initialDiscards = [];
   for (const pid of playerIds) {
     const counts = {};
     for (const c of hands.get(pid)) counts[c.num] = (counts[c.num] || 0) + 1;
@@ -934,6 +937,7 @@ function startBluffRummy(room) {
       if (cnt === 4) {
         const num = parseInt(numStr);
         hands.set(pid, hands.get(pid).filter(c => c.num !== num));
+        initialDiscards.push({ playerName: room.players.get(pid)?.name || 'Player', num });
         broadcastRoom(room.id, { type: 'br-auto-discard', playerId: pid, num });
         log('info', 'br-auto-discard', { roomId: room.id, playerId: pid, num });
       }
@@ -955,25 +959,15 @@ function startBluffRummy(room) {
     lastPlayerCards: null,
     lastAnnouncedNum: null,
     finishOrder,
-    discards: [],
+    discards: initialDiscards,
     active: true,
   };
   room.status = 'playing';
   broadcastLobby();
 
-  // Record initial auto-discards (done before sending hands)
-  for (const pid of playerIds) {
-    const counts = {};
-    for (const c of hands.get(pid)) counts[c.num] = (counts[c.num] || 0) + 1;
-    for (const [numStr, cnt] of Object.entries(counts)) if (cnt >= 4) {
-      room.br.discards.push({ playerName: room.players.get(pid)?.name || 'Player', num: parseInt(numStr) });
-    }
-  }
-
-  // Send initial hands (include discard list so client shows deck immediately)
+  // Send initial hands
   for (const [pid, p] of room.players) {
-    const hand = hands.get(pid);
-    send(p.ws, { type: 'br-dealt', hand, discards: room.br.discards });
+    send(p.ws, { type: 'br-dealt', hand: hands.get(pid), discards: initialDiscards });
   }
 
   // Send full state to everyone

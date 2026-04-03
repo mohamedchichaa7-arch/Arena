@@ -973,6 +973,68 @@ body {
   box-shadow: 0 0 12px rgba(239, 68, 68, .4)
 }
 
+/* ── Last-played bar ─────────────────────────────────────────── */
+.last-played-bar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .4rem .8rem;
+  background: rgba(139,92,246,.1);
+  border: 1px solid rgba(139,92,246,.25);
+  border-radius: .5rem;
+  width: 100%;
+  max-width: 600px;
+  flex-wrap: wrap;
+  animation: feedSlide .28s ease-out
+}
+
+.lp-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .58rem;
+  color: var(--dim);
+  white-space: nowrap
+}
+
+.lp-cards {
+  display: flex;
+  gap: .25rem
+}
+
+.lp-card {
+  width: 32px;
+  height: 46px;
+  background: #fff;
+  border-radius: 4px;
+  border: 1.5px solid #ccc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px
+}
+
+.lp-num {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 900;
+  font-size: .55rem;
+  line-height: 1
+}
+
+.lp-suit {
+  font-size: .7rem;
+  line-height: 1
+}
+
+.lp-card.red  { color: #dc2626 }
+.lp-card.black { color: #1a1a2e }
+
+.lp-as {
+  font-size: .65rem;
+  color: var(--dim)
+}
+
+.lp-as strong { color: var(--accent) }
+
 @keyframes revealFlip {
   0% { transform: rotateY(90deg) scale(.8); opacity: 0 }
   100% { transform: rotateY(0deg) scale(1); opacity: 1 }
