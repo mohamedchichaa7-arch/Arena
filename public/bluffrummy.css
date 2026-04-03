@@ -734,6 +734,228 @@ body {
   100% { opacity: 0;  transform: translate(var(--tx), var(--ty))                         scale(.55) rotate(-14deg) }
 }
 
+/* ── Discard ghost (green, quicker arc) ── */
+.discard-ghost {
+  position: fixed;
+  width: 38px;
+  height: 54px;
+  border-radius: 5px;
+  pointer-events: none;
+  z-index: 300;
+  background: linear-gradient(145deg, #052e16 0%, #166534 50%, #15803d 100%);
+  border: 2px solid rgba(34, 197, 94, .9);
+  box-shadow: 0 0 12px rgba(34,197,94,.4);
+  animation: discardFly .52s cubic-bezier(.4,0,.6,1) forwards
+}
+
+.discard-ghost::after {
+  content: '✕';
+  font-size: .7rem;
+  color: rgba(134,239,172,.7);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center
+}
+
+@keyframes discardFly {
+  0%   { opacity: 1;   transform: translate(0,0)                                              scale(1)    rotate(0deg)   }
+  38%  { opacity: 1;   transform: translate(calc(var(--tx)*.42), calc(var(--ty)*.42 - 36px)) scale(.88)  rotate(var(--rdir,8deg))  }
+  100% { opacity: 0;   transform: translate(var(--tx), var(--ty))                             scale(.38)  rotate(calc(var(--rdir,8deg)*2.5)) }
+}
+
+/* ── Discard deck (corner of pile-area) ── */
+.discard-deck {
+  position: absolute;
+  top: .55rem;
+  right: .75rem;
+  width: 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .18rem;
+  cursor: default;
+  user-select: none;
+  z-index: 5
+}
+
+.discard-deck-stack {
+  position: relative;
+  width: 38px;
+  height: 52px;
+  flex-shrink: 0
+}
+
+.discard-deck-stack::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1.5px dashed rgba(34,197,94,.22);
+  border-radius: 4px
+}
+
+.discard-pile-card {
+  position: absolute;
+  width: 38px;
+  height: 52px;
+  background: linear-gradient(145deg, #052e16, #166534, #15803d);
+  border: 1.5px solid rgba(34,197,94,.55);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.5);
+  animation: dcardLand .3s cubic-bezier(.175,.885,.32,1.275) both
+}
+
+.discard-pile-card:nth-child(1) { transform: rotate(-5deg) translate(-2px, 2px) }
+.discard-pile-card:nth-child(2) { transform: rotate(-1deg) translate(0px, 0px) }
+.discard-pile-card:nth-child(3) { transform: rotate(4deg) translate(2px,-2px) }
+
+@keyframes dcardLand {
+  from { opacity: 0; transform: scale(.5) }
+  to   { opacity: 1 }
+}
+
+.discard-deck-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .38rem;
+  color: rgba(34,197,94,.5);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  text-align: center;
+  white-space: nowrap
+}
+
+.discard-deck-count {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  background: #166534;
+  color: #86efac;
+  font-family: 'Orbitron', sans-serif;
+  font-size: .48rem;
+  font-weight: 900;
+  min-width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid rgba(34,197,94,.55);
+  padding: 0 2px;
+  animation: countPop .22s cubic-bezier(.175,.885,.32,1.275) both
+}
+
+@keyframes countPop {
+  from { transform: scale(0) }
+  to   { transform: scale(1) }
+}
+
+/* ── Discard tooltip (opens on hover) ── */
+.discard-tooltip {
+  position: absolute;
+  bottom: calc(100% + .6rem);
+  right: -4px;
+  width: 210px;
+  background: linear-gradient(160deg, #071507 0%, #0f2a0f 40%, #13132e 100%);
+  border: 1.5px solid rgba(34,197,94,.38);
+  border-radius: .7rem;
+  padding: .65rem .7rem .6rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px) scale(.97);
+  transition: opacity .22s ease, transform .22s ease;
+  z-index: 200;
+  box-shadow: 0 16px 50px rgba(0,0,0,.8), 0 0 24px rgba(34,197,94,.08)
+}
+
+.discard-deck:hover .discard-tooltip,
+.discard-deck.peek .discard-tooltip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1)
+}
+
+.dt-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .52rem;
+  color: #86efac;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: .55rem;
+  text-align: center;
+  border-bottom: 1px solid rgba(34,197,94,.18);
+  padding-bottom: .35rem
+}
+
+.dt-set {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  margin-bottom: .55rem
+}
+
+.dt-set:last-child { margin-bottom: 0 }
+
+.dt-set-header {
+  font-size: .62rem;
+  color: #6ee7b7;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: .3rem
+}
+
+.dt-set-header::before {
+  content: '×4';
+  font-family: 'Orbitron', sans-serif;
+  font-size: .48rem;
+  background: rgba(34,197,94,.18);
+  border: 1px solid rgba(34,197,94,.3);
+  border-radius: .2rem;
+  padding: 0 .25rem;
+  color: #86efac
+}
+
+.dt-cards {
+  display: flex;
+  gap: .25rem
+}
+
+.dt-card {
+  width: 30px;
+  height: 44px;
+  background: #fff;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 900;
+  font-size: .52rem;
+  gap: .08rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,.45);
+  animation: dtCardIn .3s ease-out both
+}
+
+.dt-card.red   { color: #dc2626 }
+.dt-card.black { color: #111827 }
+
+.dt-card .dt-suit { font-size: .65rem }
+
+@keyframes dtCardIn {
+  from { opacity: 0; transform: translateY(5px) rotateX(40deg) scale(.8) }
+  to   { opacity: 1; transform: translateY(0)   rotateX(0deg)  scale(1) }
+}
+
+.dt-empty {
+  font-size: .65rem;
+  color: rgba(134,239,172,.35);
+  text-align: center;
+  font-style: italic;
+  padding: .3rem 0
+}
+
 .reveal-card .rv-suit {
   font-size: .9rem
 }

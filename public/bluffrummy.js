@@ -41,6 +41,7 @@
   let currentMeldNum = null;
   let currentTurnId = null;
   let players = new Map(); // id -> {name, cardCount, eliminated, rank}
+  let discardHistory = []; // [{playerName, num}]
   let rankings = [];
 
   const SUITS = ['♠', '♥', '♦', '♣'];
@@ -146,13 +147,18 @@
       hand = msg.hand;
       gameActive = true;
       btnStart.style.display = 'none';
+      discardHistory = [];
+      updateDiscardDeck();
       renderHand(true);
       addLog('Cards dealt! Game started.', 'info');
     },
 
     'br-auto-discard'(msg) {
       const p = players.get(msg.playerId);
-      addLog(`<span class="feed-name">${escapeHtml(p?.name || 'Player')}</span> auto-discarded 4× ${cardLabel(msg.num)}`, 'discard');
+      const playerName = p?.name || 'Player';
+      addLog(`<span class="feed-name">${escapeHtml(playerName)}</span> auto-discarded 4 × ${cardLabel(msg.num)}`, 'discard');
+      discardHistory.push({ playerName, num: msg.num });
+      animateDiscard(msg.num);
     },
 
     'br-turn'(msg) {
@@ -416,6 +422,106 @@
     el.classList.remove('meld-flash'); void el.offsetWidth;
     el.classList.add('meld-flash');
     setTimeout(() => el.classList.remove('meld-flash'), 600);
+  }
+
+  // ── Discard animation system ─────────────────────────────────
+  function animateDiscard(num) {
+    const deckEl = $('discardDeck');
+    const pileEl = document.querySelector('.pile-area');
+    if (!deckEl || !pileEl) return;
+
+    const deckRect  = deckEl.getBoundingClientRect();
+    const pileRect  = pileEl.getBoundingClientRect();
+    const targetX   = deckRect.left + deckRect.width  / 2;
+    const targetY   = deckRect.top  + deckRect.height / 2;
+    // Source: centre of the meld pile
+    const srcX = pileRect.left + pileRect.width  / 2;
+    const srcY = pileRect.top  + pileRect.height / 2;
+
+    const dirs = [-1, 1, -1, 1]; // alternate spin direction per card
+    for (let i = 0; i < 4; i++) {
+      setTimeout(() => {
+        const ghost = document.createElement('div');
+        ghost.className = 'discard-ghost';
+        // Small random jitter so cards don't stack perfectly
+        const jx = (Math.random() - .5) * 14;
+        const jy = (Math.random() - .5) * 10;
+        const tx = targetX - srcX + jx;
+        const ty = targetY - srcY + jy;
+        ghost.style.cssText =
+          `left:${srcX - 19}px;top:${srcY - 27}px;` +
+          `--tx:${tx}px;--ty:${ty}px;--rdir:${dirs[i] * (6 + i * 3)}deg`;
+        document.body.appendChild(ghost);
+        setTimeout(() => ghost.remove(), 600);
+      }, i * 110);
+    }
+
+    // Update deck visual once last card lands
+    setTimeout(updateDiscardDeck, 4 * 110 + 250);
+  }
+
+  function updateDiscardDeck() {
+    const stack    = $('discardDeckStack');
+    const countEl  = $('discardCount');
+    if (!stack || !countEl) return;
+
+    stack.innerHTML = '';
+    const total = discardHistory.length;
+    const show  = Math.min(total, 3);
+    for (let i = 0; i < show; i++) {
+      const card = document.createElement('div');
+      card.className = 'discard-pile-card';
+      card.style.animationDelay = `${i * 0.04}s`;
+      stack.appendChild(card);
+    }
+    if (total > 0) {
+      countEl.style.display = 'flex';
+      countEl.textContent    = total;
+      // re-trigger pop animation
+      countEl.style.animation = 'none';
+      void countEl.offsetWidth;
+      countEl.style.animation = '';
+    } else {
+      countEl.style.display = 'none';
+    }
+    renderDiscardTooltip();
+  }
+
+  function renderDiscardTooltip() {
+    const container = $('dtSets');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (discardHistory.length === 0) {
+      container.innerHTML = '<div class="dt-empty">No discards yet</div>';
+      return;
+    }
+
+    // Newest discard first
+    for (let hi = discardHistory.length - 1; hi >= 0; hi--) {
+      const { playerName, num } = discardHistory[hi];
+      const setDiv = document.createElement('div');
+      setDiv.className = 'dt-set';
+
+      const header = document.createElement('div');
+      header.className = 'dt-set-header';
+      header.textContent = `${playerName} — ${cardLabel(num)}s`;
+      setDiv.appendChild(header);
+
+      const cardsDiv = document.createElement('div');
+      cardsDiv.className = 'dt-cards';
+      SUITS.forEach((suit, si) => {
+        const c = document.createElement('div');
+        c.className = `dt-card ${SUIT_COLORS[suit] || 'black'}`;
+        c.style.animationDelay = `${si * 0.07}s`;
+        c.innerHTML =
+          `<span>${cardLabel(num)}</span>` +
+          `<span class="dt-suit">${suit}</span>`;
+        cardsDiv.appendChild(c);
+      });
+      setDiv.appendChild(cardsDiv);
+      container.appendChild(setDiv);
+    }
   }
 
   // ── Ghost card fly animation (played cards) ───────────────────

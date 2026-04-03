@@ -54,6 +54,16 @@
         <div class="pile-area">
           <div class="pile-label" id="pileLabel">No meld yet</div>
           <div class="pile-cards" id="pileCards"></div>
+          <!-- Discard deck — absolutely positioned in corner of pile-area -->
+          <div class="discard-deck" id="discardDeck">
+            <div class="discard-deck-stack" id="discardDeckStack"></div>
+            <div class="discard-deck-label">♻ DISCARDS</div>
+            <div class="discard-deck-count" id="discardCount" style="display:none">0</div>
+            <div class="discard-tooltip" id="discardTooltip">
+              <div class="dt-title">Discarded Sets</div>
+              <div class="dt-sets" id="dtSets"><div class="dt-empty">No discards yet</div></div>
+            </div>
+          </div>
         </div>
 
         <!-- Game feed -->
