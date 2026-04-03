@@ -56,8 +56,8 @@
           <div class="pile-cards" id="pileCards"></div>
         </div>
 
-        <!-- Action log -->
-        <div class="action-log" id="actionLog"></div>
+        <!-- Game feed -->
+        <div class="game-feed" id="actionLog"></div>
       </div>
 
       <!-- Play controls -->
@@ -99,13 +99,15 @@
     </aside>
   </div>
 
-  <!-- OVERLAYS -->
-  <div class="overlay" id="revealOverlay">
-    <h2 class="reveal-title" id="revealTitle">Cards Revealed!</h2>
-    <div class="reveal-cards" id="revealCards"></div>
-    <div class="reveal-result" id="revealResult"></div>
-    <button class="btn btn-primary btn-lg" id="btnRevealClose">Continue</button>
+  <!-- REVEAL BANNER — non-blocking, auto-dismisses, slides from top -->
+  <div class="reveal-banner" id="revealOverlay">
+    <div class="reveal-banner-title" id="revealTitle">Cards Revealed!</div>
+    <div class="reveal-banner-cards" id="revealCards"></div>
+    <div class="reveal-banner-result" id="revealResult"></div>
+    <div class="reveal-countdown"><div class="reveal-countdown-bar" id="revealCountdownBar"></div></div>
   </div>
+  <!-- Challenge flash — pointer-events:none CSS-only overlay -->
+  <div class="challenge-flash" id="challengeFlash"></div>
   <div class="overlay" id="gameOverOverlay">
     <h2 class="go-title" id="goTitle">🏆 WINNER!</h2>
     <div class="go-rankings" id="goRankings"></div>

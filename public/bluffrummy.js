@@ -22,7 +22,7 @@
   const revealTitle = $('revealTitle');
   const revealCardsEl = $('revealCards');
   const revealResult = $('revealResult');
-  const btnRevealClose = $('btnRevealClose');
+  const challengeFlashEl = $('challengeFlash');
   const gameOverOverlay = $('gameOverOverlay');
   const goTitle = $('goTitle');
   const goRankings = $('goRankings');
@@ -39,6 +39,7 @@
   let myTurn = false;
   let canChallenge = false;
   let currentMeldNum = null;
+  let currentTurnId = null;
   let players = new Map(); // id -> {name, cardCount, eliminated, rank}
   let rankings = [];
 
@@ -103,12 +104,12 @@
     },
 
     'player-joined'(msg) {
-      addLog(`<span class="log-name">${escapeHtml(msg.name)}</span> joined the room`);
+      addLog(`<span class="feed-name">${escapeHtml(msg.name)}</span> joined the room`, 'info');
     },
 
     'player-left'(msg) {
       const p = players.get(msg.id);
-      addLog(`<span class="log-name">${escapeHtml(p?.name || 'Player')}</span> left`);
+      addLog(`<span class="feed-name">${escapeHtml(p?.name || 'Player')}</span> left`, 'info');
     },
 
     // ── Bluff Rummy specific ─────────────────────────────────
@@ -120,6 +121,7 @@
       myTurn = msg.currentTurn === myId;
       canChallenge = msg.canChallenge && msg.currentTurn === myId;
       currentMeldNum = msg.meldNum;
+      currentTurnId = msg.currentTurn || null;
       rankings = msg.rankings || [];
 
       // Update players map
@@ -145,18 +147,19 @@
       gameActive = true;
       btnStart.style.display = 'none';
       renderHand(true);
-      addLog('Cards dealt! Game started.');
+      addLog('Cards dealt! Game started.', 'info');
     },
 
     'br-auto-discard'(msg) {
       const p = players.get(msg.playerId);
-      addLog(`<span class="log-name">${escapeHtml(p?.name || 'Player')}</span> auto-discarded 4× ${cardLabel(msg.num)}`);
+      addLog(`<span class="feed-name">${escapeHtml(p?.name || 'Player')}</span> auto-discarded 4× ${cardLabel(msg.num)}`, 'discard');
     },
 
     'br-turn'(msg) {
       myTurn = msg.currentTurn === myId;
       canChallenge = msg.canChallenge && myTurn;
       currentMeldNum = msg.meldNum;
+      currentTurnId = msg.currentTurn;
       const turnPlayer = players.get(msg.currentTurn);
       if (myTurn) {
         status.textContent = canChallenge ? 'Your turn — play cards or challenge!' : 'Your turn — play cards!';
@@ -183,12 +186,17 @@
     },
 
     'br-challenge'(msg) {
-      addLog(`<span class="log-name">${escapeHtml(msg.challengerName)}</span> challenges <span class="log-name">${escapeHtml(msg.targetName)}</span>!`, 'log-challenge');
+      addLog(`<span class="feed-name">${escapeHtml(msg.challengerName)}</span> challenges <span class="feed-name">${escapeHtml(msg.targetName)}</span>!`, 'challenge');
+      triggerChallengeSequence();
     },
 
     'br-reveal'(msg) {
-      // Show reveal overlay
       showRevealOverlay(msg);
+      if (msg.wasBluff) {
+        addLog(`<span class="feed-name">${escapeHtml(msg.challengerName)}</span> caught <span class="feed-name">${escapeHtml(msg.targetName)}</span> bluffing! +${msg.cards.length} cards`, 'bluff');
+      } else {
+        addLog(`<span class="feed-name">${escapeHtml(msg.targetName)}</span> was honest — <span class="feed-name">${escapeHtml(msg.challengerName)}</span> takes ${msg.cards.length} card${msg.cards.length !== 1 ? 's' : ''}`, 'honest');
+      }
     },
 
     'br-hand-update'(msg) {
@@ -210,7 +218,7 @@
       const p = players.get(msg.playerId);
       if (p) { p.eliminated = true; p.rank = msg.rank; }
       const label = msg.playerId === myId ? 'You' : escapeHtml(p?.name || 'Player');
-      addLog(`🏆 ${label} finished in place #${msg.rank}!`, 'log-win');
+      addLog(`<span class="feed-name">${label}</span> finished in place #${msg.rank}!`, 'win');
       renderPlayers();
     },
 
@@ -223,8 +231,9 @@
     'br-new-meld'(msg) {
       currentMeldNum = null;
       pileCards.innerHTML = '';
-      pileLabel.textContent = 'New meld — ' + (msg.starterName || 'Someone') + ' starts';
-      addLog(`New meld started by <span class="log-name">${escapeHtml(msg.starterName || '?')}</span>`);
+      pileLabel.textContent = '🔀 New meld — ' + (msg.starterName || 'Someone') + ' starts';
+      addLog(`New meld started by <span class="feed-name">${escapeHtml(msg.starterName || '?')}</span>`, 'meld');
+      flashPileArea();
     },
 
     // ── Chat ─────────────────────────────────────────────────
@@ -243,7 +252,7 @@
       div.className = 'player-card' +
         (pid === myId ? ' me' : '') +
         (p.eliminated ? ' eliminated' : '') +
-        (gameActive && !p.eliminated && myTurn === false && false ? '' : '');
+        (pid === currentTurnId && gameActive && !p.eliminated ? ' active-turn' : '');
 
       const colors = ['#8b5cf6', '#06b6d4', '#f472b6', '#fbbf24', '#22c55e', '#ef4444', '#a78bfa', '#34d399'];
       const ci = [...players.keys()].indexOf(pid) % colors.length;
@@ -298,15 +307,23 @@
   function renderPile(size, num) {
     pileCards.innerHTML = '';
     if (num) {
-      pileLabel.textContent = `Meld: "${cardLabel(num)}s" — ${size} card(s)`;
+      pileLabel.textContent = `🏦 Meld: “${cardLabel(num)}s”`;
     } else {
       pileLabel.textContent = 'No meld yet';
     }
-    for (let i = 0; i < size; i++) {
+    // Show up to 5 stacked face-down cards + a count badge
+    const show = Math.min(size, 5);
+    for (let i = 0; i < show; i++) {
       const el = document.createElement('div');
       el.className = 'pile-card face-down';
-      el.style.animationDelay = `${i * 0.08}s`;
+      el.style.animationDelay = `${i * 0.06}s`;
       pileCards.appendChild(el);
+    }
+    if (size > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'pile-count-badge';
+      badge.textContent = `×${size}`;
+      pileCards.appendChild(badge);
     }
   }
 
@@ -326,20 +343,28 @@
     }
   }
 
-  function addLog(html, cls) {
+  const FEED_ICONS = { play:'🃏', challenge:'🤥', bluff:'😤', honest:'✅', win:'🏆', meld:'🔀', discard:'♻️', info:'ℹ️' };
+  function addLog(html, type) {
+    const cls = type || 'info';
     const div = document.createElement('div');
-    div.className = 'log-entry' + (cls ? ' ' + cls : '');
-    div.innerHTML = html;
-    actionLog.appendChild(div);
-    actionLog.scrollTop = actionLog.scrollHeight;
-    // Keep max 30 entries
-    while (actionLog.children.length > 30) actionLog.removeChild(actionLog.firstChild);
+    div.className = `feed-entry feed-${cls}`;
+    const icon = document.createElement('span');
+    icon.className = 'feed-icon';
+    icon.textContent = FEED_ICONS[cls] || 'ℹ️';
+    const text = document.createElement('span');
+    text.innerHTML = html;
+    div.appendChild(icon);
+    div.appendChild(text);
+    actionLog.insertBefore(div, actionLog.firstChild);
+    while (actionLog.children.length > 40) actionLog.removeChild(actionLog.lastChild);
   }
 
-  // ── Reveal overlay ────────────────────────────────────────────
+  // ── Reveal banner (auto-dismisses after ~4.5 s) ────────────────
+  let _revealTimer = null;
   function showRevealOverlay(msg) {
     revealCardsEl.innerHTML = '';
     const annNum = msg.announcedNum;
+    const wasBluff = msg.wasBluff;
 
     for (let i = 0; i < msg.cards.length; i++) {
       const c = msg.cards[i];
@@ -347,30 +372,71 @@
       const colorClass = SUIT_COLORS[c.suit] || 'black';
       const el = document.createElement('div');
       el.className = `reveal-card ${colorClass} ${honest ? 'honest' : 'bluff'}`;
-      el.style.animationDelay = `${i * 0.15}s`;
+      el.style.animationDelay = `${i * 0.14}s`;
       el.innerHTML = `<span class="rv-num">${cardLabel(c.num)}</span><span class="rv-suit">${c.suit}</span>`;
       revealCardsEl.appendChild(el);
     }
 
-    const wasBluff = msg.wasBluff;
     const challengerName = escapeHtml(msg.challengerName);
-    const targetName = escapeHtml(msg.targetName);
-    const takerName = escapeHtml(msg.takerName);
+    const targetName     = escapeHtml(msg.targetName);
 
     if (wasBluff) {
-      revealTitle.textContent = 'CAUGHT BLUFFING!';
-      revealResult.innerHTML = `<span style="color:var(--green)">${challengerName}</span> was right! <br><span style="color:var(--red)">${targetName}</span> takes ${msg.cards.length} cards.`;
+      revealTitle.className   = 'reveal-banner-title bluff';
+      revealTitle.textContent = 'BLUFF CAUGHT!';
+      revealResult.innerHTML  = `<span style="color:var(--green)">${challengerName}</span> was right!<br><span style="color:var(--red)">${targetName}</span> takes ${msg.cards.length} card${msg.cards.length !== 1 ? 's' : ''}!`;
     } else {
-      revealTitle.textContent = 'BAD CALL!';
-      revealResult.innerHTML = `<span style="color:var(--red)">${challengerName}</span> was wrong! <br>${targetName} was honest. <span style="color:var(--red)">${challengerName}</span> takes ${msg.cards.length} cards.`;
+      revealTitle.className   = 'reveal-banner-title honest';
+      revealTitle.textContent = 'HONEST PLAY!';
+      revealResult.innerHTML  = `<span style="color:var(--green)">${targetName}</span> was telling the truth!<br><span style="color:var(--red)">${challengerName}</span> takes ${msg.cards.length} card${msg.cards.length !== 1 ? 's' : ''}!`;
     }
 
-    revealOverlay.classList.add('show');
+    const banner = $('revealOverlay');
+    const bar    = $('revealCountdownBar');
+    banner.classList.add('show');
+    bar.style.transition = 'none'; bar.style.width = '100%';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      bar.style.transition = 'width 4500ms linear'; bar.style.width = '0%';
+    }));
+    clearTimeout(_revealTimer);
+    _revealTimer = setTimeout(() => banner.classList.remove('show'), 4500);
   }
 
-  btnRevealClose.addEventListener('click', () => {
-    revealOverlay.classList.remove('show');
-  });
+  // ── Challenge screen flash ────────────────────────────────────
+  function triggerChallengeSequence() {
+    challengeFlashEl.classList.remove('active');
+    void challengeFlashEl.offsetWidth;
+    challengeFlashEl.classList.add('active');
+    setTimeout(() => challengeFlashEl.classList.remove('active'), 700);
+  }
+
+  // ── Pile area new-meld flash ──────────────────────────────────
+  function flashPileArea() {
+    const el = document.querySelector('.pile-area');
+    if (!el) return;
+    el.classList.remove('meld-flash'); void el.offsetWidth;
+    el.classList.add('meld-flash');
+    setTimeout(() => el.classList.remove('meld-flash'), 600);
+  }
+
+  // ── Ghost card fly animation (played cards) ───────────────────
+  function animateCardFly(count) {
+    const pileEl = document.querySelector('.pile-area');
+    if (!pileEl) return;
+    const pileRect = pileEl.getBoundingClientRect();
+    const handRect = handCards.getBoundingClientRect();
+    const n = Math.min(count, 3);
+    for (let i = 0; i < n; i++) {
+      const ghost = document.createElement('div');
+      ghost.className = 'card-ghost';
+      const sx = handRect.left + handRect.width / 2 + (i - (n - 1) / 2) * 16;
+      const sy = handRect.top;
+      const tx = pileRect.left + pileRect.width / 2 - sx;
+      const ty = pileRect.top  + pileRect.height / 2 - sy;
+      ghost.style.cssText = `left:${sx}px;top:${sy}px;--tx:${tx}px;--ty:${ty}px;animation-delay:${i * 0.06}s`;
+      document.body.appendChild(ghost);
+      setTimeout(() => ghost.remove(), 700 + i * 60);
+    }
+  }
 
   // ── Game over ─────────────────────────────────────────────────
   function showGameOver(ranks) {
