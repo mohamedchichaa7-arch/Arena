@@ -1,66 +1,86 @@
 (function () {
   'use strict';
 
-  // ── DOM refs ──────────────────────────────────────────────────
+  // ── DOM refs ──────────────────────────────────────────────
   const $ = id => document.getElementById(id);
-  const btnBack = $('btnBack');
-  const btnStart = $('btnStartGame');
-  const status = $('status');
-  const roomBadge = $('roomBadge');
-  const playerList = $('playerList');
-  const playerCount = $('playerCount');
-  const handCards = $('handCards');
-  const handCount = $('handCount');
-  const pileCards = $('pileCards');
-  const pileLabel = $('pileLabel');
-  const playArea = $('playArea');
-  const btnPlay = $('btnPlayCards');
+  const btnBack      = $('btnBack');
+  const btnStart     = $('btnStartGame');
+  const status       = $('status');
+  const roomBadge    = $('roomBadge');
+  const playerSeats  = $('playerSeats');
+  const handCards    = $('handCards');
+  const handCount    = $('handCount');
+  const pileCards    = $('pileCards');
+  const pileLabel    = $('pileLabel');
+  const playArea     = $('playArea');
+  const btnPlay      = $('btnPlayCards');
   const btnChallenge = $('btnChallenge');
-  const announceNum = $('announceNum');
-  const actionLog = $('actionLog');
-  const revealOverlay = $('revealOverlay');
-  const revealTitle = $('revealTitle');
-  const revealCardsEl = $('revealCards');
-  const revealResult = $('revealResult');
+  const actionLog    = $('actionLog');
+  const revealOverlay   = $('revealOverlay');
+  const revealTitle     = $('revealTitle');
+  const revealCardsEl   = $('revealCards');
+  const revealResult    = $('revealResult');
   const challengeFlashEl = $('challengeFlash');
-  const gameOverOverlay = $('gameOverOverlay');
-  const goTitle = $('goTitle');
-  const goRankings = $('goRankings');
+  const gameOverOverlay  = $('gameOverOverlay');
+  const goTitle      = $('goTitle');
+  const goRankings   = $('goRankings');
   const btnPlayAgain = $('btnPlayAgain');
   const chatMessages = $('chatMessages');
-  const chatInput = $('chatInput');
-  const chatSend = $('chatSend');
+  const chatInput    = $('chatInput');
+  const chatSend     = $('chatSend');
+  const tableEl      = $('table');
+  const tableCenter  = $('tableCenter');
 
-  // ── State ─────────────────────────────────────────────────────
+  // Modal
+  const playModal    = $('playModal');
+  const modalCards   = $('modalCards');
+  const announceGrid = $('announceGrid');
+  const modalCancel  = $('modalCancel');
+  const modalConfirm = $('modalConfirm');
+
+  // Chat
+  const chatPanel    = $('chatPanel');
+  const chatBackdrop = $('chatBackdrop');
+  const btnChat      = $('btnToggleChat');
+  const chatClose    = $('chatClose');
+
+  // ── State ─────────────────────────────────────────────────
   let ws, myId, myName;
-  let hand = [];           // [{num, suit}]
+  let hand = [];
   let selectedIndices = new Set();
   let gameActive = false;
   let myTurn = false;
   let canChallenge = false;
   let currentMeldNum = null;
   let currentTurnId = null;
-  let players = new Map(); // id -> {name, cardCount, eliminated, rank}
-  let discardHistory = []; // [{playerName, num}]
+  let players = new Map();
+  let discardHistory = [];
   let rankings = [];
+  let modalAnnounceNum = null;
 
   const SUITS = ['♠', '♥', '♦', '♣'];
   const SUIT_COLORS = { '♠': 'black', '♥': 'red', '♦': 'red', '♣': 'black' };
 
-  // ── Helpers ───────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────
   function escapeHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   function cardLabel(num) {
-    if (num === 1) return 'A';
+    if (num === 1)  return 'A';
     if (num === 11) return 'J';
     if (num === 12) return 'Q';
     if (num === 13) return 'K';
     return String(num);
   }
 
-  // ── WebSocket ─────────────────────────────────────────────────
+  function getInitials(name) {
+    return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
+  }
+
+  const SEAT_COLORS = ['#8b5cf6', '#06b6d4', '#f472b6', '#e8a838', '#22c55e', '#ef4444', '#a78bfa', '#34d399'];
+
+  // ── WebSocket ─────────────────────────────────────────────
   const params = new URLSearchParams(location.search);
   const roomId = params.get('room');
   if (!roomId) { location.href = '/'; return; }
@@ -91,13 +111,11 @@
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
   }
 
-  // ── Message handlers ──────────────────────────────────────────
+  // ── Message handlers ──────────────────────────────────────
   const handlers = {
     'room-joined'(msg) {
-      myId = msg.players ? undefined : undefined; // set below
       roomBadge.textContent = msg.roomName + ' #' + msg.roomId;
-      status.textContent = 'In room — waiting for players…';
-      // We don't know our own ID directly; the server sends it in br-state
+      status.textContent = 'Waiting for players…';
     },
 
     'error'(msg) {
@@ -105,7 +123,7 @@
     },
 
     'player-joined'(msg) {
-      addLog(`<span class="feed-name">${escapeHtml(msg.name)}</span> joined the room`, 'info');
+      addLog(`<span class="feed-name">${escapeHtml(msg.name)}</span> joined`, 'info');
     },
 
     'player-left'(msg) {
@@ -113,9 +131,7 @@
       addLog(`<span class="feed-name">${escapeHtml(p?.name || 'Player')}</span> left`, 'info');
     },
 
-    // ── Bluff Rummy specific ─────────────────────────────────
     'br-state'(msg) {
-      // Full state sync
       myId = msg.yourId;
       hand = msg.hand || [];
       gameActive = msg.active;
@@ -125,7 +141,6 @@
       currentTurnId = msg.currentTurn || null;
       rankings = msg.rankings || [];
 
-      // Update players map
       players.clear();
       for (const p of msg.players) {
         players.set(p.id, { name: p.name, cardCount: p.cardCount, eliminated: p.eliminated, rank: p.rank });
@@ -138,7 +153,7 @@
       updateControls();
 
       if (!gameActive && rankings.length === 0) {
-        status.textContent = myTurn ? '' : 'Waiting for game to start…';
+        status.textContent = 'Waiting for game to start…';
         btnStart.style.display = '';
         playArea.style.display = 'none';
       }
@@ -170,7 +185,7 @@
       currentTurnId = msg.currentTurn;
       const turnPlayer = players.get(msg.currentTurn);
       if (myTurn) {
-        status.textContent = canChallenge ? 'Your turn — play cards or challenge!' : 'Your turn — play cards!';
+        status.textContent = canChallenge ? 'Your turn — play or challenge!' : 'Your turn!';
       } else {
         status.textContent = `${escapeHtml(turnPlayer?.name || 'Opponent')}'s turn…`;
       }
@@ -181,8 +196,11 @@
     'br-play'(msg) {
       const p = players.get(msg.playerId);
       if (p) p.cardCount = msg.cardCount;
-      addLog(`<span class="feed-name">${escapeHtml(p?.name || '?')}</span> played ${msg.count} card${msg.count !== 1 ? 's' : ''} as <strong>“${cardLabel(msg.announcedNum)}s”</strong>`, 'play');
-      if (msg.playerId === myId) animateCardFly(msg.count);
+      addLog(`<span class="feed-name">${escapeHtml(p?.name || '?')}</span> played ${msg.count} card${msg.count !== 1 ? 's' : ''} as <strong>"${cardLabel(msg.announcedNum)}s"</strong>`, 'play');
+
+      // Animate cards flying from the player's seat (or hand tray) to center
+      animatePlayFromSeat(msg.playerId, msg.count);
+
       renderPile(msg.meldSize, msg.meldNum);
       renderPlayers();
       if (msg.playerId === myId) {
@@ -225,7 +243,7 @@
       const p = players.get(msg.playerId);
       if (p) { p.eliminated = true; p.rank = msg.rank; }
       const label = msg.playerId === myId ? 'You' : escapeHtml(p?.name || 'Player');
-      addLog(`<span class="feed-name">${label}</span> finished in place #${msg.rank}!`, 'win');
+      addLog(`<span class="feed-name">${label}</span> finished #${msg.rank}!`, 'win');
       renderPlayers();
     },
 
@@ -238,73 +256,123 @@
     'br-new-meld'(msg) {
       currentMeldNum = null;
       pileCards.innerHTML = '';
-      pileLabel.textContent = '🔀 New meld — ' + (msg.starterName || 'Someone') + ' starts';
+      pileLabel.textContent = 'New meld — ' + (msg.starterName || 'Someone') + ' starts';
       addLog(`New meld started by <span class="feed-name">${escapeHtml(msg.starterName || '?')}</span>`, 'meld');
       clearLastPlayed();
       flashPileArea();
     },
 
-    // ── Chat ─────────────────────────────────────────────────
     'chat'(msg) {
       appendChat(msg.name, msg.text, 'other');
     },
   };
 
-  // ── UI Rendering ──────────────────────────────────────────────
+  // ── Player rendering (seats around table) ─────────────────
   function renderPlayers() {
-    playerList.innerHTML = '';
-    let count = 0;
-    for (const [pid, p] of players) {
-      count++;
-      const div = document.createElement('div');
-      div.className = 'player-card' +
-        (pid === myId ? ' me' : '') +
-        (p.eliminated ? ' eliminated' : '') +
-        (pid === currentTurnId && gameActive && !p.eliminated ? ' active-turn' : '');
+    playerSeats.innerHTML = '';
+    const ids = [...players.keys()];
+    const total = ids.length;
+    if (total === 0) return;
 
-      const colors = ['#8b5cf6', '#06b6d4', '#f472b6', '#fbbf24', '#22c55e', '#ef4444', '#a78bfa', '#34d399'];
-      const ci = [...players.keys()].indexOf(pid) % colors.length;
-      const badge = p.eliminated ? (p.rank === 1 ? '🏆' : `#${p.rank}`) : `🃏 ${p.cardCount}`;
+    const myIdx = ids.indexOf(myId);
+    if (myIdx === -1) return;
 
-      div.innerHTML = `
-        <span class="pc-dot" style="background:${colors[ci]}"></span>
-        <span class="pc-name">${escapeHtml(p.name)}${pid === myId ? ' (You)' : ''}</span>
-        <span class="pc-cards">${badge}</span>`;
-      playerList.appendChild(div);
-    }
-    playerCount.textContent = count;
+    // Ellipse parameters (% of table dimensions)
+    const cx = 50, cy = 46;
+    const rx = 40, ry = 36;
+
+    ids.forEach((pid, i) => {
+      if (pid === myId) return; // self is the hand tray
+
+      const p = players.get(pid);
+      // Calculate angle: my seat is at bottom (270°), others distributed clockwise
+      const offset = ((i - myIdx + total) % total);
+      const angle = (Math.PI * 1.5) + (offset / total) * 2 * Math.PI;
+      const x = cx + rx * Math.cos(angle);
+      const y = cy + ry * Math.sin(angle);
+
+      const seat = document.createElement('div');
+      seat.className = 'seat' +
+        (pid === currentTurnId && gameActive && !p.eliminated ? ' active' : '') +
+        (p.eliminated ? ' eliminated' : '');
+      seat.style.left = x + '%';
+      seat.style.top = y + '%';
+      seat.dataset.pid = pid;
+
+      const ci = ids.indexOf(pid) % SEAT_COLORS.length;
+      const color = SEAT_COLORS[ci];
+      const initials = getInitials(p.name);
+      const cardCount = p.eliminated ? 0 : (p.cardCount || 0);
+      const showCards = Math.min(cardCount, 8);
+
+      // Build mini card fan
+      let miniCardsHtml = '';
+      for (let c = 0; c < showCards; c++) {
+        const spread = showCards > 1 ? (c / (showCards - 1) - 0.5) : 0;
+        const rot = spread * 30;
+        const tx = spread * (showCards * 2.5);
+        miniCardsHtml += `<div class="mini-card" style="transform:translate(calc(-50% + ${tx}px), 0) rotate(${rot}deg);"></div>`;
+      }
+
+      const badge = p.eliminated ? (p.rank === 1 ? '🏆' : `#${p.rank}`) : '';
+
+      seat.innerHTML =
+        `<div class="seat-name">${escapeHtml(p.name)}</div>` +
+        `<div class="seat-avatar" style="background:${color}">${initials}</div>` +
+        `<div class="seat-hand">${miniCardsHtml}${cardCount > 8 ? `<span class="seat-count">${cardCount}</span>` : ''}</div>` +
+        (badge ? `<div class="seat-badge">${badge}</div>` : '');
+
+      playerSeats.appendChild(seat);
+    });
   }
 
+  // ── Hand rendering (overlapping fan) ──────────────────────
   function renderHand(animate) {
     handCards.innerHTML = '';
     selectedIndices.clear();
     handCount.textContent = hand.length;
 
-    // Sort hand by number then suit
+    // Sort by number then suit
     const sorted = hand.map((c, i) => ({ ...c, origIdx: i }));
     sorted.sort((a, b) => a.num - b.num || SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit));
     hand = sorted.map(c => ({ num: c.num, suit: c.suit }));
 
+    const total = hand.length;
+    const maxSpread = Math.min(total * 2.5, 35); // max fan angle
+
     hand.forEach((card, i) => {
       const el = document.createElement('div');
       const colorClass = SUIT_COLORS[card.suit] || 'black';
-      el.className = `game-card ${colorClass}` + (animate ? ' dealt' : '');
-      if (animate) el.style.animationDelay = `${i * 0.06}s`;
 
-      el.innerHTML = `
-        <span class="card-corner">${cardLabel(card.num)}<br>${card.suit}</span>
-        <span class="card-num">${cardLabel(card.num)}</span>
-        <span class="card-suit">${card.suit}</span>`;
+      // Fan geometry
+      const t = total > 1 ? (i / (total - 1)) - 0.5 : 0;
+      const angle = t * maxSpread;
+      const yOffset = Math.abs(t) * 18; // arc: edges lower
+      const overlap = Math.min(22, Math.max(8, 600 / total));
+
+      el.className = `game-card ${colorClass}` + (animate ? ' dealt' : '');
+      el.style.transform = `rotate(${angle}deg) translateY(${yOffset}px)`;
+      el.style.setProperty('--rest-transform', `rotate(${angle}deg) translateY(${yOffset}px)`);
+      el.style.marginLeft = i === 0 ? '0' : `-${overlap}px`;
+      el.style.zIndex = i;
+      if (animate) el.style.animationDelay = `${i * 0.04}s`;
+
+      el.innerHTML =
+        `<span class="card-corner">${cardLabel(card.num)}<br>${card.suit}</span>` +
+        `<span class="card-num">${cardLabel(card.num)}</span>` +
+        `<span class="card-suit">${card.suit}</span>`;
 
       el.addEventListener('click', () => {
         if (!myTurn || !gameActive) return;
         if (selectedIndices.has(i)) {
           selectedIndices.delete(i);
           el.classList.remove('selected');
+          el.style.transform = `rotate(${angle}deg) translateY(${yOffset}px)`;
         } else {
-          if (selectedIndices.size >= 3) return; // max 3
+          if (selectedIndices.size >= 3) return;
           selectedIndices.add(i);
           el.classList.add('selected');
+          el.style.transform = `rotate(${angle}deg) translateY(${yOffset - 20}px)`;
         }
       });
 
@@ -312,14 +380,11 @@
     });
   }
 
+  // ── Pile rendering ────────────────────────────────────────
   function renderPile(size, num) {
     pileCards.innerHTML = '';
-    if (num) {
-      pileLabel.textContent = `🏦 Meld: “${cardLabel(num)}s”`;
-    } else {
-      pileLabel.textContent = 'No meld yet';
-    }
-    // Show up to 5 stacked face-down cards + a count badge
+    pileLabel.textContent = num ? `MELD: "${cardLabel(num)}s"` : 'No meld yet';
+
     const show = Math.min(size, 5);
     for (let i = 0; i < show; i++) {
       const el = document.createElement('div');
@@ -335,6 +400,7 @@
     }
   }
 
+  // ── Controls ──────────────────────────────────────────────
   function updateControls() {
     if (!gameActive) {
       playArea.style.display = 'none';
@@ -343,30 +409,11 @@
     playArea.style.display = '';
     btnPlay.disabled = !myTurn;
     btnChallenge.style.display = canChallenge ? '' : 'none';
-
-    // Rebuild announce-number select, excluding already-discarded numbers
-    const discardedNums = new Set(discardHistory.map(d => d.num));
-    const prevVal = announceNum.value;
-    announceNum.innerHTML = '';
-    for (let n = 1; n <= 13; n++) {
-      if (discardedNums.has(n)) continue;
-      const opt = document.createElement('option');
-      opt.value = String(n);
-      const labels = { 1:'A — Ace', 11:'J — Jack', 12:'Q — Queen', 13:'K — King' };
-      opt.textContent = labels[n] || String(n);
-      announceNum.appendChild(opt);
-    }
-
-    if (currentMeldNum) {
-      announceNum.value = String(currentMeldNum);
-      announceNum.disabled = true;
-    } else {
-      if (announceNum.querySelector(`option[value="${prevVal}"]`)) announceNum.value = prevVal;
-      announceNum.disabled = !myTurn;
-    }
   }
 
-  const FEED_ICONS = { play:'🃏', challenge:'🤥', bluff:'😤', honest:'✅', win:'🏆', meld:'🔀', discard:'♻️', info:'ℹ️' };
+  // ── Game feed ─────────────────────────────────────────────
+  const FEED_ICONS = { play: '🃏', challenge: '🤥', bluff: '😤', honest: '✅', win: '🏆', meld: '🔀', discard: '♻️', info: 'ℹ️' };
+
   function addLog(html, type) {
     const cls = type || 'info';
     const div = document.createElement('div');
@@ -382,12 +429,90 @@
     while (actionLog.children.length > 40) actionLog.removeChild(actionLog.lastChild);
   }
 
-  // ── Reveal banner (auto-dismisses after ~4.5 s) ────────────────
+  // ── Play modal ────────────────────────────────────────────
+  function openPlayModal() {
+    if (selectedIndices.size === 0 || selectedIndices.size > 3) return;
+
+    const selectedCards = [...selectedIndices].sort((a, b) => a - b).map(i => hand[i]);
+    modalAnnounceNum = currentMeldNum || null;
+
+    // Render selected cards in modal
+    modalCards.innerHTML = '';
+    selectedCards.forEach(card => {
+      const el = document.createElement('div');
+      const colorClass = SUIT_COLORS[card.suit] || 'black';
+      el.className = `modal-card ${colorClass}`;
+      el.innerHTML = `<span class="mc-num">${cardLabel(card.num)}</span><span class="mc-suit">${card.suit}</span>`;
+      modalCards.appendChild(el);
+    });
+
+    // Build announce grid
+    const discardedNums = new Set(discardHistory.map(d => d.num));
+    announceGrid.innerHTML = '';
+    for (let n = 1; n <= 13; n++) {
+      const chip = document.createElement('button');
+      chip.className = 'announce-chip';
+      chip.textContent = cardLabel(n);
+      chip.dataset.num = n;
+
+      if (discardedNums.has(n)) {
+        chip.classList.add('disabled');
+      } else if (currentMeldNum) {
+        if (n === currentMeldNum) {
+          chip.classList.add('locked');
+          modalAnnounceNum = n;
+        } else {
+          chip.classList.add('disabled');
+        }
+      } else {
+        chip.addEventListener('click', () => {
+          announceGrid.querySelectorAll('.announce-chip').forEach(c => c.classList.remove('active'));
+          chip.classList.add('active');
+          modalAnnounceNum = n;
+          modalConfirm.disabled = false;
+        });
+        // Auto-select first available if nothing selected
+        if (modalAnnounceNum === null) {
+          modalAnnounceNum = n;
+          chip.classList.add('active');
+        }
+      }
+
+      announceGrid.appendChild(chip);
+    }
+
+    modalConfirm.disabled = !modalAnnounceNum;
+    playModal.classList.add('show');
+  }
+
+  function closePlayModal() {
+    playModal.classList.remove('show');
+    modalAnnounceNum = null;
+  }
+
+  function confirmPlay() {
+    if (!modalAnnounceNum) return;
+    const cards = [...selectedIndices].sort((a, b) => a - b).map(i => ({ num: hand[i].num, suit: hand[i].suit }));
+    showLastPlayed(cards, modalAnnounceNum);
+    wsSend({ type: 'br-play', cards, announceNum: modalAnnounceNum });
+    selectedIndices.clear();
+    closePlayModal();
+  }
+
+  btnPlay.addEventListener('click', openPlayModal);
+  modalCancel.addEventListener('click', closePlayModal);
+  modalConfirm.addEventListener('click', confirmPlay);
+
+  // Close modal on backdrop click
+  playModal.addEventListener('click', (e) => {
+    if (e.target === playModal) closePlayModal();
+  });
+
+  // ── Reveal banner ─────────────────────────────────────────
   let _revealTimer = null;
   function showRevealOverlay(msg) {
     revealCardsEl.innerHTML = '';
     const annNum = msg.announcedNum;
-    const wasBluff = msg.wasBluff;
 
     for (let i = 0; i < msg.cards.length; i++) {
       const c = msg.cards[i];
@@ -403,28 +528,30 @@
     const challengerName = escapeHtml(msg.challengerName);
     const targetName     = escapeHtml(msg.targetName);
 
-    if (wasBluff) {
-      revealTitle.className   = 'reveal-banner-title bluff';
+    if (msg.wasBluff) {
+      revealTitle.className = 'reveal-title bluff';
       revealTitle.textContent = 'BLUFF CAUGHT!';
-      revealResult.innerHTML  = `<span style="color:var(--green)">${challengerName}</span> was right!<br><span style="color:var(--red)">${targetName}</span> takes ${msg.totalCards || msg.cards.length} card${(msg.totalCards || msg.cards.length) !== 1 ? 's' : ''}!`;
+      revealResult.innerHTML = `<span style="color:var(--green)">${challengerName}</span> was right!<br><span style="color:var(--red)">${targetName}</span> takes ${msg.totalCards || msg.cards.length} card${(msg.totalCards || msg.cards.length) !== 1 ? 's' : ''}!`;
     } else {
-      revealTitle.className   = 'reveal-banner-title honest';
+      revealTitle.className = 'reveal-title honest';
       revealTitle.textContent = 'HONEST PLAY!';
-      revealResult.innerHTML  = `<span style="color:var(--green)">${targetName}</span> was telling the truth!<br><span style="color:var(--red)">${challengerName}</span> takes ${msg.totalCards || msg.cards.length} card${(msg.totalCards || msg.cards.length) !== 1 ? 's' : ''}!`;
+      revealResult.innerHTML = `<span style="color:var(--green)">${targetName}</span> was telling the truth!<br><span style="color:var(--red)">${challengerName}</span> takes ${msg.totalCards || msg.cards.length} card${(msg.totalCards || msg.cards.length) !== 1 ? 's' : ''}!`;
     }
 
-    const banner = $('revealOverlay');
-    const bar    = $('revealCountdownBar');
+    const banner = revealOverlay;
+    const bar = $('revealCountdownBar');
     banner.classList.add('show');
-    bar.style.transition = 'none'; bar.style.width = '100%';
+    bar.style.transition = 'none';
+    bar.style.width = '100%';
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      bar.style.transition = 'width 4500ms linear'; bar.style.width = '0%';
+      bar.style.transition = 'width 4500ms linear';
+      bar.style.width = '0%';
     }));
     clearTimeout(_revealTimer);
     _revealTimer = setTimeout(() => banner.classList.remove('show'), 4500);
   }
 
-  // ── Challenge screen flash ────────────────────────────────────
+  // ── Challenge flash ───────────────────────────────────────
   function triggerChallengeSequence() {
     challengeFlashEl.classList.remove('active');
     void challengeFlashEl.offsetWidth;
@@ -432,16 +559,15 @@
     setTimeout(() => challengeFlashEl.classList.remove('active'), 700);
   }
 
-  // ── Pile area new-meld flash ──────────────────────────────────
+  // ── Pile flash ────────────────────────────────────────────
   function flashPileArea() {
-    const el = document.querySelector('.pile-area');
-    if (!el) return;
-    el.classList.remove('meld-flash'); void el.offsetWidth;
-    el.classList.add('meld-flash');
-    setTimeout(() => el.classList.remove('meld-flash'), 600);
+    tableCenter.classList.remove('meld-flash');
+    void tableCenter.offsetWidth;
+    tableCenter.classList.add('meld-flash');
+    setTimeout(() => tableCenter.classList.remove('meld-flash'), 600);
   }
 
-  // ── Last-played display ────────────────────────────────────
+  // ── Last played ───────────────────────────────────────────
   function showLastPlayed(cards, announcedNum) {
     const bar    = $('lastPlayedBar');
     const lpCrds = $('lpCards');
@@ -462,50 +588,84 @@
     if (bar) bar.style.display = 'none';
   }
 
-  // ── Discard animation system ─────────────────────────────────
+  // ── Animations: play from seat to center ──────────────────
+  function animatePlayFromSeat(playerId, count) {
+    const centerRect = tableCenter.getBoundingClientRect();
+    const targetX = centerRect.left + centerRect.width / 2;
+    const targetY = centerRect.top + centerRect.height / 2;
+
+    let srcX, srcY;
+
+    if (playerId === myId) {
+      // From hand tray
+      const handRect = handCards.getBoundingClientRect();
+      srcX = handRect.left + handRect.width / 2;
+      srcY = handRect.top;
+    } else {
+      // From player seat
+      const seatEl = playerSeats.querySelector(`[data-pid="${playerId}"]`);
+      if (seatEl) {
+        const seatRect = seatEl.getBoundingClientRect();
+        srcX = seatRect.left + seatRect.width / 2;
+        srcY = seatRect.top + seatRect.height / 2;
+      } else {
+        return;
+      }
+    }
+
+    const n = Math.min(count, 3);
+    for (let i = 0; i < n; i++) {
+      const ghost = document.createElement('div');
+      ghost.className = 'card-ghost';
+      const tx = targetX - srcX;
+      const ty = targetY - srcY;
+      ghost.style.cssText = `left:${srcX - 21}px;top:${srcY - 30}px;--tx:${tx}px;--ty:${ty}px;animation-delay:${i * 0.07}s`;
+      document.body.appendChild(ghost);
+      setTimeout(() => ghost.remove(), 600 + i * 70);
+    }
+  }
+
+  // ── Discard animation ─────────────────────────────────────
   function animateDiscard(num) {
     const deckEl = $('discardDeck');
-    const pileEl = document.querySelector('.pile-area');
+    const pileEl = document.querySelector('.table-center');
     if (!deckEl || !pileEl) return;
 
-    const deckRect  = deckEl.getBoundingClientRect();
-    const pileRect  = pileEl.getBoundingClientRect();
-    const targetX   = deckRect.left + deckRect.width  / 2;
-    const targetY   = deckRect.top  + deckRect.height / 2;
-    // Source: centre of the meld pile
-    const srcX = pileRect.left + pileRect.width  / 2;
-    const srcY = pileRect.top  + pileRect.height / 2;
+    const deckRect = deckEl.getBoundingClientRect();
+    const pileRect = pileEl.getBoundingClientRect();
+    const targetX = deckRect.left + deckRect.width / 2;
+    const targetY = deckRect.top + deckRect.height / 2;
+    const srcX = pileRect.left + pileRect.width / 2;
+    const srcY = pileRect.top + pileRect.height / 2;
 
-    const dirs = [-1, 1, -1, 1]; // alternate spin direction per card
+    const dirs = [-1, 1, -1, 1];
     for (let i = 0; i < 4; i++) {
       setTimeout(() => {
         const ghost = document.createElement('div');
         ghost.className = 'discard-ghost';
-        // Small random jitter so cards don't stack perfectly
-        const jx = (Math.random() - .5) * 14;
-        const jy = (Math.random() - .5) * 10;
+        const jx = (Math.random() - .5) * 12;
+        const jy = (Math.random() - .5) * 8;
         const tx = targetX - srcX + jx;
         const ty = targetY - srcY + jy;
         ghost.style.cssText =
-          `left:${srcX - 19}px;top:${srcY - 27}px;` +
-          `--tx:${tx}px;--ty:${ty}px;--rdir:${dirs[i] * (6 + i * 3)}deg`;
+          `left:${srcX - 18}px;top:${srcY - 25}px;` +
+          `--tx:${tx}px;--ty:${ty}px;--rdir:${dirs[i] * (5 + i * 3)}deg`;
         document.body.appendChild(ghost);
         setTimeout(() => ghost.remove(), 600);
-      }, i * 110);
+      }, i * 100);
     }
 
-    // Update deck visual once last card lands
-    setTimeout(updateDiscardDeck, 4 * 110 + 250);
+    setTimeout(updateDiscardDeck, 4 * 100 + 250);
   }
 
   function updateDiscardDeck() {
-    const stack    = $('discardDeckStack');
-    const countEl  = $('discardCount');
+    const stack   = $('discardDeckStack');
+    const countEl = $('discardCount');
     if (!stack || !countEl) return;
 
     stack.innerHTML = '';
     const total = discardHistory.length;
-    const show  = Math.min(total, 3);
+    const show = Math.min(total, 3);
     for (let i = 0; i < show; i++) {
       const card = document.createElement('div');
       card.className = 'discard-pile-card';
@@ -514,8 +674,7 @@
     }
     if (total > 0) {
       countEl.style.display = 'flex';
-      countEl.textContent    = total;
-      // re-trigger pop animation
+      countEl.textContent = total;
       countEl.style.animation = 'none';
       void countEl.offsetWidth;
       countEl.style.animation = '';
@@ -535,7 +694,6 @@
       return;
     }
 
-    // Newest discard first
     for (let hi = discardHistory.length - 1; hi >= 0; hi--) {
       const { playerName, num } = discardHistory[hi];
       const setDiv = document.createElement('div');
@@ -548,13 +706,10 @@
 
       const cardsDiv = document.createElement('div');
       cardsDiv.className = 'dt-cards';
-      SUITS.forEach((suit, si) => {
+      SUITS.forEach((suit) => {
         const c = document.createElement('div');
         c.className = `dt-card ${SUIT_COLORS[suit] || 'black'}`;
-        c.style.animationDelay = `${si * 0.07}s`;
-        c.innerHTML =
-          `<span>${cardLabel(num)}</span>` +
-          `<span class="dt-suit">${suit}</span>`;
+        c.innerHTML = `<span>${cardLabel(num)}</span><span class="dt-suit">${suit}</span>`;
         cardsDiv.appendChild(c);
       });
       setDiv.appendChild(cardsDiv);
@@ -562,27 +717,7 @@
     }
   }
 
-  // ── Ghost card fly animation (played cards) ───────────────────
-  function animateCardFly(count) {
-    const pileEl = document.querySelector('.pile-area');
-    if (!pileEl) return;
-    const pileRect = pileEl.getBoundingClientRect();
-    const handRect = handCards.getBoundingClientRect();
-    const n = Math.min(count, 3);
-    for (let i = 0; i < n; i++) {
-      const ghost = document.createElement('div');
-      ghost.className = 'card-ghost';
-      const sx = handRect.left + handRect.width / 2 + (i - (n - 1) / 2) * 16;
-      const sy = handRect.top;
-      const tx = pileRect.left + pileRect.width / 2 - sx;
-      const ty = pileRect.top  + pileRect.height / 2 - sy;
-      ghost.style.cssText = `left:${sx}px;top:${sy}px;--tx:${tx}px;--ty:${ty}px;animation-delay:${i * 0.06}s`;
-      document.body.appendChild(ghost);
-      setTimeout(() => ghost.remove(), 700 + i * 60);
-    }
-  }
-
-  // ── Game over ─────────────────────────────────────────────────
+  // ── Game over ─────────────────────────────────────────────
   function showGameOver(ranks) {
     goRankings.innerHTML = '';
     let winnerIsMe = false;
@@ -593,7 +728,7 @@
       goRankings.appendChild(row);
       if (r.rank === 1 && r.id === myId) winnerIsMe = true;
     }
-    goTitle.textContent = winnerIsMe ? '🏆 YOU WIN!' : '🏆 GAME OVER';
+    goTitle.textContent = winnerIsMe ? 'YOU WIN!' : 'GAME OVER';
     gameOverOverlay.classList.add('show');
     if (winnerIsMe) {
       fireConfetti();
@@ -606,18 +741,9 @@
     wsSend({ type: 'br-start' });
   });
 
-  // ── Actions ───────────────────────────────────────────────────
+  // ── Actions ───────────────────────────────────────────────
   btnStart.addEventListener('click', () => {
     wsSend({ type: 'br-start' });
-  });
-
-  btnPlay.addEventListener('click', () => {
-    if (!myTurn || selectedIndices.size === 0 || selectedIndices.size > 3) return;
-    const cards = [...selectedIndices].sort((a, b) => a - b).map(i => ({ num: hand[i].num, suit: hand[i].suit }));
-    const num = parseInt(announceNum.value);
-    showLastPlayed(cards, num);
-    wsSend({ type: 'br-play', cards, announceNum: num });
-    selectedIndices.clear();
   });
 
   btnChallenge.addEventListener('click', () => {
@@ -625,7 +751,7 @@
     wsSend({ type: 'br-challenge' });
   });
 
-  // ── Chat ──────────────────────────────────────────────────────
+  // ── Chat ──────────────────────────────────────────────────
   function appendChat(name, text, cls) {
     const div = document.createElement('div');
     div.className = 'chat-msg ' + cls;
@@ -649,19 +775,32 @@
     if (e.key === 'Enter') sendChat();
   });
 
-  // ── Navigation ────────────────────────────────────────────────
+  // Chat panel toggle
+  function openChat() {
+    chatPanel.classList.add('open');
+    chatBackdrop.classList.add('show');
+  }
+  function closeChat() {
+    chatPanel.classList.remove('open');
+    chatBackdrop.classList.remove('show');
+  }
+  btnChat.addEventListener('click', openChat);
+  chatClose.addEventListener('click', closeChat);
+  chatBackdrop.addEventListener('click', closeChat);
+
+  // ── Navigation ────────────────────────────────────────────
   btnBack.addEventListener('click', () => {
     location.href = '/';
   });
 
-  // ── Confetti ──────────────────────────────────────────────────
+  // ── Confetti ──────────────────────────────────────────────
   function fireConfetti() {
     const canvas = $('confetti');
     const ctx = canvas.getContext('2d');
     canvas.width = innerWidth;
     canvas.height = innerHeight;
     const particles = [];
-    const colors = ['#fbbf24', '#8b5cf6', '#06b6d4', '#22c55e', '#ef4444', '#f472b6'];
+    const colors = ['#c9a84c', '#e8c75a', '#8b5cf6', '#06b6d4', '#22c55e', '#ef4444', '#f472b6'];
     for (let i = 0; i < 150; i++) {
       particles.push({
         x: Math.random() * canvas.width,
@@ -696,6 +835,6 @@
     draw();
   }
 
-  // ── Connect ───────────────────────────────────────────────────
+  // ── Connect ───────────────────────────────────────────────
   connect();
 })();
