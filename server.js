@@ -371,8 +371,9 @@ function send(ws, msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); 
 
 function broadcastLobby() {
   const list = serializeRooms();
+  const seen = new Set();
   const onlineUsers = [];
-  for (const [, c] of conns) { if (c.name) onlineUsers.push(c.name); }
+  for (const [, c] of conns) { if (c.name && !seen.has(c.name)) { seen.add(c.name); onlineUsers.push(c.name); } }
   const raw = JSON.stringify({ type: 'room-list', rooms: list, onlineUsers });
   for (const [, c] of conns) {
     if (c.mode === 'lobby' && c.ws.readyState === 1) c.ws.send(raw);
@@ -431,17 +432,32 @@ function removeFromRoom(conn) {
     } else checkBattleEnd(room);
   }
   if (room.br && room.br.active) {
-    // Remove player from bluff rummy
+    const brHand = room.br.hands.get(conn.id);
     room.br.turnOrder = room.br.turnOrder.filter(pid => pid !== conn.id);
     room.br.hands.delete(conn.id);
     if (room.br.turnIdx >= room.br.turnOrder.length) room.br.turnIdx = 0;
     if (room.players.size === 0) {
       room.br = null;
-    } else if (room.br.turnOrder.length <= 1) {
+    } else if (room.br.turnOrder.length < 1) {
       endBluffRummy(room);
     } else {
+      // Store hand for reconnect window and pause the game
+      if (!room.br.disconnects) room.br.disconnects = new Map();
+      if (brHand) room.br.disconnects.set(conn.name, { hand: [...brHand], at: Date.now() });
+      room.br.paused = true;
+      const disconnectedName = conn.name;
+      const roomId = room.id;
+      broadcastRoom(roomId, {
+        type: 'br-player-disconnect', name: disconnectedName,
+        voteTimeoutMs: 15000, playerCount: room.players.size,
+      });
+      room.br.pauseVotes = { redistribute: 0, wait: 0, voters: new Set() };
+      if (room.br.voteTimer) clearTimeout(room.br.voteTimer);
+      room.br.voteTimer = setTimeout(() => {
+        const r = rooms.get(roomId);
+        if (r?.br?.paused) applyBrVoteResult(r, 'redistribute');
+      }, 15000);
       broadcastBrPlayerUpdate(room);
-      sendBrTurn(room);
     }
   }
   if (room.rami && room.rami.active) {
@@ -516,8 +532,9 @@ wss.on('connection', (ws, req) => {
       case 'lobby': {
         conn.name = String(msg.name || 'Player').slice(0, 20);
         conn.mode = 'lobby';
+        const seenNow = new Set();
         const onlineUsersNow = [];
-        for (const [, c] of conns) { if (c.name) onlineUsersNow.push(c.name); }
+        for (const [, c] of conns) { if (c.name && !seenNow.has(c.name)) { seenNow.add(c.name); onlineUsersNow.push(c.name); } }
         send(ws, { type: 'room-list', rooms: serializeRooms(), onlineUsers: onlineUsersNow });
         log('info', 'lobby-join', { id, name: conn.name, ip: conn.ip });
         break;
@@ -556,6 +573,30 @@ wss.on('connection', (ws, req) => {
         }
         // Accept name from game page (new WS connection)
         if (msg.name) conn.name = String(msg.name).slice(0, 20);
+
+        // Remove any duplicate in this room with the same name (page-refresh cleanup)
+        for (const [existingId, existingP] of room.players) {
+          if (existingP.name === conn.name && existingId !== id) {
+            const oldConn = conns.get(existingId);
+            if (oldConn) { oldConn.mode = 'lobby'; oldConn.roomId = null; }
+            room.players.delete(existingId);
+            if (room.br?.active) {
+              room.br.turnOrder = room.br.turnOrder.filter(p => p !== existingId);
+              if (room.br.turnIdx >= room.br.turnOrder.length) room.br.turnIdx = 0;
+            }
+            break;
+          }
+        }
+
+        // Check for BluffRummy reconnect (disconnected player rejoining)
+        let isBrReconnect = false;
+        if (room.br?.active && room.br.disconnects?.has(conn.name)) isBrReconnect = true;
+
+        // Lock game-in-progress rooms to new players (allow BR reconnects)
+        if (room.status === 'playing' && room.type === 'bluffrummy' && !isBrReconnect) {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
+
         removeFromRoom(conn); // leave any existing room
         conn.mode = 'room';
         conn.roomId = room.id;
@@ -565,8 +606,27 @@ wss.on('connection', (ws, req) => {
           roomName: room.name, myId: id, players: roomPlayerList(room, id),
         });
         broadcastRoom(room.id, { type: 'player-joined', id, name: conn.name }, id);
+
+        // Restore BR hand on reconnect
+        if (isBrReconnect) {
+          const disc = room.br.disconnects.get(conn.name);
+          room.br.disconnects.delete(conn.name);
+          room.br.hands.set(id, disc.hand);
+          if (!room.br.turnOrder.includes(id)) {
+            const insertAt = Math.min(room.br.turnIdx, room.br.turnOrder.length);
+            room.br.turnOrder.splice(insertAt, 0, id);
+          }
+          if (room.br.voteTimer) { clearTimeout(room.br.voteTimer); room.br.voteTimer = null; }
+          room.br.paused = false;
+          room.br.pauseVotes = null;
+          broadcastRoom(room.id, { type: 'br-reconnected', name: conn.name }, id);
+          send(ws, { type: 'br-hand-update', hand: disc.hand });
+          sendBrFullState(room);
+          sendBrTurn(room);
+        }
+
         broadcastLobby();
-        log('info', 'room-joined', { id, name: conn.name, ip: conn.ip, roomId: room.id, roomType: room.type, players: room.players.size });
+        log('info', 'room-joined', { id, name: conn.name, ip: conn.ip, roomId: room.id, roomType: room.type, players: room.players.size, reconnect: isBrReconnect });
         break;
       }
 
@@ -737,6 +797,7 @@ wss.on('connection', (ws, req) => {
       case 'br-start': {
         const room = rooms.get(conn.roomId);
         if (!room || room.type !== 'bluffrummy') return;
+        if (room.br?.active) { send(ws, { type: 'error', msg: 'A game is already in progress' }); return; }
         if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2-4 players' }); return; }
         startBluffRummy(room);
         break;
@@ -745,6 +806,7 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(conn.roomId);
         if (!room || !room.br || !room.br.active) return;
         const br = room.br;
+        if (br.paused) return; // game paused
         if (br.turnOrder[br.turnIdx] !== id) return; // not your turn
         const sentCards = msg.cards;
         const annNum = parseInt(msg.announceNum);
@@ -804,8 +866,8 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(conn.roomId);
         if (!room || !room.br || !room.br.active) return;
         const br = room.br;
-        if (br.turnOrder[br.turnIdx] !== id) return;
-        if (!br.lastPlayerId || br.lastPlayerId === id) return; // can't challenge self or if no play
+        if (!br.lastPlayerId || br.lastPlayerId === id) return; // no play to challenge, or own play
+        if (!br.hands.has(id)) return; // must be active player
         const challengerName = conn.name;
         const targetConn = conns.get(br.lastPlayerId);
         const targetName = targetConn ? targetConn.name : 'Player';
@@ -861,6 +923,20 @@ wss.on('connection', (ws, req) => {
         sendBrTurn(room);
         // Broadcast player updates
         broadcastBrPlayerUpdate(room);
+        break;
+      }
+
+      case 'br-vote': {
+        const room = rooms.get(conn.roomId);
+        if (!room?.br?.pauseVotes) break;
+        const votes = room.br.pauseVotes;
+        if (votes.voters.has(id)) break; // already voted
+        votes.voters.add(id);
+        const choice = msg.choice === 'wait' ? 'wait' : 'redistribute';
+        votes[choice]++;
+        const total = room.players.size;
+        broadcastRoom(room.id, { type: 'br-vote-update', redistribute: votes.redistribute, wait: votes.wait, total });
+        if (votes.voters.size >= total) applyBrVoteResult(room, votes.redistribute >= votes.wait ? 'redistribute' : 'wait');
         break;
       }
 
@@ -959,19 +1035,23 @@ wss.on('connection', (ws, req) => {
         const r = room.rami;
         if (r.turnOrder[r.turnIdx] !== id || !r.drawnThisTurn) break;
         const h = r.hands.get(id);
-        const indices = Array.isArray(msg.indices) ? msg.indices.map(Number) : [];
-        if (indices.some(i => i < 0 || i >= h.length)) break;
-        const cards = indices.map(i => ({...h[i]}));
-        const result = validateRamiMeld(cards);
+        const cids = Array.isArray(msg.cids) ? msg.cids.map(Number) : [];
+        const cards = cids.map(cid => h.find(c => c.cid === cid)).filter(Boolean);
+        if (cards.length !== cids.length || cards.length < 3) break;
+        const result = validateRamiMeld(cards.map(c => ({...c})));
         if (!result.valid) { send(ws, {type:'rami-error', msg: result.reason}); break; }
-
+        const removeByCids = (cidList) => {
+          const removed = [];
+          for (const cid of cidList) {
+            const idx = h.findIndex(c => c.cid === cid);
+            if (idx !== -1) removed.push(h.splice(idx, 1)[0]);
+          }
+          return removed;
+        };
         // Check opening
         if (!r.hasOpened.get(id)) {
           const newTotal = r.turnOpenPts + result.pts;
-          // Remove from hand
-          const desc = [...indices].sort((a,b) => b-a);
-          const meldCards = [];
-          for (const i of desc) meldCards.unshift(h.splice(i,1)[0]);
+          const meldCards = removeByCids(cids);
           validateRamiMeld(meldCards); // tag jokers
           const meldId = ++r.meldCounter;
           r.melds.push({id: meldId, cards: meldCards});
@@ -986,9 +1066,7 @@ wss.on('connection', (ws, req) => {
             broadcastRoom(room.id, {type:'rami-log', text:(room.players.get(id)?.name||'?')+' melded '+result.pts+' pts ('+newTotal+'/71 toward opening).', cls:'meld'});
           }
         } else {
-          const desc = [...indices].sort((a,b) => b-a);
-          const meldCards = [];
-          for (const i of desc) meldCards.unshift(h.splice(i,1)[0]);
+          const meldCards = removeByCids(cids);
           validateRamiMeld(meldCards);
           r.melds.push({id: ++r.meldCounter, cards: meldCards});
           broadcastRoom(room.id, {type:'rami-log', text:(room.players.get(id)?.name||'?')+' melded a '+result.type+'.', cls:'meld'});
@@ -1005,9 +1083,10 @@ wss.on('connection', (ws, req) => {
         if (r.turnOrder[r.turnIdx] !== id || !r.drawnThisTurn) break;
         if (!r.hasOpened.get(id)) { send(ws, {type:'rami-error', msg:'Open first (need 71+ pts total)!'}); break; }
         const h = r.hands.get(id);
-        const cardIdx = parseInt(msg.cardIdx);
+        const cardCid = parseInt(msg.cardCid);
         const meldId = parseInt(msg.meldId);
-        if (isNaN(cardIdx) || cardIdx < 0 || cardIdx >= h.length) break;
+        const cardIdx = h.findIndex(c => c.cid === cardCid);
+        if (isNaN(cardCid) || cardIdx === -1) break;
         const meld = r.melds.find(m => m.id === meldId);
         if (!meld) { send(ws, {type:'rami-error', msg:'Meld not found'}); break; }
         const newCards = ramiAddCardToMeld(meld.cards, h[cardIdx]);
@@ -1027,9 +1106,10 @@ wss.on('connection', (ws, req) => {
         if (r.turnOrder[r.turnIdx] !== id || !r.drawnThisTurn) break;
         if (!r.hasOpened.get(id)) { send(ws, {type:'rami-error', msg:'Open first!'}); break; }
         const h = r.hands.get(id);
-        const cardIdx = parseInt(msg.cardIdx);
+        const cardCid = parseInt(msg.cardCid);
         const meldId = parseInt(msg.meldId);
-        if (isNaN(cardIdx) || cardIdx < 0 || cardIdx >= h.length) break;
+        const cardIdx = h.findIndex(c => c.cid === cardCid);
+        if (isNaN(cardCid) || cardIdx === -1) break;
         const meld = r.melds.find(m => m.id === meldId);
         if (!meld) { send(ws, {type:'rami-error', msg:'Meld not found'}); break; }
         const jokerPos = meld.cards.findIndex(c => c.isJoker);
@@ -1053,8 +1133,9 @@ wss.on('connection', (ws, req) => {
         const r = room.rami;
         if (r.turnOrder[r.turnIdx] !== id || !r.drawnThisTurn) break;
         const h = r.hands.get(id);
-        const cardIdx = parseInt(msg.cardIdx);
-        if (isNaN(cardIdx) || cardIdx < 0 || cardIdx >= h.length) break;
+        const cardCid = parseInt(msg.cardCid);
+        const cardIdx = h.findIndex(c => c.cid === cardCid);
+        if (isNaN(cardCid) || cardIdx === -1) break;
 
         // If not opened and has pending melds, undo them
         if (!r.hasOpened.get(id) && r.turnPendingMelds.length > 0) {
@@ -1195,6 +1276,10 @@ function startBluffRummy(room) {
     finishOrder,
     discards: initialDiscards,
     active: true,
+    paused: false,
+    disconnects: new Map(),
+    pauseVotes: null,
+    voteTimer: null,
   };
   room.status = 'playing';
   broadcastLobby();
@@ -1232,7 +1317,7 @@ function sendBrFullState(room) {
       hand: br.hands.get(pid) || [],
       active: br.active,
       currentTurn: currentTurnId,
-      canChallenge: currentTurnId === pid && br.lastPlayerId && br.lastPlayerId !== pid,
+      canChallenge: !!(br.lastPlayerId) && br.lastPlayerId !== pid,
       meldNum: br.meldNum,
       meldSize: br.meldCards.length,
       players: playersList,
@@ -1246,13 +1331,13 @@ function sendBrFullState(room) {
 
 function sendBrTurn(room) {
   const br = room.br;
-  if (!br || !br.active || br.turnOrder.length === 0) return;
+  if (!br || !br.active || br.turnOrder.length === 0 || br.paused) return;
   const currentTurnId = br.turnOrder[br.turnIdx];
   for (const [pid, p] of room.players) {
     send(p.ws, {
       type: 'br-turn',
       currentTurn: currentTurnId,
-      canChallenge: currentTurnId === pid && br.lastPlayerId != null && br.lastPlayerId !== pid,
+      canChallenge: br.lastPlayerId != null && br.lastPlayerId !== pid,
       meldNum: br.meldNum,
     });
   }
@@ -1395,14 +1480,15 @@ function ramiAddCardToMeld(meld, card) {
 }
 
 function buildRamiDeck() {
+  let cid = 0;
   const d = [];
   for (let copy = 0; copy < 2; copy++) {
     for (let num = 1; num <= 13; num++) {
-      for (const suit of RAMI_SUITS) d.push({num, suit, isJoker:false});
+      for (const suit of RAMI_SUITS) d.push({num, suit, isJoker:false, cid:++cid});
     }
   }
-  d.push({num:0, suit:'🃏', isJoker:true});
-  d.push({num:0, suit:'🃏', isJoker:true});
+  d.push({num:0, suit:'🃏', isJoker:true, jokerColor:'black', cid:++cid});
+  d.push({num:0, suit:'🃏', isJoker:true, jokerColor:'red',   cid:++cid});
   return d;
 }
 
@@ -1469,6 +1555,7 @@ function sendRamiStateAll(room) {
       turnOpenPts: r.turnOrder[r.turnIdx] === pid ? r.turnOpenPts : 0,
       myId: pid,
       active: r.roundActive,
+      drawnThisTurn: r.turnOrder[r.turnIdx] === pid ? r.drawnThisTurn : false,
     });
   }
 }
@@ -1739,6 +1826,38 @@ function runRamiAI(room, aiId) {
 function ramiCardStr(c) {
   if (c.isJoker) return '🃏';
   return ramiRankLabel(c.num) + c.suit;
+}
+
+function applyBrVoteResult(room, choice) {
+  const br = room.br;
+  if (!br) return;
+  if (br.voteTimer) { clearTimeout(br.voteTimer); br.voteTimer = null; }
+  br.pauseVotes = null;
+  if (choice === 'redistribute') {
+    const allCards = [];
+    for (const [, disc] of (br.disconnects || new Map())) allCards.push(...disc.hand);
+    br.disconnects = new Map();
+    let ci = 0;
+    for (const c of allCards) {
+      const pid = br.turnOrder[ci % br.turnOrder.length];
+      if (pid) br.hands.get(pid)?.push(c);
+      ci++;
+    }
+    br.paused = false;
+    broadcastRoom(room.id, { type: 'br-vote-result', choice: 'redistribute' });
+    for (const [pid, p] of room.players) {
+      send(p.ws, { type: 'br-hand-update', hand: br.hands.get(pid) || [] });
+    }
+    broadcastBrPlayerUpdate(room);
+    if (br.turnOrder.length <= 1) { endBluffRummy(room); return; }
+    sendBrTurn(room);
+  } else {
+    broadcastRoom(room.id, { type: 'br-vote-result', choice: 'wait', waitMs: 45000 });
+    br.voteTimer = setTimeout(() => {
+      const r = rooms.get(room.id);
+      if (r?.br?.paused) applyBrVoteResult(r, 'redistribute');
+    }, 45000);
+  }
 }
 
 function endBluffRummy(room) {
