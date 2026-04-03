@@ -797,6 +797,7 @@ wss.on('connection', (ws, req) => {
       case 'br-start': {
         const room = rooms.get(conn.roomId);
         if (!room || room.type !== 'bluffrummy') return;
+        if (room.br?.active) { send(ws, { type: 'error', msg: 'A game is already in progress' }); return; }
         if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2-4 players' }); return; }
         startBluffRummy(room);
         break;

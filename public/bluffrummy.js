@@ -141,6 +141,9 @@
         status.textContent = myTurn ? '' : 'Waiting for game to start…';
         btnStart.style.display = '';
         playArea.style.display = 'none';
+      } else if (gameActive) {
+        btnStart.style.display = 'none';
+        playArea.style.display = '';
       }
     },
 
