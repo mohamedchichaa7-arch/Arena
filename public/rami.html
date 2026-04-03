@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rami Tunisien — Game Arena</title>
+  <link rel="stylesheet" href="rami.css">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap"
+    rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+
+<body>
+  <div class="layout">
+    <!-- Sidebar: players -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+      <div class="score-board" id="scoreBoard">
+        <div class="sb-title">Scoreboard</div>
+        <div class="sb-rows" id="sbRows"></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
+        <h1 class="logo logo-sm">RAMI TUNISIEN</h1>
+        <span class="round-badge" id="roundBadge">Round 1</span>
+      </header>
+
+      <!-- Setup screen -->
+      <div class="setup-screen" id="setupScreen">
+        <div class="setup-card">
+          <h2 class="setup-title">New Game</h2>
+          <label class="setup-label">AI Opponents
+            <select id="aiCount">
+              <option value="1">1 (2 players)</option>
+              <option value="2" selected>2 (3 players)</option>
+              <option value="3">3 (4 players)</option>
+            </select>
+          </label>
+          <label class="setup-label">Losing Threshold
+            <select id="loseThreshold">
+              <option value="100">100 points</option>
+              <option value="200" selected>200 points</option>
+              <option value="300">300 points</option>
+            </select>
+          </label>
+          <button class="btn btn-primary btn-lg" id="btnNewGame">Start Game</button>
+        </div>
+      </div>
+
+      <!-- Status -->
+      <div class="status" id="status" style="display:none"></div>
+
+      <!-- Game feed -->
+      <div class="game-feed" id="gameFeed" style="display:none"></div>
+
+      <!-- Table melds -->
+      <div class="table-area" id="tableArea" style="display:none">
+        <div class="table-label">TABLE MELDS</div>
+        <div class="table-melds" id="tableMelds">
+          <div class="table-empty">No melds on the table yet</div>
+        </div>
+      </div>
+
+      <!-- Draw / Discard piles -->
+      <div class="piles-row" id="pilesRow" style="display:none">
+        <div class="pile draw-pile" id="drawPile">
+          <div class="pile-stack">
+            <div class="pile-card-back"></div>
+            <div class="pile-card-back off1"></div>
+            <div class="pile-card-back off2"></div>
+          </div>
+          <div class="pile-count" id="drawCount">0</div>
+          <div class="pile-name">DRAW</div>
+        </div>
+        <div class="pile discard-pile" id="discardPile">
+          <div class="discard-top" id="discardTop">
+            <span class="dt-empty-msg">Empty</span>
+          </div>
+          <div class="pile-name">DISCARD</div>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="action-bar" id="actionBar" style="display:none">
+        <button class="btn btn-action" id="btnDraw" disabled>🂠 Draw</button>
+        <button class="btn btn-action" id="btnPickDiscard" disabled>♻ Pick Discard</button>
+        <button class="btn btn-action btn-meld" id="btnMeld" disabled>📤 Meld Selected</button>
+        <button class="btn btn-action btn-add" id="btnAddToMeld" disabled>➕ Add to Meld</button>
+        <button class="btn btn-action btn-swap" id="btnSwapJoker" disabled>🃏 Swap Joker</button>
+        <button class="btn btn-action btn-discard" id="btnDiscard" disabled>🗑 Discard</button>
+        <div class="meld-points" id="meldPoints" style="display:none">
+          Selected: <strong id="meldPtsVal">0</strong> pts
+        </div>
+      </div>
+
+      <!-- Player hand -->
+      <div class="hand-area" id="handArea" style="display:none">
+        <div class="hand-label">Your Hand (<span id="handCount">0</span>)</div>
+        <div class="hand-cards" id="handCards"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Round-end overlay -->
+  <div class="overlay" id="roundOverlay">
+    <div class="overlay-card">
+      <h2 class="ov-title" id="ovTitle">Round Over</h2>
+      <div class="ov-body" id="ovBody"></div>
+      <button class="btn btn-primary btn-lg" id="btnNextRound">Next Round</button>
+    </div>
+  </div>
+
+  <!-- Game-over overlay -->
+  <div class="overlay" id="gameOverOverlay">
+    <div class="overlay-card">
+      <h2 class="ov-title" id="goTitle">Game Over</h2>
+      <div class="ov-body" id="goBody"></div>
+      <button class="btn btn-primary btn-lg" id="btnNewGameOver">New Game</button>
+    </div>
+  </div>
+
+  <!-- Confetti canvas -->
+  <canvas id="confetti" style="position:fixed;inset:0;pointer-events:none;z-index:999"></canvas>
+
+  <script src="rami.js"></script>
+</body>
+
+</html>

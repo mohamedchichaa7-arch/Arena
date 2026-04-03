@@ -211,7 +211,7 @@
     for (const r of rooms) {
       const card = document.createElement('div');
       card.className = 'room-card';
-      const icon = r.type === 'tetris' ? '\u{1F3AE}' : r.type === 'tictactoe' ? '\u2B55' : r.type === 'bluffrummy' ? '\u{1F0CF}' : '\u{1F3C1}';
+      const icon = r.type === 'tetris' ? '\u{1F3AE}' : r.type === 'tictactoe' ? '\u2B55' : r.type === 'bluffrummy' ? '\u{1F0CF}' : r.type === 'rami' ? '\u{1F3B4}' : '\u{1F3C1}';
       const statusCls = r.status === 'playing' ? 'playing' : 'waiting';
       const full = r.players >= r.maxPlayers;
       const lockBadge = r.locked ? '<span class="room-lock">\uD83D\uDD12</span>' : '';
@@ -238,6 +238,7 @@
     tetris: 'Highest single-game score',
     tictactoe: 'Total wins',
     bluffrummy: 'Total wins',
+    rami: 'Total round wins',
   };
 
   function openLeaderboard(game) {
