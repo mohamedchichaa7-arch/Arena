@@ -43,28 +43,31 @@
         <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
         <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
         <h1 class="logo logo-sm">RAMI TUNISIEN</h1>
-        <span class="round-badge" id="roundBadge">Round 1</span>
+        <span class="round-badge" id="roundBadge"></span>
+        <span class="room-badge" id="roomBadge"></span>
       </header>
 
       <!-- Setup screen -->
       <div class="setup-screen" id="setupScreen">
         <div class="setup-card">
-          <h2 class="setup-title">New Game</h2>
-          <label class="setup-label">AI Opponents
-            <select id="aiCount">
-              <option value="1">1 (2 players)</option>
-              <option value="2" selected>2 (3 players)</option>
-              <option value="3">3 (4 players)</option>
+          <h2 class="setup-title">Rami Tunisien</h2>
+          <p class="setup-hint">Waiting for players to join&hellip;</p>
+          <label class="setup-label">AI Opponents to fill empty seats
+            <select id="aiCountSel">
+              <option value="0">0 — humans only</option>
+              <option value="1">1 AI</option>
+              <option value="2">2 AI</option>
+              <option value="3" selected>3 AI (fill to 4)</option>
             </select>
           </label>
           <label class="setup-label">Losing Threshold
-            <select id="loseThreshold">
+            <select id="loseThreshSel">
               <option value="100">100 points</option>
               <option value="200" selected>200 points</option>
               <option value="300">300 points</option>
             </select>
           </label>
-          <button class="btn btn-primary btn-lg" id="btnNewGame">Start Game</button>
+          <button class="btn btn-primary btn-lg" id="btnStartGame">Start Game</button>
         </div>
       </div>
 
@@ -142,6 +145,7 @@
 
   <!-- Confetti canvas -->
   <canvas id="confetti" style="position:fixed;inset:0;pointer-events:none;z-index:999"></canvas>
+  <div class="error-toast" id="errorToast"></div>
 
   <script src="rami.js"></script>
 </body>

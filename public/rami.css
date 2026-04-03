@@ -157,7 +157,20 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter'
 .game-card.selected{transform:translateY(-10px);border-color:var(--primary);box-shadow:0 0 15px rgba(139,92,246,.4)}
 .game-card.dealt{animation:dealIn .4s ease-out both}
 .game-card.drag-over{border-color:var(--gold);box-shadow:0 0 12px rgba(251,191,36,.3)}
-.game-card.dragging{opacity:.4;transform:scale(.92)}
+.game-card.dragging{opacity:.3;transform:scale(.9) !important;box-shadow:none !important}
+
+/* Drag ghost — cloned card that follows the cursor */
+.drag-ghost{position:fixed;pointer-events:none;z-index:1000;opacity:.88;transform:rotate(-5deg) scale(1.06);box-shadow:0 20px 60px rgba(0,0,0,.7);transition:none !important;border-radius:8px}
+
+/* Error toast */
+.error-toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(20px);background:rgba(239,68,68,.92);color:#fff;padding:.45rem 1.1rem;border-radius:.5rem;font-size:.75rem;font-weight:600;opacity:0;pointer-events:none;transition:opacity .25s ease,transform .25s ease;z-index:500;white-space:nowrap;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.error-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* Room badge in header */
+.room-badge{font-size:.65rem;color:rgba(255,255,255,.4);font-family:'Inter',sans-serif;font-weight:400;margin-left:.5rem;white-space:nowrap}
+
+/* Setup hint */
+.setup-hint{font-size:.75rem;color:rgba(255,255,255,.45);margin:-.3rem 0 .8rem}
 
 @keyframes dealIn{from{opacity:0;transform:translateY(-40px) scale(.7) rotate(-10deg)}to{opacity:1;transform:translateY(0) scale(1) rotate(0)}}
 

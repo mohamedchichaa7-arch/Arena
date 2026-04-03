@@ -75,7 +75,35 @@
     lobbyScreen.style.display = '';
     userBadge.textContent = myName;
     roomNameInput.value = myName + "'s Room";
+    checkTesterAndUnlock();
     connect();
+  }
+
+  async function checkTesterAndUnlock() {
+    try {
+      const token = sessionStorage.getItem('arena-token');
+      if (!token) return;
+      const res = await fetch('/api/skins', { headers: { 'Authorization': 'Bearer ' + token } });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.isTester) {
+        // Add Rami to game type dropdown
+        if (!gameTypeSelect.querySelector('[value="rami"]')) {
+          const opt = document.createElement('option');
+          opt.value = 'rami'; opt.textContent = '🎴 Rami Tunisien';
+          gameTypeSelect.appendChild(opt);
+        }
+        // Add Rami leaderboard tab
+        const lbTabs = document.querySelector('.lb-tabs');
+        if (lbTabs && !lbTabs.querySelector('[data-game="rami"]')) {
+          const btn = document.createElement('button');
+          btn.className = 'lb-tab'; btn.dataset.game = 'rami';
+          btn.textContent = '🎴 Rami';
+          btn.addEventListener('click', () => openLeaderboard('rami'));
+          lbTabs.appendChild(btn);
+        }
+      }
+    } catch {}
   }
 
   function setAuthError(msg) { authError.textContent = msg; }

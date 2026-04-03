@@ -444,6 +444,15 @@ function removeFromRoom(conn) {
       sendBrTurn(room);
     }
   }
+  if (room.rami && room.rami.active) {
+    // Remove from human turn order only; AI stays
+    room.rami.turnOrder = room.rami.turnOrder.filter(pid => pid !== conn.id);
+    room.rami.hands.delete(conn.id);
+    if (room.rami.turnIdx >= room.rami.turnOrder.length) room.rami.turnIdx = 0;
+    if (room.rami.turnOrder.length === 0 || room.players.size === 0) {
+      room.rami.active = false;
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -517,7 +526,7 @@ wss.on('connection', (ws, req) => {
       case 'create-room': {
         const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? 1 : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -855,9 +864,234 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
-      case 'game-over': {
+      // ── Rami Tunisien ──────────────────────────────────────
+      case 'rami-start': {
         const room = rooms.get(conn.roomId);
-        if (!room) return;
+        if (!room || room.type !== 'rami') break;
+        if (room.players.size < 1) { send(ws, {type:'error', msg:'Need at least 1 player'}); break; }
+        if (room.rami?.roundActive) break;
+
+        // Build turn order: real players first, then AI to fill up to 4
+        const humanIds = [...room.players.keys()];
+        const loseThreshold = Math.max(50, Math.min(500, parseInt(msg.loseThreshold) || 200));
+        const totalSeats = Math.min(4, Math.max(2, humanIds.length + (parseInt(msg.aiCount) ?? (4 - humanIds.length))));
+        const aiNeeded = Math.max(0, totalSeats - humanIds.length);
+
+        const aiIds = new Set();
+        const aiNames = new Map();
+        const aiHands = new Map();
+        const allIds = [...humanIds];
+        for (let i = 0; i < aiNeeded; i++) {
+          const aiId = `ai-rami-${++ramiAiSeq}`;
+          aiIds.add(aiId);
+          aiNames.set(aiId, RAMI_AI_NAMES[i % RAMI_AI_NAMES.length] + (aiNeeded > 3 ? ' '+(i+1) : ''));
+          aiHands.set(aiId, []);
+          allIds.push(aiId);
+        }
+
+        const scoreMap = new Map();
+        if (room.rami?.scores) {
+          for (const [pid, s] of room.rami.scores) scoreMap.set(pid, s);
+        }
+        for (const pid of allIds) if (!scoreMap.has(pid)) scoreMap.set(pid, 0);
+
+        room.rami = {
+          deck: [], discardPile: [], melds: [], meldCounter: 0,
+          hands: new Map([...humanIds.map(id => [id,[]]), ...aiHands]),
+          hasOpened: new Map(),
+          scores: scoreMap,
+          roundNum: room.rami?.roundNum || 0,
+          loseThreshold,
+          turnOrder: allIds,
+          turnIdx: 0,
+          aiIds, aiNames,
+          active: true,
+          roundActive: false,
+          drawnThisTurn: false,
+          turnPendingMelds: [],
+          turnOpenPts: 0,
+        };
+        room.status = 'playing';
+        broadcastLobby();
+        startRamiRound(room);
+        log('info', 'rami-start', {roomId:room.id, players:allIds.length, ai:aiNeeded});
+        break;
+      }
+
+      case 'rami-draw': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.rami?.roundActive) break;
+        const r = room.rami;
+        if (r.turnOrder[r.turnIdx] !== id || r.drawnThisTurn) break;
+        if (r.deck.length === 0) ramiReshuffleDeck(r);
+        if (r.deck.length === 0) break;
+        const card = r.deck.pop();
+        r.hands.get(id).push(card);
+        r.drawnThisTurn = true;
+        send(ws, {type:'rami-drew', card, deckCount: r.deck.length, source:'deck'});
+        broadcastRoom(room.id, {type:'rami-drew-public', playerId:id, deckCount:r.deck.length}, id);
+        sendRamiStateAll(room);
+        break;
+      }
+
+      case 'rami-pick-discard': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.rami?.roundActive) break;
+        const r = room.rami;
+        if (r.turnOrder[r.turnIdx] !== id || r.drawnThisTurn) break;
+        if (r.discardPile.length === 0) break;
+        const card = r.discardPile.pop();
+        r.hands.get(id).push(card);
+        r.drawnThisTurn = true;
+        send(ws, {type:'rami-drew', card, source:'discard'});
+        broadcastRoom(room.id, {
+          type:'rami-log',
+          text: (room.players.get(id)?.name||'?')+' picked up '+ramiCardStr(card)+' from discard.',
+          cls:'info',
+        }, id);
+        sendRamiStateAll(room);
+        break;
+      }
+
+      case 'rami-meld': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.rami?.roundActive) break;
+        const r = room.rami;
+        if (r.turnOrder[r.turnIdx] !== id || !r.drawnThisTurn) break;
+        const h = r.hands.get(id);
+        const indices = Array.isArray(msg.indices) ? msg.indices.map(Number) : [];
+        if (indices.some(i => i < 0 || i >= h.length)) break;
+        const cards = indices.map(i => ({...h[i]}));
+        const result = validateRamiMeld(cards);
+        if (!result.valid) { send(ws, {type:'rami-error', msg: result.reason}); break; }
+
+        // Check opening
+        if (!r.hasOpened.get(id)) {
+          const newTotal = r.turnOpenPts + result.pts;
+          // Remove from hand
+          const desc = [...indices].sort((a,b) => b-a);
+          const meldCards = [];
+          for (const i of desc) meldCards.unshift(h.splice(i,1)[0]);
+          validateRamiMeld(meldCards); // tag jokers
+          const meldId = ++r.meldCounter;
+          r.melds.push({id: meldId, cards: meldCards});
+          r.turnPendingMelds.push(meldId);
+          r.turnOpenPts = newTotal;
+          if (newTotal >= 71) {
+            r.hasOpened.set(id, true);
+            r.turnPendingMelds = [];
+            r.turnOpenPts = 0;
+            broadcastRoom(room.id, {type:'rami-log', text:(room.players.get(id)?.name||'?')+' opened with '+newTotal+' pts!', cls:'meld'});
+          } else {
+            broadcastRoom(room.id, {type:'rami-log', text:(room.players.get(id)?.name||'?')+' melded '+result.pts+' pts ('+newTotal+'/71 toward opening).', cls:'meld'});
+          }
+        } else {
+          const desc = [...indices].sort((a,b) => b-a);
+          const meldCards = [];
+          for (const i of desc) meldCards.unshift(h.splice(i,1)[0]);
+          validateRamiMeld(meldCards);
+          r.melds.push({id: ++r.meldCounter, cards: meldCards});
+          broadcastRoom(room.id, {type:'rami-log', text:(room.players.get(id)?.name||'?')+' melded a '+result.type+'.', cls:'meld'});
+        }
+        sendRamiStateAll(room);
+        if (h.length === 0) { ramiEndRound(room, id); }
+        break;
+      }
+
+      case 'rami-add-to-meld': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.rami?.roundActive) break;
+        const r = room.rami;
+        if (r.turnOrder[r.turnIdx] !== id || !r.drawnThisTurn) break;
+        if (!r.hasOpened.get(id)) { send(ws, {type:'rami-error', msg:'Open first (need 71+ pts total)!'}); break; }
+        const h = r.hands.get(id);
+        const cardIdx = parseInt(msg.cardIdx);
+        const meldId = parseInt(msg.meldId);
+        if (isNaN(cardIdx) || cardIdx < 0 || cardIdx >= h.length) break;
+        const meld = r.melds.find(m => m.id === meldId);
+        if (!meld) { send(ws, {type:'rami-error', msg:'Meld not found'}); break; }
+        const newCards = ramiAddCardToMeld(meld.cards, h[cardIdx]);
+        if (!newCards) { send(ws, {type:'rami-error', msg:'Card doesn\'t fit this meld'}); break; }
+        meld.cards = newCards;
+        const card = h.splice(cardIdx, 1)[0];
+        broadcastRoom(room.id, {type:'rami-log', text:(room.players.get(id)?.name||'?')+' added '+ramiCardStr(card)+' to a meld.', cls:'meld'});
+        sendRamiStateAll(room);
+        if (h.length === 0) { ramiEndRound(room, id); }
+        break;
+      }
+
+      case 'rami-swap-joker': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.rami?.roundActive) break;
+        const r = room.rami;
+        if (r.turnOrder[r.turnIdx] !== id || !r.drawnThisTurn) break;
+        if (!r.hasOpened.get(id)) { send(ws, {type:'rami-error', msg:'Open first!'}); break; }
+        const h = r.hands.get(id);
+        const cardIdx = parseInt(msg.cardIdx);
+        const meldId = parseInt(msg.meldId);
+        if (isNaN(cardIdx) || cardIdx < 0 || cardIdx >= h.length) break;
+        const meld = r.melds.find(m => m.id === meldId);
+        if (!meld) { send(ws, {type:'rami-error', msg:'Meld not found'}); break; }
+        const jokerPos = meld.cards.findIndex(c => c.isJoker);
+        if (jokerPos === -1) { send(ws, {type:'rami-error', msg:'No Joker in this meld!'}); break; }
+        const testCards = [...meld.cards];
+        testCards[jokerPos] = h[cardIdx];
+        if (!validateRamiMeld(testCards).valid) { send(ws, {type:'rami-error', msg:'Card doesn\'t replace the Joker\'s position here'}); break; }
+        const joker = meld.cards[jokerPos];
+        joker.substituteNum = undefined; joker.substituteSuit = undefined;
+        meld.cards[jokerPos] = h[cardIdx];
+        h.splice(cardIdx, 1);
+        h.push(joker);
+        broadcastRoom(room.id, {type:'rami-log', text:(room.players.get(id)?.name||'?')+' swapped a Joker from a meld!', cls:'meld'});
+        sendRamiStateAll(room);
+        break;
+      }
+
+      case 'rami-discard': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.rami?.roundActive) break;
+        const r = room.rami;
+        if (r.turnOrder[r.turnIdx] !== id || !r.drawnThisTurn) break;
+        const h = r.hands.get(id);
+        const cardIdx = parseInt(msg.cardIdx);
+        if (isNaN(cardIdx) || cardIdx < 0 || cardIdx >= h.length) break;
+
+        // If not opened and has pending melds, undo them
+        if (!r.hasOpened.get(id) && r.turnPendingMelds.length > 0) {
+          for (let i = r.turnPendingMelds.length - 1; i >= 0; i--) {
+            const meldId = r.turnPendingMelds[i];
+            const idx = r.melds.findIndex(m => m.id === meldId);
+            if (idx !== -1) {
+              const meldCards = r.melds.splice(idx, 1)[0].cards;
+              h.push(...meldCards);
+            }
+          }
+          r.turnPendingMelds = [];
+          r.turnOpenPts = 0;
+          sendRamiStateAll(room);
+          send(ws, {type:'rami-error', msg:'Opening not reached (need 71 pts) — melds returned to your hand.'});
+          break;
+        }
+
+        const card = h.splice(cardIdx, 1)[0];
+        r.discardPile.push(card);
+        r.turnPendingMelds = [];
+        r.turnOpenPts = 0;
+        broadcastRoom(room.id, {type:'rami-log', text:(room.players.get(id)?.name||'?')+' discarded '+ramiCardStr(card)+'.', cls:'info'});
+        sendRamiStateAll(room);
+        if (h.length === 0) { ramiEndRound(room, id); return; }
+        ramiAdvanceTurn(room);
+        break;
+      }
+
+      case 'rami-next-round': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.rami?.active || room.rami?.roundActive) break;
+        startRamiRound(room);
+        break;
+      }
+
+      case 'game-over': {
         broadcastRoom(room.id, { type: 'player-gameover', id, name: conn.name }, id);
         const elapsedGame = room.battle?.startedAt ? Math.floor((Date.now() - room.battle.startedAt) / 1000) : null;
         log('info', 'game-over', { id, name: conn.name, ip: conn.ip, roomId: room.id, elapsedSec: elapsedGame });
@@ -1059,6 +1293,452 @@ function broadcastBrPlayerUpdate(room) {
     });
   }
   broadcastRoom(room.id, { type: 'br-player-update', players: playersList });
+}
+
+// ── Rami Tunisien helpers ────────────────────────────────────────
+const RAMI_SUITS = ['♠','♥','♦','♣'];
+const RAMI_AI_NAMES = ['Aziz','Fatma','Youssef'];
+let ramiAiSeq = 0;
+
+function ramiCardPts(c) {
+  if (c.isJoker) return 0;
+  if (c.num === 1 || c.num >= 11) return 10;
+  return c.num;
+}
+function ramiHandPts(h) { return h.reduce((s,c) => s + ramiCardPts(c), 0); }
+function ramiRankLabel(n) { return n === 1 ? 'A' : n === 11 ? 'J' : n === 12 ? 'Q' : n === 13 ? 'K' : String(n); }
+
+function validateRamiMeld(cards) {
+  if (cards.length < 3) return {valid:false, reason:'Need at least 3 cards'};
+  const reals = cards.filter(c => !c.isJoker);
+  const jokerCount = cards.length - reals.length;
+
+  // ── SET: 3-4 cards same rank, different suits ──
+  if (cards.length <= 4) {
+    const rankSet = new Set(reals.map(c => c.num));
+    const suits = reals.map(c => c.suit);
+    const suitSet = new Set(suits);
+    if (rankSet.size <= 1 && suitSet.size === suits.length) {
+      const rank = reals.length > 0 ? reals[0].num : 1;
+      const ptVal = (rank === 1 || rank >= 11) ? 10 : rank;
+      const pts = cards.length * ptVal;
+      const usedSuits = new Set(suits);
+      const availSuits = RAMI_SUITS.filter(s => !usedSuits.has(s));
+      let ji = 0;
+      cards.forEach(c => { if (c.isJoker) { c.substituteNum = rank; c.substituteSuit = availSuits[ji++] || '♠'; }});
+      return {valid:true, type:'set', pts};
+    }
+    if (rankSet.size === 1 && suitSet.size < suits.length)
+      return {valid:false, reason:'Sets need different suits for each card'};
+  }
+
+  // ── RUN: 3+ consecutive same suit ──
+  const suitSetAll = new Set(reals.map(c => c.suit));
+  if (suitSetAll.size <= 1) {
+    const suit = suitSetAll.size === 1 ? [...suitSetAll][0] : '♠';
+    const tryStart = (start) => {
+      const needed = [];
+      for (let i = 0; i < cards.length; i++) needed.push(start + i);
+      if (needed[needed.length-1] > 14) return null;
+      const usedReal = new Set();
+      let jUsed = 0;
+      for (const n of needed) {
+        let found = false;
+        for (let ri = 0; ri < reals.length; ri++) {
+          if (usedReal.has(ri)) continue;
+          if (reals[ri].num === n || (reals[ri].num === 1 && n === 14)) { usedReal.add(ri); found = true; break; }
+        }
+        if (!found) jUsed++;
+      }
+      if (jUsed !== jokerCount) return null;
+      let pts = 0;
+      const jokers = cards.filter(c => c.isJoker);
+      let ji = 0;
+      const usedReal2 = new Set();
+      for (const n of needed) {
+        const actualNum = n > 13 ? 1 : n;
+        let found = false;
+        for (let ri = 0; ri < reals.length; ri++) {
+          if (usedReal2.has(ri)) continue;
+          if (reals[ri].num === n || (reals[ri].num === 1 && n === 14)) {
+            usedReal2.add(ri); pts += ramiCardPts(reals[ri]); found = true; break;
+          }
+        }
+        if (!found && ji < jokers.length) {
+          jokers[ji].substituteNum = actualNum;
+          jokers[ji].substituteSuit = suit;
+          pts += (actualNum === 1 || actualNum >= 11) ? 10 : actualNum;
+          ji++;
+        }
+      }
+      return pts;
+    };
+    for (let s = 1; s <= 14; s++) {
+      const pts = tryStart(s);
+      if (pts !== null) return {valid:true, type:'run', pts};
+    }
+    return {valid:false, reason:'Cards are not consecutive (for a run they must follow in order, same suit)'};
+  }
+
+  // Mixed ranks and suits
+  const rankSet2 = new Set(reals.map(c => c.num));
+  if (rankSet2.size === 1) return {valid:false, reason:'Cards must have different suits in a set'};
+  return {valid:false, reason:'Cards must be same rank (set) or consecutive same suit (run)'};
+}
+
+function ramiAddCardToMeld(meld, card) {
+  const test1 = [...meld, card];
+  if (validateRamiMeld(test1).valid) return test1;
+  const test2 = [card, ...meld];
+  if (validateRamiMeld(test2).valid) return test2;
+  return null;
+}
+
+function buildRamiDeck() {
+  const d = [];
+  for (let copy = 0; copy < 2; copy++) {
+    for (let num = 1; num <= 13; num++) {
+      for (const suit of RAMI_SUITS) d.push({num, suit, isJoker:false});
+    }
+  }
+  d.push({num:0, suit:'🃏', isJoker:true});
+  d.push({num:0, suit:'🃏', isJoker:true});
+  return d;
+}
+
+function ramiShuffle(arr) {
+  for (let i = arr.length-1; i > 0; i--) {
+    const j = Math.floor(Math.random()*(i+1)); [arr[i],arr[j]] = [arr[j],arr[i]];
+  }
+}
+
+function startRamiRound(room) {
+  const r = room.rami;
+  r.roundNum++;
+  const deck = buildRamiDeck();
+  ramiShuffle(deck);
+  r.deck = deck;
+  r.discardPile = [];
+  r.melds = [];
+  r.meldCounter = 0;
+  r.turnPendingMelds = [];
+  r.turnOpenPts = 0;
+
+  r.hasOpened = new Map();
+  for (const pid of r.turnOrder) { r.hasOpened.set(pid, false); r.hands.set(pid, []); }
+
+  // Deal 14 cards each
+  for (let i = 0; i < 14; i++) {
+    for (const pid of r.turnOrder) r.hands.get(pid).push(r.deck.pop());
+  }
+  // Flip initial discard
+  r.discardPile.push(r.deck.pop());
+  r.roundActive = true;
+  r.turnIdx = 0;
+  r.drawnThisTurn = false;
+
+  sendRamiStateAll(room);
+  sendRamiTurn(room);
+  broadcastRoom(room.id, {type:'rami-log', text:'Round '+r.roundNum+' begins!', cls:'info'});
+}
+
+function sendRamiStateAll(room) {
+  const r = room.rami;
+  // Send each player their private state (own hand)
+  for (const [pid, p] of room.players) {
+    const myHand = r.hands.get(pid) || [];
+    send(p.ws, {
+      type: 'rami-state',
+      hand: myHand,
+      melds: r.melds,
+      discardTop: r.discardPile.length > 0 ? r.discardPile[r.discardPile.length-1] : null,
+      discardCount: r.discardPile.length,
+      deckCount: r.deck.length,
+      roundNum: r.roundNum,
+      loseThreshold: r.loseThreshold,
+      players: r.turnOrder.map(id => ({
+        id,
+        name: r.aiNames.has(id) ? r.aiNames.get(id) : room.players.get(id)?.name || 'Player',
+        isAI: r.aiIds.has(id),
+        cardCount: r.hands.get(id)?.length ?? 0,
+        score: r.scores.get(id) || 0,
+        hasOpened: r.hasOpened.get(id) || false,
+      })),
+      turnId: r.turnOrder[r.turnIdx],
+      hasOpened: r.hasOpened.get(pid) || false,
+      turnOpenPts: r.turnOrder[r.turnIdx] === pid ? r.turnOpenPts : 0,
+      myId: pid,
+      active: r.roundActive,
+    });
+  }
+}
+
+function sendRamiTurn(room) {
+  const r = room.rami;
+  const currentId = r.turnOrder[r.turnIdx];
+  broadcastRoom(room.id, {
+    type: 'rami-turn',
+    turnId: currentId,
+    isAI: r.aiIds.has(currentId),
+    playerName: r.aiNames.has(currentId) ? r.aiNames.get(currentId) : room.players.get(currentId)?.name || 'Player',
+  });
+}
+
+function ramiReshuffleDeck(r) {
+  if (r.discardPile.length <= 1) return;
+  const top = r.discardPile.pop();
+  r.deck = [...r.discardPile];
+  r.discardPile = [top];
+  ramiShuffle(r.deck);
+}
+
+function ramiAdvanceTurn(room) {
+  const r = room.rami;
+  r.turnIdx = (r.turnIdx + 1) % r.turnOrder.length;
+  r.drawnThisTurn = false;
+  r.turnPendingMelds = [];
+  r.turnOpenPts = 0;
+  sendRamiTurn(room);
+  sendRamiStateAll(room);
+  // If next is AI, run after short delay
+  const nextId = r.turnOrder[r.turnIdx];
+  if (r.aiIds.has(nextId)) {
+    setTimeout(() => runRamiAI(room, nextId), 900);
+  }
+}
+
+function ramiEndRound(room, winnerId) {
+  const r = room.rami;
+  r.roundActive = false;
+  const winnerName = r.aiNames.has(winnerId) ? r.aiNames.get(winnerId) : room.players.get(winnerId)?.name || 'Player';
+
+  const results = r.turnOrder.map(pid => {
+    const pts = pid === winnerId ? 0 : ramiHandPts(r.hands.get(pid) || []);
+    r.scores.set(pid, (r.scores.get(pid) || 0) + pts);
+    return {
+      id: pid,
+      name: r.aiNames.has(pid) ? r.aiNames.get(pid) : room.players.get(pid)?.name || 'Player',
+      penalty: pts,
+      total: r.scores.get(pid),
+      isWinner: pid === winnerId,
+    };
+  });
+
+  broadcastRoom(room.id, {type:'rami-round-over', winnerName, results});
+  broadcastRoom(room.id, {type:'rami-log', text:winnerName+' wins Round '+r.roundNum+'!', cls:'win'});
+
+  // Report score for human winner
+  if (!r.aiIds.has(winnerId) && room.players.has(winnerId)) {
+    // Score reported by client via /api/score
+  }
+
+  // Check game over
+  const maxScore = Math.max(...r.turnOrder.map(pid => r.scores.get(pid) || 0));
+  if (maxScore >= r.loseThreshold) {
+    endRamiGame(room);
+  }
+}
+
+function endRamiGame(room) {
+  const r = room.rami;
+  r.active = false;
+  room.status = 'waiting';
+  const sorted = [...r.turnOrder]
+    .map(pid => ({
+      id: pid,
+      name: r.aiNames.has(pid) ? r.aiNames.get(pid) : room.players.get(pid)?.name || 'Player',
+      score: r.scores.get(pid) || 0,
+    }))
+    .sort((a,b) => a.score - b.score);
+  broadcastRoom(room.id, {type:'rami-game-over', rankings: sorted});
+  broadcastLobby();
+  log('info', 'rami-gameover', {roomId:room.id, winner:sorted[0]?.name});
+}
+
+// ── Rami AI ───────────────────────────────────────────────────
+function ramiAiCanUseDiscard(hand, card) {
+  for (let i = 0; i < hand.length; i++) {
+    for (let j = i+1; j < hand.length; j++) {
+      if (validateRamiMeld([hand[i], hand[j], {...card}]).valid) return true;
+    }
+  }
+  return false;
+}
+
+function ramiCombinations(n, k) {
+  if (k > n) return [];
+  const result = [];
+  const combo = [];
+  function gen(start) {
+    if (combo.length === k) { result.push([...combo]); return; }
+    if (start >= n) return;
+    if (result.length > 8000) return;
+    combo.push(start);
+    gen(start+1);
+    combo.pop();
+    gen(start+1);
+  }
+  gen(0);
+  return result;
+}
+
+function ramiFindAllMelds(h) {
+  const used = new Set();
+  const result = [];
+  for (let size = Math.min(h.length, 13); size >= 3; size--) {
+    const combos = ramiCombinations(h.length, size);
+    for (const indices of combos) {
+      if (indices.some(i => used.has(i))) continue;
+      const cards = indices.map(i => ({...h[i]}));
+      const v = validateRamiMeld(cards);
+      if (v.valid) { result.push({indices, type:v.type, pts:v.pts}); for (const i of indices) used.add(i); }
+    }
+  }
+  return result;
+}
+
+function ramiFindBestMeld(h) {
+  let best = null;
+  for (let size = Math.min(h.length, 13); size >= 3; size--) {
+    const combos = ramiCombinations(h.length, size);
+    for (const indices of combos) {
+      const cards = indices.map(i => ({...h[i]}));
+      const v = validateRamiMeld(cards);
+      if (v.valid && (!best || v.pts > best.pts)) best = {indices, type:v.type, pts:v.pts};
+    }
+    if (best) break;
+  }
+  return best;
+}
+
+function ramiBestDiscard(h) {
+  let bestIdx = 0, bestScore = Infinity;
+  for (let i = 0; i < h.length; i++) {
+    const c = h[i];
+    if (c.isJoker) continue;
+    let score = 0;
+    for (let j = 0; j < h.length; j++) {
+      if (j === i) continue;
+      if (!h[j].isJoker && h[j].num === c.num) score += 3;
+      if (!h[j].isJoker && h[j].suit === c.suit && Math.abs(h[j].num - c.num) <= 2) score += 2;
+    }
+    score -= ramiCardPts(c) * 0.5;
+    if (score < bestScore) { bestScore = score; bestIdx = i; }
+  }
+  return bestIdx;
+}
+
+function runRamiAI(room, aiId) {
+  const r = room.rami;
+  if (!r || !r.roundActive || r.turnOrder[r.turnIdx] !== aiId) return;
+  const h = r.hands.get(aiId);
+
+  // 1. Draw
+  let drewDiscard = false;
+  if (r.discardPile.length > 0 && ramiAiCanUseDiscard(h, r.discardPile[r.discardPile.length-1])) {
+    const card = r.discardPile.pop();
+    h.push(card);
+    drewDiscard = true;
+    broadcastRoom(room.id, {
+      type:'rami-log',
+      text: r.aiNames.get(aiId)+' picked up '+ramiCardStr(card)+' from discard.',
+      cls:'ai',
+    });
+  } else {
+    if (r.deck.length === 0) ramiReshuffleDeck(r);
+    if (r.deck.length > 0) h.push(r.deck.pop());
+    broadcastRoom(room.id, {type:'rami-log', text:r.aiNames.get(aiId)+' drew from the deck.', cls:'ai'});
+  }
+
+  // 2. Meld
+  if (!r.hasOpened.get(aiId)) {
+    const allMelds = ramiFindAllMelds(h);
+    const total = allMelds.reduce((s,m) => s+m.pts, 0);
+    if (total >= 71) {
+      const allIdx = new Set();
+      for (const m of allMelds) for (const i of m.indices) allIdx.add(i);
+      const removeSorted = [...allIdx].sort((a,b) => b-a);
+      const removedMap = new Map();
+      for (const i of removeSorted) removedMap.set(i, h.splice(i,1)[0]);
+      for (const m of allMelds) {
+        const meldCards = m.indices.map(i => removedMap.get(i));
+        validateRamiMeld(meldCards); // tag jokers
+        r.melds.push({id: ++r.meldCounter, cards: meldCards});
+        broadcastRoom(room.id, {
+          type:'rami-log',
+          text: r.aiNames.get(aiId)+' melded a '+m.type+' ('+m.pts+' pts).',
+          cls:'ai',
+        });
+      }
+      r.hasOpened.set(aiId, true);
+      broadcastRoom(room.id, {
+        type:'rami-log',
+        text: r.aiNames.get(aiId)+' opened with '+total+' points!',
+        cls:'ai',
+      });
+    }
+  } else {
+    // Keep melding while possible
+    let found = true;
+    while (found) {
+      found = false;
+      const best = ramiFindBestMeld(h);
+      if (best) {
+        const sorted = [...best.indices].sort((a,b) => b-a);
+        const meldCards = [];
+        for (const i of sorted) meldCards.unshift(h.splice(i,1)[0]);
+        validateRamiMeld(meldCards);
+        r.melds.push({id: ++r.meldCounter, cards: meldCards});
+        broadcastRoom(room.id, {type:'rami-log', text:r.aiNames.get(aiId)+' melded a '+best.type+'.', cls:'ai'});
+        found = true;
+      }
+    }
+    // Add to existing melds
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let ci = h.length-1; ci >= 0; ci--) {
+        for (const meld of r.melds) {
+          const newCards = ramiAddCardToMeld(meld.cards, h[ci]);
+          if (newCards) {
+            broadcastRoom(room.id, {type:'rami-log', text:r.aiNames.get(aiId)+' added '+ramiCardStr(h[ci])+' to a meld.', cls:'ai'});
+            meld.cards = newCards;
+            h.splice(ci,1);
+            changed = true;
+            break;
+          }
+        }
+        if (changed) break;
+      }
+    }
+  }
+
+  // Win check
+  if (h.length === 0) {
+    sendRamiStateAll(room);
+    ramiEndRound(room, aiId);
+    return;
+  }
+
+  // 3. Discard
+  const discIdx = ramiBestDiscard(h);
+  const disc = h.splice(discIdx,1)[0];
+  r.discardPile.push(disc);
+  broadcastRoom(room.id, {type:'rami-log', text:r.aiNames.get(aiId)+' discarded '+ramiCardStr(disc)+'.', cls:'ai'});
+
+  if (h.length === 0) {
+    sendRamiStateAll(room);
+    ramiEndRound(room, aiId);
+    return;
+  }
+
+  sendRamiStateAll(room);
+  ramiAdvanceTurn(room);
+}
+
+function ramiCardStr(c) {
+  if (c.isJoker) return '🃏';
+  return ramiRankLabel(c.num) + c.suit;
 }
 
 function endBluffRummy(room) {
