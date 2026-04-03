@@ -45,6 +45,13 @@
 
       <div class="controls">
         <button class="btn btn-primary" id="btnStart">Start</button>
+        <select id="modeSelect" class="mode-select">
+          <option value="marathon">🏆 Marathon</option>
+          <option value="sprint">⏱️ Sprint</option>
+          <option value="ultra">⚡ Ultra</option>
+          <option value="survival">💀 Survival</option>
+          <option value="dig">⛏️ Dig</option>
+        </select>
         <button class="btn btn-accent" id="btnBattle">Battle</button>
         <div class="ai-controls">
           <select id="aiDifficulty">
@@ -72,6 +79,7 @@
               id="panelLines">0</span></div>
           <div class="panel-box garbage-box"><span class="panel-label">GARBAGE</span><span class="panel-value"
               id="panelGarbage">0</span></div>
+          <div class="panel-box" id="timerBox" style="display:none"><span class="panel-label" id="timerLabel">TIME</span><span class="panel-value" id="panelTimer">0:00</span></div>
         </div>
         <div class="board-wrap"><canvas id="boardCanvas"></canvas></div>
         <div class="side-panel">
@@ -117,7 +125,7 @@
     <div class="win-stats">
       <div>Score: <span id="goScore">0</span></div>
       <div>Lines: <span id="goLines">0</span></div>
-      <div>Level: <span id="goLevel">1</span></div>
+      <div><span id="goLevelLabel">Level</span>: <span id="goLevel">1</span></div>
     </div>
     <button class="btn btn-primary btn-lg" id="btnRestart">Play Again</button>
   </div>

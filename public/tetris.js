@@ -87,6 +87,9 @@
   const btnRestart = $('btnRestart'), confettiCvs = $('confetti'), cctx = confettiCvs.getContext('2d');
   const roomBadge = $('roomBadge'), btnBack = $('btnBack');
   const chatMessages = $('chatMessages'), chatInput = $('chatInput'), chatSend = $('chatSend');
+  const modeSelect = $('modeSelect');
+  const timerBox = $('timerBox'), panelTimer = $('panelTimer'), timerLabel = $('timerLabel');
+  const goLevelLabel = $('goLevelLabel');
 
   roomBadge.textContent = 'Room ' + roomId;
 
@@ -95,20 +98,21 @@
   // ══════════════════════════════════════════════════════════════════
   class TetrisEngine {
     constructor() { this.reset(); }
-    reset() { this.board = Array.from({ length: ROWS }, () => Array(COLS).fill(0)); this.piece = null; this.holdType = null; this.holdUsed = false; this.bag = []; this.score = 0; this.level = 1; this.lines = 0; this.combo = -1; this.state = 'idle'; this.dropCounter = 0; this.lockCounter = 0; this.lockLimit = 500; this.clearingRows = []; this.clearTimer = 0; this.pendingGarbage = 0; this.garbageSent = 0; this.lockedPiece = null; this.clearingStarted = false; this.lastClearInfo = null; }
+    reset() { this.board = Array.from({ length: ROWS }, () => Array(COLS).fill(0)); this.piece = null; this.holdType = null; this.holdUsed = false; this.bag = []; this.score = 0; this.level = 1; this.lines = 0; this.combo = -1; this.state = 'idle'; this.dropCounter = 0; this.lockCounter = 0; this.lockResets = 0; this.maxLockResets = 15; this.lockLimit = 500; this.clearingRows = []; this.clearTimer = 0; this.pendingGarbage = 0; this.garbageSent = 0; this.lockedPiece = null; this.clearingStarted = false; this.lastClearInfo = null; }
     start() { this.reset(); this.state = 'playing'; this.spawnPiece(); }
     fillBag() { const b = [...TYPES]; for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[b[i], b[j]] = [b[j], b[i]]; } this.bag.push(...b); }
     nextType() { if (this.bag.length < 7) this.fillBag(); return this.bag.shift(); }
     peekNext(n) { while (this.bag.length < n + 7) this.fillBag(); return this.bag.slice(0, n); }
-    spawnPiece() { const type = this.nextType(); this.piece = { type, colorIdx: COLOR_IDX[type], rotation: 0, shape: ROTATIONS[type][0], x: SPAWN_X[type], y: SPAWN_Y[type] }; this.lockCounter = 0; this.dropCounter = 0; this.holdUsed = false; if (this.collides(this.piece.shape, this.piece.x, this.piece.y)) this.state = 'gameover'; }
+    spawnPiece() { const type = this.nextType(); this.piece = { type, colorIdx: COLOR_IDX[type], rotation: 0, shape: ROTATIONS[type][0], x: SPAWN_X[type], y: SPAWN_Y[type] }; this.lockCounter = 0; this.lockResets = 0; this.dropCounter = 0; this.holdUsed = false; if (this.collides(this.piece.shape, this.piece.x, this.piece.y)) this.state = 'gameover'; }
     collides(shape, ox, oy) { for (let r = 0; r < shape.length; r++)for (let c = 0; c < shape[r].length; c++) { if (!shape[r][c]) continue; const br = oy + r, bc = ox + c; if (bc < 0 || bc >= COLS || br >= ROWS) return true; if (br >= 0 && this.board[br][bc]) return true; } return false; }
-    moveLeft() { if (!this.piece || this.state !== 'playing') return false; if (!this.collides(this.piece.shape, this.piece.x - 1, this.piece.y)) { this.piece.x--; this.lockCounter = 0; return true; } return false; }
-    moveRight() { if (!this.piece || this.state !== 'playing') return false; if (!this.collides(this.piece.shape, this.piece.x + 1, this.piece.y)) { this.piece.x++; this.lockCounter = 0; return true; } return false; }
+    moveLeft() { if (!this.piece || this.state !== 'playing') return false; if (!this.collides(this.piece.shape, this.piece.x - 1, this.piece.y)) { this.piece.x--; this._tryResetLock(); return true; } return false; }
+    moveRight() { if (!this.piece || this.state !== 'playing') return false; if (!this.collides(this.piece.shape, this.piece.x + 1, this.piece.y)) { this.piece.x++; this._tryResetLock(); return true; } return false; }
     moveDown() { if (!this.piece || this.state !== 'playing') return false; if (!this.collides(this.piece.shape, this.piece.x, this.piece.y + 1)) { this.piece.y++; return true; } return false; }
     softDrop() { if (this.moveDown()) { this.score += 1; return true; } return false; }
     hardDrop() { if (!this.piece || this.state !== 'playing') return 0; let d = 0; while (!this.collides(this.piece.shape, this.piece.x, this.piece.y + 1)) { this.piece.y++; d++; } this.score += d * 2; return this.lock(); }
-    rotate(dir) { if (!this.piece || this.state !== 'playing') return false; const nr = (this.piece.rotation + dir + 4) % 4; const ns = ROTATIONS[this.piece.type][nr]; const kicks = this.piece.type === 'I' ? [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2], [2, 0], [-1, 0], [2, 1], [-1, -2]] : [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, 1], [-1, 1], [1, 1]]; for (const [dx, dy] of kicks) if (!this.collides(ns, this.piece.x + dx, this.piece.y + dy)) { this.piece.x += dx; this.piece.y += dy; this.piece.rotation = nr; this.piece.shape = ns; this.lockCounter = 0; return true; } return false; }
-    doHold() { if (!this.piece || this.holdUsed || this.state !== 'playing') return; const t = this.piece.type; if (this.holdType) { const s = this.holdType; this.holdType = t; this.piece = { type: s, colorIdx: COLOR_IDX[s], rotation: 0, shape: ROTATIONS[s][0], x: SPAWN_X[s], y: SPAWN_Y[s] }; } else { this.holdType = t; this.spawnPiece(); } this.holdUsed = true; this.lockCounter = 0; }
+    rotate(dir) { if (!this.piece || this.state !== 'playing') return false; const nr = (this.piece.rotation + dir + 4) % 4; const ns = ROTATIONS[this.piece.type][nr]; const kicks = this.piece.type === 'I' ? [[0, 0], [-2, 0], [1, 0], [-2, -1], [1, 2], [2, 0], [-1, 0], [2, 1], [-1, -2]] : [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, 1], [-1, 1], [1, 1]]; for (const [dx, dy] of kicks) if (!this.collides(ns, this.piece.x + dx, this.piece.y + dy)) { this.piece.x += dx; this.piece.y += dy; this.piece.rotation = nr; this.piece.shape = ns; this._tryResetLock(); return true; } return false; }
+    doHold() { if (!this.piece || this.holdUsed || this.state !== 'playing') return; const t = this.piece.type; if (this.holdType) { const s = this.holdType; this.holdType = t; this.piece = { type: s, colorIdx: COLOR_IDX[s], rotation: 0, shape: ROTATIONS[s][0], x: SPAWN_X[s], y: SPAWN_Y[s] }; } else { this.holdType = t; this.spawnPiece(); } this.holdUsed = true; this.lockCounter = 0; this.lockResets = 0; }
+    _tryResetLock() { if (!this.piece) return; if (this.collides(this.piece.shape, this.piece.x, this.piece.y + 1)) { if (this.lockResets < this.maxLockResets) { this.lockCounter = 0; this.lockResets++; } } }
     ghostY() { if (!this.piece) return 0; let gy = this.piece.y; while (!this.collides(this.piece.shape, this.piece.x, gy + 1)) gy++; return gy; }
     lock() { if (!this.piece) return 0; const { shape, x, y, colorIdx } = this.piece; this.lockedPiece = { shape: shape.map(r => [...r]), x, y, colorIdx }; for (let r = 0; r < shape.length; r++)for (let c = 0; c < shape[r].length; c++) { if (!shape[r][c]) continue; const br = y + r, bc = x + c; if (br < 0) { this.state = 'gameover'; return 0; } this.board[br][bc] = colorIdx; } this.piece = null; const full = []; for (let r = 0; r < ROWS; r++)if (this.board[r].every(c => c !== 0)) full.push(r); if (full.length > 0) { this.clearingRows = full; this.clearTimer = 0; this.state = 'clearing'; this.clearingStarted = true; return 0; } this.combo = -1; this.applyGarbage(); this.spawnPiece(); return 0; }
     finishClear() { const count = this.clearingRows.length; const sorted = [...this.clearingRows].sort((a, b) => b - a); for (const r of sorted) { this.board.splice(r, 1); } for (let i = 0; i < count; i++) { this.board.unshift(Array(COLS).fill(0)); } this.lines += count; this.combo++; const lvl = Math.floor(this.lines / 10) + 1; const leveledUp = lvl > this.level; if (leveledUp) this.level = lvl; const scoreBefore = this.score; this.score += (LINE_SCORES[count] || 0) * this.level; if (this.combo > 0) this.score += 50 * this.combo * this.level; this.lastClearInfo = { count, rows: [...sorted], combo: this.combo, scoreGain: this.score - scoreBefore, leveledUp }; this.clearingRows = []; this.state = 'playing'; let garbage = 0; if (count === 2) garbage = 1; else if (count === 3) garbage = 2; else if (count >= 4) garbage = 4; garbage += Math.max(0, this.combo - 1); const cancel = Math.min(garbage, this.pendingGarbage); this.pendingGarbage -= cancel; garbage -= cancel; this.applyGarbage(); this.spawnPiece(); this.garbageSent = garbage; return garbage; }
@@ -141,6 +145,11 @@
   const keys = {};
   let dasKey = null, dasTimer = null;
   const DAS_DELAY = 140, DAS_REPEAT = 30;
+
+  // ── Game mode state ──────────────────────────────────────────────
+  let currentMode = 'marathon';
+  let modeTimer = 0, modeActive = false;
+  let survivalAccum = 0, survivalGapMs = 9000, survivalWave = 0;
 
   function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -701,6 +710,7 @@
     if (game.state === 'playing' || game.state === 'clearing') {
       const garbage = game.update(delta);
       consumeEngineEvents(game, true);
+      handleModeUpdate(delta);
       if (garbage > 0 && (inBattle || aiActive)) {
         if (inBattle) wsSend({ type: 'garbage', lines: garbage });
         if (aiActive && aiEngine) aiEngine.addGarbage(garbage);
@@ -1156,13 +1166,96 @@
   function onAIGameOver() { if (game.state === 'playing') statusEl.textContent = 'AI defeated! You win!'; }
 
   // ── Game Lifecycle ───────────────────────────────────────────────
-  function startGame() { game.start(); gameOverOvl.classList.remove('show'); statusEl.textContent = 'Playing!'; btnStart.disabled = true; if (aiActive) startAIEngine(); }
+  function fillDigBoard() {
+    for (let r = 4; r < ROWS; r++) {
+      const hole = Math.floor(Math.random() * COLS);
+      for (let c = 0; c < COLS; c++) game.board[r][c] = c === hole ? 0 : 8;
+    }
+  }
+  function isDigComplete() {
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (game.board[r][c] === 8) return false;
+    return true;
+  }
+  function fmtTime(ms) { const m = Math.floor(ms / 60000); const s = Math.floor((ms % 60000) / 1000).toString().padStart(2,'0'); return m + ':' + s; }
+  function fmtTimePrecise(ms) { const m = Math.floor(ms / 60000); const s = ((ms % 60000) / 1000).toFixed(2).padStart(5,'0'); return m + ':' + s; }
+  function updateModeDisplay() {
+    if (currentMode === 'marathon') { timerBox.style.display = 'none'; return; }
+    timerBox.style.display = '';
+    switch (currentMode) {
+      case 'sprint': timerLabel.textContent = 'TIME'; panelTimer.textContent = fmtTimePrecise(modeTimer); break;
+      case 'ultra':  timerLabel.textContent = 'LEFT'; { const t = Math.max(0, modeTimer); const m = Math.floor(t/60000); const s = String(Math.ceil((t%60000)/1000)).padStart(2,'0'); panelTimer.textContent = m+':'+s; } break;
+      case 'survival': timerLabel.textContent = 'ALIVE'; panelTimer.textContent = fmtTime(modeTimer); break;
+      case 'dig': { timerLabel.textContent = 'CELLS'; let gray=0; for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) if (game.board[r][c]===8) gray++; panelTimer.textContent = gray; } break;
+    }
+  }
+  function showModeEnd(title, stat3Label, stat3Val, confetti) {
+    modeActive = false;
+    goLevelLabel.textContent = stat3Label;
+    goTitle.textContent = title; goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = stat3Val;
+    gameOverOvl.classList.add('show'); btnStart.disabled = false;
+    if (typeof reportScore === 'function') reportScore('tetris', game.score);
+    if (confetti) launchConfetti();
+  }
+  function onSprintWin() { game.state = 'idle'; SFX.play('levelUp'); showModeEnd('🏁 SPRINT CLEAR!', 'Time', fmtTimePrecise(modeTimer), true); broadcastState(); }
+  function onUltraEnd()  { game.state = 'idle'; showModeEnd('⚡ ULTRA END!', 'Level', game.level, true); launchConfetti(); broadcastState(); }
+  function onDigWin()    { game.state = 'idle'; SFX.play('levelUp'); showModeEnd('⛏️ DIG COMPLETE!', 'Level', game.level, true); broadcastState(); }
+  function handleModeUpdate(delta) {
+    if (!modeActive) return;
+    if (game.state !== 'playing' && game.state !== 'clearing') return;
+    switch (currentMode) {
+      case 'sprint':
+        if (game.state === 'playing' || game.state === 'clearing') modeTimer += delta;
+        updateModeDisplay();
+        if (game.lines >= 40) onSprintWin();
+        break;
+      case 'ultra':
+        modeTimer = Math.max(0, modeTimer - delta);
+        updateModeDisplay();
+        if (modeTimer <= 0) onUltraEnd();
+        break;
+      case 'survival':
+        modeTimer += delta;
+        survivalAccum += delta;
+        if (survivalAccum >= survivalGapMs) {
+          survivalAccum = 0; survivalWave++;
+          const wl = Math.min(4, 1 + Math.floor(survivalWave / 4));
+          game.addGarbage(wl);
+          survivalGapMs = Math.max(1800, survivalGapMs * 0.92);
+          boardCanvas.parentElement.classList.add('shake');
+          setTimeout(() => boardCanvas.parentElement.classList.remove('shake'), 350);
+          SFX.play('garbage');
+        }
+        updateModeDisplay();
+        break;
+      case 'dig':
+        updateModeDisplay();
+        if (game.state === 'playing' && game.lines > 0 && isDigComplete()) onDigWin();
+        break;
+    }
+  }
+  function startGame() {
+    currentMode = modeSelect.value;
+    modeTimer = currentMode === 'ultra' ? 120000 : 0;
+    modeActive = true;
+    survivalAccum = 0; survivalGapMs = 9000; survivalWave = 0;
+    game.start();
+    if (currentMode === 'dig') fillDigBoard();
+    goLevelLabel.textContent = 'Level';
+    updateModeDisplay();
+    gameOverOvl.classList.remove('show');
+    const modeHints = { marathon:'Marathon — survive!', sprint:'Sprint — clear 40 lines!', ultra:'Ultra — 2 minutes!', survival:'Survival — hold on!', dig:'Dig — clear the board!' };
+    statusEl.textContent = modeHints[currentMode] || 'Playing!';
+    btnStart.disabled = true;
+    if (aiActive) startAIEngine();
+  }
   function onGameOver() {
     game.state = 'gameover';
+    modeActive = false;
     SFX.play('gameOver');
     if (inBattle) { wsSend({ type: 'game-over' }); statusEl.textContent = 'Game Over! Waiting…'; }
-    else if (aiActive && aiEngine && aiEngine.state === 'playing') { goTitle.textContent = 'AI WINS!'; goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level; gameOverOvl.classList.add('show'); }
-    else { goTitle.textContent = 'GAME OVER'; goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level; gameOverOvl.classList.add('show'); if (typeof reportScore === 'function') reportScore('tetris', game.score); }
+    else if (aiActive && aiEngine && aiEngine.state === 'playing') { goLevelLabel.textContent = 'Level'; goTitle.textContent = 'AI WINS!'; goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level; gameOverOvl.classList.add('show'); }
+    else if (currentMode === 'survival') { goLevelLabel.textContent = 'Survived'; goTitle.textContent = '💀 YOU FELL!'; goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = fmtTime(modeTimer); gameOverOvl.classList.add('show'); if (typeof reportScore === 'function') reportScore('tetris', game.score); }
+    else { goLevelLabel.textContent = 'Level'; goTitle.textContent = 'GAME OVER'; goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level; gameOverOvl.classList.add('show'); if (typeof reportScore === 'function') reportScore('tetris', game.score); }
     btnStart.disabled = false; broadcastState();
   }
 
