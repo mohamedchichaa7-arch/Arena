@@ -1222,3 +1222,103 @@ html, body {
   .announce-grid { grid-template-columns: repeat(4, 1fr); }
   .seat-avatar { width: 32px; height: 32px; font-size: .6rem; }
 }
+
+/*  Turn arrow on opponent seats  */
+.pc-turn-arrow {
+  display: inline-block;
+  margin-left: 3px;
+  color: #a78bfa;
+  font-size: .6rem;
+  animation: turn-arrow-pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes turn-arrow-pulse {
+  from { opacity: 0.5; transform: translateX(0); }
+  to   { opacity: 1;   transform: translateX(3px); }
+}
+
+/*  Pile suit tags  */
+.pile-suit-tag {
+  display: inline-block;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-weight: 700;
+  font-size: .8rem;
+  letter-spacing: .02em;
+}
+.pile-suit-tag.red  { color: #f87171; border-color: rgba(248,113,113,.4); }
+.pile-suit-tag.black{ color: #e2e8f0; }
+
+/*  Disconnect vote overlay  */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s;
+}
+.overlay.show { opacity: 1; pointer-events: all; }
+.overlay-card {
+  background: linear-gradient(145deg,#1e1b4b,#312e81);
+  border: 1px solid rgba(167,139,250,.35);
+  border-radius: 18px;
+  padding: 2rem 2.4rem;
+  max-width: 420px;
+  width: 90vw;
+  text-align: center;
+  box-shadow: 0 8px 40px rgba(0,0,0,.6);
+}
+.dv-subtitle {
+  color: #a5b4fc;
+  font-size: .85rem;
+  margin: .4rem 0 1rem;
+}
+.dv-vote-counts {
+  display: flex;
+  gap: .8rem;
+  justify-content: center;
+  margin-bottom: .8rem;
+}
+.dv-vote {
+  background: rgba(255,255,255,.08);
+  border-radius: 8px;
+  padding: 4px 12px;
+  font-size: .8rem;
+  color: #c4b5fd;
+}
+.dv-buttons {
+  display: flex;
+  gap: .8rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: .6rem;
+}
+.dv-btn {
+  flex: 1;
+  min-width: 130px;
+  padding: .55rem 1rem;
+  font-size: .82rem;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  border: none;
+}
+.dv-timer-bar {
+  height: 4px;
+  background: rgba(255,255,255,.12);
+  border-radius: 2px;
+  margin-top: 1.2rem;
+  overflow: hidden;
+}
+.dv-timer-fill {
+  height: 100%;
+  background: #a78bfa;
+  width: 100%;
+  border-radius: 2px;
+}

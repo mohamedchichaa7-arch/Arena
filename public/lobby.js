@@ -239,7 +239,7 @@
     for (const r of rooms) {
       const card = document.createElement('div');
       card.className = 'room-card';
-      const icon = r.type === 'tetris' ? '\u{1F3AE}' : r.type === 'tictactoe' ? '\u2B55' : r.type === 'bluffrummy' ? '\u{1F0CF}' : r.type === 'rami' ? '\u{1F3B4}' : '\u{1F3C1}';
+      const icon = r.type === 'tetris' ? '\u{1F3AE}' : r.type === 'tictactoe' ? '\u2B55' : r.type === 'bluffrummy' ? '\u{1F0CF}' : r.type === 'rami' ? '\u{1F3B4}' : r.type === 'pool' ? '\u{1F3B1}' : '\u{1F3C1}';
       const statusCls = r.status === 'playing' ? 'playing' : 'waiting';
       const full = r.players >= r.maxPlayers;
       const lockBadge = r.locked ? '<span class="room-lock">\uD83D\uDD12</span>' : '';
@@ -256,6 +256,11 @@
     const gameType = gameTypeSelect.value;
     const maxPlayers = parseInt(maxPlayersSelect.value);
     const password = roomPasswordInput.value.trim() || null;
+    // Pool is a local single-page game — navigate directly
+    if (gameType === 'pool') {
+      window.location.href = '/pool';
+      return;
+    }
     pendingCreatePassword = password;
     wsSend({ type: 'create-room', roomName, gameType, maxPlayers, password });
   });
@@ -267,6 +272,7 @@
     tictactoe: 'Total wins',
     bluffrummy: 'Total wins',
     rami: 'Total round wins',
+    pool: 'Total wins',
   };
 
   function openLeaderboard(game) {

@@ -136,7 +136,7 @@
       hand = msg.hand || [];
       gameActive = msg.active;
       myTurn = msg.currentTurn === myId;
-      canChallenge = msg.canChallenge && msg.currentTurn === myId;
+      canChallenge = msg.canChallenge;
       currentMeldNum = msg.meldNum;
       currentTurnId = msg.currentTurn || null;
       rankings = msg.rankings || [];
@@ -156,6 +156,9 @@
         status.textContent = 'Waiting for game to start…';
         btnStart.style.display = '';
         playArea.style.display = 'none';
+      } else if (gameActive) {
+        btnStart.style.display = 'none';
+        playArea.style.display = '';
       }
     },
 
@@ -180,7 +183,7 @@
 
     'br-turn'(msg) {
       myTurn = msg.currentTurn === myId;
-      canChallenge = msg.canChallenge && myTurn;
+      canChallenge = msg.canChallenge;
       currentMeldNum = msg.meldNum;
       currentTurnId = msg.currentTurn;
       const turnPlayer = players.get(msg.currentTurn);
@@ -265,6 +268,47 @@
     'chat'(msg) {
       appendChat(msg.name, msg.text, 'other');
     },
+
+    'br-player-disconnect'(msg) {
+      const overlay = $('disconnectVoteOverlay');
+      if (!overlay) return;
+      $('dvTitle').textContent = `\u26a1 ${escapeHtml(msg.name)} Disconnected`;
+      $('dvSubtitle').textContent = 'Vote: redistribute their cards or wait for reconnect?';
+      $('dvVoteCounts').innerHTML = '';
+      overlay.classList.add('show');
+      // Timer fill animation
+      const fill = $('dvTimerFill');
+      if (fill) {
+        fill.style.transition = 'none';
+        fill.style.width = '100%';
+        requestAnimationFrame(() => {
+          fill.style.transition = `width ${msg.timeout || 30}s linear`;
+          fill.style.width = '0%';
+        });
+      }
+    },
+
+    'br-vote-update'(msg) {
+      const vc = $('dvVoteCounts');
+      if (!vc) return;
+      vc.innerHTML =
+        `<span class="dv-vote">\u267b\ufe0f Redistribute: ${msg.redistribute}</span>` +
+        `<span class="dv-vote">\u23f3 Wait: ${msg.wait}</span>`;
+    },
+
+    'br-vote-result'(msg) {
+      $('disconnectVoteOverlay')?.classList.remove('show');
+      if (msg.result === 'redistribute') {
+        addLog(`Cards redistributed after disconnect`, 'info');
+      } else {
+        addLog(`Waiting for disconnected player to return`, 'info');
+      }
+    },
+
+    'br-reconnected'(msg) {
+      $('disconnectVoteOverlay')?.classList.remove('show');
+      addLog(`<span class="feed-name">${escapeHtml(msg.name)}</span> reconnected!`, 'info');
+    },
   };
 
   // ── Player rendering (seats around table) ─────────────────
@@ -317,7 +361,7 @@
       const badge = p.eliminated ? (p.rank === 1 ? '🏆' : `#${p.rank}`) : '';
 
       seat.innerHTML =
-        `<div class="seat-name">${escapeHtml(p.name)}</div>` +
+        `<div class="seat-name">${escapeHtml(p.name)}${pid === currentTurnId && gameActive && !p.eliminated ? '<span class="pc-turn-arrow">▶</span>' : ''}</div>` +
         `<div class="seat-avatar" style="background:${color}">${initials}</div>` +
         `<div class="seat-hand">${miniCardsHtml}${cardCount > 8 ? `<span class="seat-count">${cardCount}</span>` : ''}</div>` +
         (badge ? `<div class="seat-badge">${badge}</div>` : '');
@@ -383,7 +427,16 @@
   // ── Pile rendering ────────────────────────────────────────
   function renderPile(size, num) {
     pileCards.innerHTML = '';
-    pileLabel.textContent = num ? `MELD: "${cardLabel(num)}"` : 'No meld yet';
+    if (num) {
+      const suits = ['♠','♥','♦','♣'];
+      const lbl = cardLabel(num);
+      pileLabel.innerHTML = suits.map(s => {
+        const cls = (s === '♥' || s === '♦') ? 'pile-suit-tag red' : 'pile-suit-tag black';
+        return `<span class="${cls}">${lbl}${s}</span>`;
+      }).join(' ');
+    } else {
+      pileLabel.textContent = 'No meld yet';
+    }
 
     const show = Math.min(size, 5);
     for (let i = 0; i < show; i++) {
@@ -409,6 +462,7 @@
     playArea.style.display = '';
     btnPlay.disabled = !myTurn;
     btnChallenge.style.display = canChallenge ? '' : 'none';
+    btnChallenge.disabled = !canChallenge;
   }
 
   // ── Game feed ─────────────────────────────────────────────
@@ -757,8 +811,17 @@
   });
 
   btnChallenge.addEventListener('click', () => {
-    if (!myTurn || !canChallenge) return;
+    if (!canChallenge) return;
     wsSend({ type: 'br-challenge' });
+  });
+
+  $('btnVoteRedist')?.addEventListener('click', () => {
+    wsSend({ type: 'br-vote', choice: 'redistribute' });
+    $('disconnectVoteOverlay')?.classList.remove('show');
+  });
+  $('btnVoteWait')?.addEventListener('click', () => {
+    wsSend({ type: 'br-vote', choice: 'wait' });
+    $('disconnectVoteOverlay')?.classList.remove('show');
   });
 
   // ── Chat ──────────────────────────────────────────────────

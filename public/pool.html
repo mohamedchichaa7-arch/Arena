@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Pool — Game Arena</title>
+  <link rel="stylesheet" href="pool.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Top bar -->
+  <header class="topbar">
+    <button class="topbar-btn" id="btnBack">&larr;</button>
+    <h1 class="topbar-logo">🎱 POOL</h1>
+    <span class="topbar-right" id="topbarRight"></span>
+  </header>
+
+  <!-- Mode selection screen -->
+  <div id="modeScreen" class="mode-screen">
+    <h2 class="mode-title">Choose a Game Mode</h2>
+
+    <div class="skin-row">
+      <span class="skin-label">Ball Skin:</span>
+      <button class="skin-pill active" data-skin="classic">🎱 Classic</button>
+      <button class="skin-pill" data-skin="neon">⚡ Neon</button>
+      <button class="skin-pill" data-skin="crystal">💎 Crystal</button>
+    </div>
+
+    <div class="mode-grid">
+
+      <div class="mode-card" data-mode="8ball" data-vs="human">
+        <div class="mode-icon">🎱</div>
+        <h3 class="mode-name">8-Ball</h3>
+        <p class="mode-desc">Classic pool. Sink all your balls then the 8. <em>2 Players (local)</em></p>
+        <div class="mode-badge">2 Players</div>
+      </div>
+
+      <div class="mode-card" data-mode="8ball" data-vs="ai">
+        <div class="mode-icon">🤖</div>
+        <h3 class="mode-name">8-Ball vs AI</h3>
+        <p class="mode-desc">Classic 8-ball against a computer opponent.</p>
+        <div class="mode-badge">vs AI</div>
+      </div>
+
+      <div class="mode-card" data-mode="9ball" data-vs="human">
+        <div class="mode-icon">🔢</div>
+        <h3 class="mode-name">9-Ball</h3>
+        <p class="mode-desc">Hit the lowest ball first. Pocket the 9 to win. <em>2 Players (local)</em></p>
+        <div class="mode-badge">2 Players</div>
+      </div>
+
+      <div class="mode-card" data-mode="9ball" data-vs="ai">
+        <div class="mode-icon">🤖</div>
+        <h3 class="mode-name">9-Ball vs AI</h3>
+        <p class="mode-desc">9-ball rules against a computer opponent.</p>
+        <div class="mode-badge">vs AI</div>
+      </div>
+
+      <div class="mode-card" data-mode="practice" data-vs="human">
+        <div class="mode-icon">🎯</div>
+        <h3 class="mode-name">Practice</h3>
+        <p class="mode-desc">Free play — all 15 balls, no rules. Just enjoy the physics.</p>
+        <div class="mode-badge">Solo</div>
+      </div>
+
+    </div>
+    <p class="mode-hint">🖱️ Move mouse to aim &nbsp;·&nbsp; Distance from cue ball = power &nbsp;·&nbsp; Click to shoot</p>
+  </div>
+
+  <!-- Game area -->
+  <div id="gameArea" style="display:none">
+    <div class="canvas-wrap">
+      <canvas id="poolCanvas"></canvas>
+    </div>
+  </div>
+
+  <!-- Game Over overlay -->
+  <div class="go-overlay" id="goOverlay">
+    <div class="go-card">
+      <div class="go-trophy">🏆</div>
+      <h2 class="go-title" id="goTitle">Player 1 Wins!</h2>
+      <p class="go-reason" id="goReason"></p>
+      <div class="go-actions">
+        <button class="go-btn" id="btnPlayAgain">Play Again</button>
+        <button class="go-btn go-btn-sec" id="btnToMenu">Change Mode</button>
+        <button class="go-btn go-btn-sec" id="btnBackLobby">Lobby</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="pool.js"></script>
+</body>
+</html>
