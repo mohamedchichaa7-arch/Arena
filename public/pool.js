@@ -214,8 +214,8 @@
 
   // Input
   let mouse = { x: CVW / 2, y: CVH / 2 };
-  let activeSkin    = 'classic';
-  let activeCueSkin = 'classic';
+  let activeSkin    = localStorage.getItem('pool-skin')     || 'classic';
+  let activeCueSkin = localStorage.getItem('pool-cue-skin') || 'classic';
 
   // Ball tracking per player: pocketedByPlayer[p] = array of ball ids pocketed
   let pocketedByPlayer = [[], []];
@@ -1786,12 +1786,12 @@
   function loop() {
     requestAnimationFrame(loop);
     if (gamePhase === 'rolling') {
-      // In online mode, only the active player runs physics authoritatively
+      // Always step physics so the non-active player sees live ball movement
+      stepPhysics();
+      // Only the active player resolves end-of-turn and sends authoritative state
       if (!onlineMode || isMyOnlineTurn()) {
-        stepPhysics();
         if (!ballsMoving()) {
           endTurnProcessing();
-          // Send authoritative state to server after turn ends
           if (onlineMode) onlineSendTurnState();
         }
       }
@@ -2039,19 +2039,25 @@
       connectOnline();
     }
 
-    // Skin picker (ball skins)
+    // Skin picker (ball skins) — restore saved skin and persist on change
     document.querySelectorAll('.skin-pill').forEach(pill => {
+      if (pill.dataset.skin === activeSkin) pill.classList.add('active');
+      else pill.classList.remove('active');
       pill.addEventListener('click', () => {
         activeSkin = pill.dataset.skin;
+        localStorage.setItem('pool-skin', activeSkin);
         document.querySelectorAll('.skin-pill').forEach(p => p.classList.remove('active'));
         pill.classList.add('active');
       });
     });
 
-    // Cue skin picker
+    // Cue skin picker — restore saved skin and persist on change
     document.querySelectorAll('.cue-pill').forEach(pill => {
+      if (pill.dataset.cue === activeCueSkin) pill.classList.add('active');
+      else pill.classList.remove('active');
       pill.addEventListener('click', () => {
         activeCueSkin = pill.dataset.cue;
+        localStorage.setItem('pool-cue-skin', activeCueSkin);
         document.querySelectorAll('.cue-pill').forEach(p => p.classList.remove('active'));
         pill.classList.add('active');
       });
