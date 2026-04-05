@@ -539,7 +539,17 @@ wss.on('connection', (ws, req) => {
 
       // ── Lobby ─────────────────────────────────────────────
       case 'lobby': {
-        // Verify Firebase ID token
+        const sendRoomList = () => {
+          conn.mode = 'lobby';
+          if (msg.name) conn.name = String(msg.name).slice(0, 20);
+          const seenNow = new Set();
+          const onlineUsersNow = [];
+          for (const [, c] of conns) { if (c.name && !seenNow.has(c.name)) { seenNow.add(c.name); onlineUsersNow.push(c.name); } }
+          send(ws, { type: 'room-list', rooms: serializeRooms(), onlineUsers: onlineUsersNow });
+        };
+        // If already authenticated, just refresh the room list
+        if (conn.verified) { sendRoomList(); break; }
+        // First-time auth: require token
         const rawToken = msg.token ? String(msg.token) : null;
         if (!rawToken) {
           send(ws, { type: 'error', msg: 'Auth required' });
@@ -550,11 +560,7 @@ wss.on('connection', (ws, req) => {
           conn.uid      = decoded.uid;
           conn.verified = true;
           conn.name     = String(msg.name || decoded.name || 'Player').slice(0, 20);
-          conn.mode     = 'lobby';
-          const seenNow = new Set();
-          const onlineUsersNow = [];
-          for (const [, c] of conns) { if (c.name && !seenNow.has(c.name)) { seenNow.add(c.name); onlineUsersNow.push(c.name); } }
-          send(ws, { type: 'room-list', rooms: serializeRooms(), onlineUsers: onlineUsersNow });
+          sendRoomList();
           log('info', 'lobby-join', { id, name: conn.name, ip: conn.ip });
         }).catch(() => {
           send(ws, { type: 'error', msg: 'Invalid or expired token — please log in again' });

@@ -173,7 +173,7 @@
     ws.onclose = () => { setTimeout(() => { if (lobbyScreen.style.display !== 'none') connect(); }, 3000); };
     // Auto-refresh room list and online users every 20 s
     setInterval(() => {
-      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'lobby', name: myName }));
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'lobby', name: myName, token: sessionStorage.getItem('arena-token') || myToken || '' }));
     }, 20000);
   }
 
