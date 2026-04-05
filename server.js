@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -570,9 +570,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -1269,6 +1269,96 @@ wss.on('connection', (ws, req) => {
         room.status = 'waiting';
         broadcastLobby();
         log('info', 'pool-gameover', { id, name: conn.name, ip: conn.ip, roomId: room.id, winner: msg.winner });
+        break;
+      }
+
+      // ── Battleship ─────────────────────────────────────────
+      case 'bs-ready': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'battleship') break;
+        if (!room.bs) room.bs = { layouts: new Map(), ready: new Set(), shots: new Map() };
+        const layout = Array.isArray(msg.layout) ? msg.layout : [];
+        const SHIP_SIZES = { Carrier: 5, Battleship: 4, Cruiser: 3, Submarine: 3, Destroyer: 2 };
+        const board = Array.from({ length: 10 }, () => new Array(10).fill(0));
+        let valid = layout.length === 5;
+        if (valid) {
+          for (const ship of layout) {
+            const expected = SHIP_SIZES[String(ship.name)];
+            if (!expected || ship.size !== expected) { valid = false; break; }
+            const r = parseInt(ship.row), c = parseInt(ship.col), horiz = !!ship.horiz;
+            if (isNaN(r) || isNaN(c) || r < 0 || r >= 10 || c < 0 || c >= 10) { valid = false; break; }
+            for (let i = 0; i < expected; i++) {
+              const sr = horiz ? r : r + i;
+              const sc = horiz ? c + i : c;
+              if (sr < 0 || sr >= 10 || sc < 0 || sc >= 10 || board[sr][sc]) { valid = false; break; }
+              board[sr][sc] = ship.name;
+            }
+            if (!valid) break;
+          }
+        }
+        if (!valid) { send(ws, { type: 'error', msg: 'Invalid fleet placement' }); break; }
+        room.bs.layouts.set(id, {
+          board,
+          ships: layout.map(s => ({ name: s.name, size: s.size, row: s.row, col: s.col, horiz: s.horiz, hits: 0 })),
+        });
+        room.bs.ready.add(id);
+        if (room.bs.ready.size >= 2 && room.players.size >= 2) {
+          const pids = [...room.players.keys()];
+          room.bs.currentTurn = pids[Math.floor(Math.random() * 2)];
+          room.status = 'playing';
+          broadcastLobby();
+          for (const [pid, p] of room.players) {
+            const opp = [...room.players.entries()].find(([oid]) => oid !== pid);
+            send(p.ws, { type: 'bs-start', firstTurn: room.bs.currentTurn, oppName: opp?.[1].name || 'Opponent' });
+          }
+          log('info', 'bs-start', { roomId: room.id, firstTurn: room.players.get(room.bs.currentTurn)?.name, ip: conn.ip });
+        }
+        break;
+      }
+
+      case 'bs-fire': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'battleship' || !room.bs) break;
+        if (room.bs.currentTurn !== id) break;
+        const row = parseInt(msg.row), col = parseInt(msg.col);
+        if (isNaN(row) || isNaN(col) || row < 0 || row >= 10 || col < 0 || col >= 10) break;
+        const myShots = room.bs.shots.get(id) || new Set();
+        const shotKey = `${row},${col}`;
+        if (myShots.has(shotKey)) break;
+        myShots.add(shotKey);
+        room.bs.shots.set(id, myShots);
+        const oppId = [...room.players.keys()].find(p => p !== id);
+        if (!oppId) break;
+        const oppLayout = room.bs.layouts.get(oppId);
+        if (!oppLayout) break;
+        const cellContent = oppLayout.board[row][col];
+        const isHit = !!cellContent;
+        let sunk = null, sunkCells = null;
+        if (isHit) {
+          const ship = oppLayout.ships.find(s => s.name === cellContent);
+          if (ship) {
+            ship.hits++;
+            if (ship.hits >= ship.size) {
+              sunk = ship.name;
+              sunkCells = [];
+              for (let i = 0; i < ship.size; i++) {
+                sunkCells.push({ r: ship.horiz ? ship.row : ship.row + i, c: ship.horiz ? ship.col + i : ship.col });
+              }
+            }
+          }
+        }
+        const allSunk = oppLayout.ships.every(s => s.hits >= s.size);
+        const result = isHit ? 'hit' : 'miss';
+        send(ws, { type: 'bs-shot-result', row, col, result, sunk, sunkCells, win: allSunk });
+        const oppPlayer = room.players.get(oppId);
+        if (oppPlayer) send(oppPlayer.ws, { type: 'bs-inbound', row, col, result, sunk, sunkCells, win: allSunk });
+        if (allSunk) {
+          room.bs = null; room.status = 'waiting'; broadcastLobby();
+          log('info', 'bs-win', { roomId: room.id, winner: conn.name, ip: conn.ip });
+        } else {
+          room.bs.currentTurn = isHit ? id : oppId; // hit = keep turn, miss = switch
+        }
+        log('info', 'bs-fire', { roomId: room.id, by: conn.name, row, col, result, sunk: sunk || '' });
         break;
       }
 

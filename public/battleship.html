@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sea Battle · Arena</title>
+  <link rel="stylesheet" href="/battleship.css"/>
+</head>
+<body>
+
+<div class="topbar">
+  <a class="topbar-logo" href="/">⚓ Arena</a>
+  <span class="topbar-right" id="topbarUser"></span>
+</div>
+
+<!-- Waiting Room (shown when ?room= present) -->
+<div id="waitingRoom" class="waiting-room" style="display:none">
+  <h2>⚓ Sea Battle Room</h2>
+  <div id="wr-status" class="wr-status">Connecting…</div>
+  <div id="wr-players" class="wr-players"></div>
+  <button class="btn-leave" id="btnLeaveRoom">← Back to Lobby</button>
+</div>
+
+<!-- Placement Screen -->
+<div id="placementScreen" class="placement-screen" style="display:none">
+  <h2 class="screen-title">⚓ Place Your Fleet</h2>
+  <div class="placement-layout">
+    <div class="fleet-panel" id="fleetPanel">
+      <h3>Your Ships</h3>
+      <div id="shipDock" class="ship-dock"></div>
+      <div class="placement-hints">
+        <p>� Drag ships onto your grid</p>
+        <p>↻ Tap Rotate or press <strong>R</strong> to flip</p>
+        <div class="hint-buttons">
+          <button id="btnRotate" class="btn-secondary">↻ Rotate</button>
+          <button id="btnAutoPlace" class="btn-secondary">🎲 Auto-place</button>
+          <button id="btnResetPlacement" class="btn-secondary">↺ Reset</button>
+        </div>
+      </div>
+    </div>
+    <div class="grid-wrap">
+      <div class="grid-labels-top"></div>
+      <div class="placement-grid-area">
+        <div class="grid-labels-left"></div>
+        <div id="placementGrid" class="sea-grid placement-grid"></div>
+      </div>
+    </div>
+  </div>
+  <button id="btnReady" class="btn-ready" disabled>🚢 Ready!</button>
+  <div id="placementMsg" class="placement-msg"></div>
+</div>
+
+<!-- Battle Screen -->
+<div id="battleScreen" class="battle-screen" style="display:none">
+  <div class="battle-header">
+    <div class="player-info" id="infoSelf">
+      <span class="pi-name" id="nameSelf">You</span>
+      <div class="fleet-status" id="fleetSelf"></div>
+    </div>
+    <div class="turn-display" id="turnDisplay">Your Turn</div>
+    <div class="player-info pi-right" id="infoOpp">
+      <span class="pi-name" id="nameOpp">Opponent</span>
+      <div class="fleet-status" id="fleetOpp"></div>
+    </div>
+  </div>
+
+  <div class="battle-grids">
+    <div class="grid-section">
+      <h3 class="grid-title">🌊 Your Waters</h3>
+      <div class="grid-wrap">
+        <div id="selfGrid" class="sea-grid battle-grid"></div>
+      </div>
+    </div>
+    <div class="grid-section">
+      <h3 class="grid-title">🎯 Enemy Waters</h3>
+      <div class="grid-wrap">
+        <div id="enemyGrid" class="sea-grid battle-grid clickable"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="battleLog" class="battle-log"></div>
+</div>
+
+<!-- Game Over Overlay -->
+<div id="goOverlay" class="go-overlay" style="display:none">
+  <div class="go-card">
+    <div class="go-title" id="goTitle">Game Over</div>
+    <div class="go-reason" id="goReason"></div>
+    <div class="go-buttons">
+      <button id="btnRematch" class="btn-primary">🔄 Rematch</button>
+      <button id="btnToLobby" class="btn-secondary">🏠 Lobby</button>
+    </div>
+  </div>
+</div>
+
+<!-- Canvas for explosion particles -->
+<canvas id="fxCanvas" class="fx-canvas"></canvas>
+
+<script src="/firebase-init.js"></script>
+<script src="/battleship.js"></script>
+</body>
+</html>
