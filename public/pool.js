@@ -2046,8 +2046,8 @@
       pill.addEventListener('click', () => {
         activeSkin = pill.dataset.skin;
         localStorage.setItem('pool-skin', activeSkin);
-        document.querySelectorAll('.skin-pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
+        document.querySelectorAll('.skin-pill').forEach(p =>
+          p.classList.toggle('active', p.dataset.skin === activeSkin));
       });
     });
 
@@ -2058,8 +2058,8 @@
       pill.addEventListener('click', () => {
         activeCueSkin = pill.dataset.cue;
         localStorage.setItem('pool-cue-skin', activeCueSkin);
-        document.querySelectorAll('.cue-pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
+        document.querySelectorAll('.cue-pill').forEach(p =>
+          p.classList.toggle('active', p.dataset.cue === activeCueSkin));
       });
     });
 
