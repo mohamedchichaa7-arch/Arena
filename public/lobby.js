@@ -256,11 +256,6 @@
     const gameType = gameTypeSelect.value;
     const maxPlayers = parseInt(maxPlayersSelect.value);
     const password = roomPasswordInput.value.trim() || null;
-    // Pool is a local single-page game — navigate directly
-    if (gameType === 'pool') {
-      window.location.href = '/pool';
-      return;
-    }
     pendingCreatePassword = password;
     wsSend({ type: 'create-room', roomName, gameType, maxPlayers, password });
   });
