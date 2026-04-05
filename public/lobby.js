@@ -168,7 +168,7 @@
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}`);
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'lobby', name: myName }));
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'lobby', name: myName, token: sessionStorage.getItem('arena-token') || myToken || '' }));
     ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch {} };
     ws.onclose = () => { setTimeout(() => { if (lobbyScreen.style.display !== 'none') connect(); }, 3000); };
     // Auto-refresh room list and online users every 20 s

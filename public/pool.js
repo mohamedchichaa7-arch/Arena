@@ -63,15 +63,25 @@
     const col = BALL_COL[id] || '#aaa';
     const isStripe = id >= 9;
     const isEight  = id === 8;
+
     const div = document.createElement('div');
     div.className = 'tball' + (isStripe ? ' striped' : '') + (dimmed ? ' pocketed-ball' : '') + (isEight ? ' eight-ball' : '');
+
     if (!isEight) {
-      div.style.background = isStripe
-        ? `linear-gradient(#fff 30%, ${col} 30%, ${col} 70%, #fff 70%)`
-        : `radial-gradient(circle at 35% 35%, ${lighten(col, 50)}, ${col} 60%, ${darken(col, 30)})`;
+      if (isStripe) {
+        // White base ball with a colored stripe band via CSS custom property
+        div.style.setProperty('--spc', col);
+      } else {
+        div.style.background = `radial-gradient(circle at 35% 35%, ${lighten(col, 50)}, ${col} 60%, ${darken(col, 30)})`;
+      }
     }
     div.style.border = `1.5px solid ${isEight ? 'rgba(255,255,255,.38)' : 'rgba(255,255,255,.22)'}`;
-    div.textContent = String(id);
+
+    // Number badge — always a white circle with dark number, readable on any background
+    const badge = document.createElement('span');
+    badge.className = 'tball-badge';
+    badge.textContent = String(id);
+    div.appendChild(badge);
     div.title = `Ball ${id}`;
     return div;
   }
@@ -209,6 +219,18 @@
 
   // Ball tracking per player: pocketedByPlayer[p] = array of ball ids pocketed
   let pocketedByPlayer = [[], []];
+
+  // ── Online multiplayer state ────────────────────────────────────────────
+  const urlRoomId   = new URLSearchParams(location.search).get('room');
+  const myName      = sessionStorage.getItem('arena-name') || 'Player';
+  const myToken     = sessionStorage.getItem('arena-token') || '';
+  let   onlineMode  = false;       // true when connected to a WS room
+  let   ws          = null;
+  let   wsMyId      = null;        // server-assigned connection id
+  let   myPlayerIdx = -1;          // 0 = host/breaks, 1 = guest
+  let   onlinePlayers = [];        // [{ id, name }]
+  // Mouse position broadcast (sent to opponent so they see your aim)
+  let   lastMouseBroadcast = 0;
 
   // ── Ball factory ────────────────────────────────────────────────────────
   function makeBall(id, x, y) {
@@ -654,10 +676,17 @@
 
     $('goTitle').textContent  = (vsMode === 'ai' && winner === 1) ? 'You Lose!'
       : (vsMode === 'ai' && winner === 0) ? 'You Win!'
+      : (onlineMode && winner === myPlayerIdx) ? 'You Win! 🏆'
+      : (onlineMode && winner !== myPlayerIdx) ? 'You Lose!'
       : `${players[winner]} Wins!`;
     $('goReason').textContent = reason || '';
     $('goOverlay').classList.add('show');
     updateTrackerUI();
+
+    // Broadcast result to server so opponent's screen updates too
+    if (onlineMode) {
+      wsSend({ type: 'pool-gameover', winner, reason });
+    }
   }
 
   // ── AI opponent ──────────────────────────────────────────────────────────
@@ -1615,6 +1644,18 @@
       ctx.fillText('AI thinking…', CVW / 2, CY + CH - 35);
     }
 
+    // Online: waiting for opponent badge
+    if (onlineMode && !isMyOnlineTurn() && gamePhase !== 'over') {
+      ctx.fillStyle = 'rgba(0,0,0,0.62)';
+      roundRect(ctx, CVW / 2 - 100, CY + CH - 50, 200, 30, 8);
+      ctx.fill();
+      ctx.fillStyle    = '#a78bfa';
+      ctx.font         = 'bold 11px Inter,sans-serif';
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${players[turn]}'s turn…`, CVW / 2, CY + CH - 35);
+    }
+
     // Ball-in-hand ghost (follows mouse)
     if (gamePhase === 'placing') {
       const col = '#f0ede6';
@@ -1674,11 +1715,22 @@
       const cb = getCueBall();
       if (cb) { cb.x = mouse.x; cb.y = mouse.y; }
     }
+    // Broadcast mouse to opponent so they see your aim line
+    if (onlineMode && isMyOnlineTurn()) {
+      const now = Date.now();
+      if (now - lastMouseBroadcast > 50) {
+        lastMouseBroadcast = now;
+        wsSend({ type: 'pool-mouse', x: mouse.x, y: mouse.y });
+      }
+    }
   }
 
   function onDown(e) {
     if (e.button !== undefined && e.button !== 0) return;
     const pos = getPos(e);
+
+    // Block input when it's not your turn in online mode
+    if (onlineMode && !isMyOnlineTurn()) return;
 
     if (gamePhase === 'placing') {
       placeCueBall(pos.x, pos.y);
@@ -1721,6 +1773,11 @@
     cb.vx = (dx / d) * spd;
     cb.vy = (dy / d) * spd;
 
+    // In online mode, broadcast the shot so opponent simulates it simultaneously
+    if (onlineMode) {
+      wsSend({ type: 'pool-shot', vx: cb.vx, vy: cb.vy, balls: onlineSerializeBalls() });
+    }
+
     resetTurnTracking();
     gamePhase = 'rolling';
   }
@@ -1729,8 +1786,15 @@
   function loop() {
     requestAnimationFrame(loop);
     if (gamePhase === 'rolling') {
-      stepPhysics();
-      if (!ballsMoving()) endTurnProcessing();
+      // In online mode, only the active player runs physics authoritatively
+      if (!onlineMode || isMyOnlineTurn()) {
+        stepPhysics();
+        if (!ballsMoving()) {
+          endTurnProcessing();
+          // Send authoritative state to server after turn ends
+          if (onlineMode) onlineSendTurnState();
+        }
+      }
     }
     if (gamePhase !== 'menu') render();
   }
@@ -1760,11 +1824,220 @@
     window.addEventListener('resize', resize);
   }
 
+  // ── Online multiplayer helpers ────────────────────────────────────────────
+  function wsSend(msg) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+  }
+
+  function onlineSerializeBalls() {
+    return balls.map(b => ({ id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, active: b.active }));
+  }
+
+  function onlineApplyBallState(bArr) {
+    balls = bArr.map(b => ({ id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy, active: b.active }));
+  }
+
+  // Serialize full game state to send to opponent
+  function onlineSerializeState() {
+    return {
+      balls: onlineSerializeBalls(),
+      turn, groupAssigned, playerGroup: [...playerGroup], eightLegal: [...eightLegal],
+      pocketedByPlayer: [pocketedByPlayer[0].slice(), pocketedByPlayer[1].slice()],
+      gamePhase, gameMode,
+    };
+  }
+
+  // Apply full state received from opponent/server
+  function onlineApplyState(st) {
+    if (!st) return;
+    onlineApplyBallState(st.balls);
+    turn            = st.turn;
+    groupAssigned   = st.groupAssigned;
+    playerGroup     = st.playerGroup   || [null, null];
+    eightLegal      = st.eightLegal    || [false, false];
+    pocketedByPlayer = [st.pocketedByPlayer[0] || [], st.pocketedByPlayer[1] || []];
+    gamePhase = st.gamePhase;
+    updateTrackerUI();
+    resetTurnTracking();
+  }
+
+  // Is it my turn in online mode?
+  function isMyOnlineTurn() {
+    return onlineMode && myPlayerIdx === turn;
+  }
+
+  function connectOnline() {
+    onlineMode = true;
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}`);
+
+    ws.onopen = () => {
+      const pw = sessionStorage.getItem('arena-room-password') || undefined;
+      sessionStorage.removeItem('arena-room-password');
+      wsSend({ type: 'join-room', roomId: urlRoomId, name: myName, password: pw, token: myToken });
+    };
+
+    ws.onmessage = e => { try { handleOnlineMsg(JSON.parse(e.data)); } catch {} };
+
+    ws.onclose = () => {
+      onlineMode = false;
+      $('roomStatus').textContent = 'Disconnected. Returning to lobby…';
+      setTimeout(() => { location.href = '/'; }, 3000);
+    };
+  }
+
+  function renderOnlinePlayers() {
+    const el = $('roomPlayers');
+    if (!el) return;
+    el.innerHTML = '';
+    for (let i = 0; i < 2; i++) {
+      const p = onlinePlayers[i];
+      const card = document.createElement('div');
+      card.className = 'room-player-card' + (p && p.id === wsMyId ? ' me' : '') + (!p ? ' empty' : '');
+      card.innerHTML = `<span class="rpc-icon">${p ? '🎱' : '⌛'}</span><span>${p ? p.name : 'Waiting…'}</span>`;
+      el.appendChild(card);
+    }
+    // Show Start buttons only if 2 players and I'm host (playerIdx 0)
+    const actions = $('roomActions');
+    if (actions) actions.style.display = (onlinePlayers.length >= 2 && myPlayerIdx === 0 && gamePhase === 'menu') ? '' : 'none';
+  }
+
+  function handleOnlineMsg(msg) {
+    switch (msg.type) {
+      case 'room-joined': {
+        wsMyId = msg.myId;
+        onlinePlayers = [];
+        // Self is always first joined
+        onlinePlayers.push({ id: wsMyId, name: myName });
+        // Others already in room
+        for (const p of (msg.players || [])) onlinePlayers.push({ id: p.id, name: p.name });
+        myPlayerIdx = 0; // first to arrive is host
+        $('roomStatus').textContent = onlinePlayers.length >= 2 ? 'Room full — ready to start!' : 'Waiting for opponent…';
+        renderOnlinePlayers();
+        break;
+      }
+
+      case 'player-joined': {
+        onlinePlayers.push({ id: msg.id, name: msg.name });
+        myPlayerIdx = onlinePlayers.findIndex(p => p.id === wsMyId);
+        if (myPlayerIdx < 0) myPlayerIdx = 0;
+        $('roomStatus').textContent = 'Opponent joined — ready to start!';
+        renderOnlinePlayers();
+        break;
+      }
+
+      case 'player-left': {
+        onlinePlayers = onlinePlayers.filter(p => p.id !== msg.id);
+        if (gamePhase !== 'menu' && gamePhase !== 'over') {
+          gamePhase = 'over';
+          $('goTitle').textContent  = 'Opponent Left';
+          $('goReason').textContent = 'Your opponent disconnected.';
+          $('goOverlay').classList.add('show');
+        }
+        $('roomStatus').textContent = 'Opponent left.';
+        renderOnlinePlayers();
+        break;
+      }
+
+      // Host sends pool-match-start → both clients initialise
+      case 'pool-match-start': {
+        const mode = msg.mode || '8ball';
+        players[0] = msg.players[0] || onlinePlayers[0]?.name || 'Player 1';
+        players[1] = msg.players[1] || onlinePlayers[1]?.name || 'Player 2';
+        // Confirm my player index from server-assigned seat
+        myPlayerIdx = msg.seats ? msg.seats.indexOf(wsMyId) : myPlayerIdx;
+        if (myPlayerIdx < 0) myPlayerIdx = 0;
+
+        // Hide online room lobby, show game area
+        $('onlineRoom').style.display = 'none';
+        initGame(mode, 'online');
+        $('roomStatus') && ($('roomStatus').textContent = '');
+        break;
+      }
+
+      // Opponent fired a shot — apply their velocity to cue ball and let physics run here too
+      case 'pool-shot': {
+        if (!onlineMode || gamePhase !== 'aiming') break;
+        const cb = getCueBall();
+        if (!cb) break;
+        // Apply the shot state from opponent
+        if (msg.balls) onlineApplyBallState(msg.balls);
+        const cb2 = getCueBall();
+        if (cb2) { cb2.vx = msg.vx; cb2.vy = msg.vy; }
+        resetTurnTracking();
+        gamePhase = 'rolling';
+        break;
+      }
+
+      // End-of-turn authoritative state from the active player
+      case 'pool-state': {
+        if (!onlineMode) break;
+        onlineApplyState(msg.state);
+        // If it's now MY turn, set to aiming
+        if (myPlayerIdx === msg.state.turn && msg.state.gamePhase === 'aiming') {
+          gamePhase = 'aiming';
+        } else if (msg.state.gamePhase === 'placing' && myPlayerIdx === msg.state.turn) {
+          beginBallInHand();
+        }
+        break;
+      }
+
+      // Opponent's mouse position (for spectation / watching aim)
+      case 'pool-mouse': {
+        // Only update if it's NOT my turn (so I see opponent aiming)
+        if (myPlayerIdx !== turn) {
+          mouse = { x: msg.x, y: msg.y };
+        }
+        break;
+      }
+
+      case 'pool-gameover': {
+        endGame(msg.winner, msg.reason);
+        break;
+      }
+
+      case 'error': {
+        alert(msg.msg);
+        break;
+      }
+    }
+  }
+
+  // Called by active player when balls stop — sends authoritative state to server
+  function onlineSendTurnState() {
+    if (!onlineMode) return;
+    wsSend({ type: 'pool-state', state: onlineSerializeState() });
+  }
+
   // ── Init ─────────────────────────────────────────────────────────────────
   function init() {
     setupCanvas();
-    players[0] = sessionStorage.getItem('arena-name') || 'Player 1';
+    players[0] = myName;
     players[1] = 'Player 2';
+
+    // ── Online room mode: URL has ?room= ────────────────────────────────
+    if (urlRoomId) {
+      $('modeScreen').style.display = 'none';
+      $('onlineRoom').style.display = '';
+
+      // Wire up start-match buttons (host only — visibility controlled by renderOnlinePlayers)
+      document.querySelectorAll('.room-start-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (onlinePlayers.length < 2) {
+            $('roomStatus').textContent = 'Waiting for opponent to join first…';
+            return;
+          }
+          const mode = btn.dataset.mode;
+          const seats  = onlinePlayers.map(p => p.id);
+          const pNames = onlinePlayers.map(p => p.name);
+          wsSend({ type: 'pool-match-start', mode, seats, players: pNames });
+        });
+      });
+
+      $('btnLeaveRoom').addEventListener('click', () => { location.href = '/'; });
+
+      connectOnline();
+    }
 
     // Skin picker (ball skins)
     document.querySelectorAll('.skin-pill').forEach(pill => {
@@ -1810,7 +2083,11 @@
         gamePhase = 'menu';
         if (aiTimerRef) clearTimeout(aiTimerRef);
         $('gameArea').style.display   = 'none';
-        $('modeScreen').style.display = '';
+        if (onlineMode) {
+          $('onlineRoom').style.display = '';
+        } else {
+          $('modeScreen').style.display = '';
+        }
         $('goOverlay').classList.remove('show');
         return;
       }
@@ -1820,13 +2097,25 @@
     // Game over buttons
     $('btnPlayAgain').addEventListener('click', () => {
       $('goOverlay').classList.remove('show');
-      initGame(gameMode, vsMode);
+      if (onlineMode && myPlayerIdx === 0) {
+        // Host re-sends match-start with same mode
+        const seats  = onlinePlayers.map(p => p.id);
+        const pNames = onlinePlayers.map(p => p.name);
+        wsSend({ type: 'pool-match-start', mode: gameMode, seats, players: pNames });
+      } else if (!onlineMode) {
+        initGame(gameMode, vsMode);
+      }
     });
     $('btnToMenu').addEventListener('click', () => {
       gamePhase = 'menu';
       if (aiTimerRef) clearTimeout(aiTimerRef);
-      $('gameArea').style.display   = 'none';
-      $('modeScreen').style.display = '';
+      $('gameArea').style.display = 'none';
+      if (onlineMode) {
+        $('onlineRoom').style.display = '';
+        renderOnlinePlayers();
+      } else {
+        $('modeScreen').style.display = '';
+      }
       $('goOverlay').classList.remove('show');
     });
     $('btnBackLobby').addEventListener('click', () => { location.href = '/'; });

@@ -851,7 +851,7 @@
       // Join room with our name (and password if this is a locked room)
       const password = sessionStorage.getItem('arena-room-password') || undefined;
       sessionStorage.removeItem('arena-room-password');
-      wsSend({ type: 'join-room', roomId, name: myName, password });
+      wsSend({ type: 'join-room', roomId, name: myName, password, token: sessionStorage.getItem('arena-token') || '' });
     };
     ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch { } };
     ws.onclose = () => { statusEl.textContent = 'Disconnected. Returning to lobby…'; setTimeout(() => location.href = '/', 3000); };

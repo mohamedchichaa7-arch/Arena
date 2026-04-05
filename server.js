@@ -522,28 +522,51 @@ wss.on('connection', (ws, req) => {
   conns.set(id, conn);
   log('info', 'connect', { id, ip, ua: `"${userAgent}"`, total: totalConnections });
 
-  ws.on('message', (raw) => {
+  ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
+
+    // ── Require verified auth for every message except the first auth ──
+    // lobby and join-room are the two entry-points; they carry the Firebase token.
+    // All other messages are only processed after the connection is verified.
+    if (!conn.verified && msg.type !== 'lobby' && msg.type !== 'join-room') {
+      send(ws, { type: 'error', msg: 'Not authenticated' });
+      ws.close();
+      return;
+    }
 
     switch (msg.type) {
 
       // ── Lobby ─────────────────────────────────────────────
       case 'lobby': {
-        conn.name = String(msg.name || 'Player').slice(0, 20);
-        conn.mode = 'lobby';
-        const seenNow = new Set();
-        const onlineUsersNow = [];
-        for (const [, c] of conns) { if (c.name && !seenNow.has(c.name)) { seenNow.add(c.name); onlineUsersNow.push(c.name); } }
-        send(ws, { type: 'room-list', rooms: serializeRooms(), onlineUsers: onlineUsersNow });
-        log('info', 'lobby-join', { id, name: conn.name, ip: conn.ip });
+        // Verify Firebase ID token
+        const rawToken = msg.token ? String(msg.token) : null;
+        if (!rawToken) {
+          send(ws, { type: 'error', msg: 'Auth required' });
+          ws.close();
+          return;
+        }
+        admin.auth().verifyIdToken(rawToken).then(decoded => {
+          conn.uid      = decoded.uid;
+          conn.verified = true;
+          conn.name     = String(msg.name || decoded.name || 'Player').slice(0, 20);
+          conn.mode     = 'lobby';
+          const seenNow = new Set();
+          const onlineUsersNow = [];
+          for (const [, c] of conns) { if (c.name && !seenNow.has(c.name)) { seenNow.add(c.name); onlineUsersNow.push(c.name); } }
+          send(ws, { type: 'room-list', rooms: serializeRooms(), onlineUsers: onlineUsersNow });
+          log('info', 'lobby-join', { id, name: conn.name, ip: conn.ip });
+        }).catch(() => {
+          send(ws, { type: 'error', msg: 'Invalid or expired token — please log in again' });
+          ws.close();
+        });
         break;
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -562,6 +585,26 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'join-room': {
+        // Game pages open a fresh WS and immediately send join-room with their token.
+        // Verify now if not yet verified (lobby message was on a different WS connection).
+        const joinToken = msg.token ? String(msg.token) : null;
+        if (!conn.verified) {
+          if (!joinToken) {
+            send(ws, { type: 'error', msg: 'Auth required' });
+            ws.close();
+            return;
+          }
+          try {
+            const decoded = await admin.auth().verifyIdToken(joinToken);
+            conn.uid      = decoded.uid;
+            conn.verified = true;
+          } catch {
+            send(ws, { type: 'error', msg: 'Invalid or expired token — please log in again' });
+            ws.close();
+            return;
+          }
+        }
+
         const room = rooms.get(msg.roomId);
         if (!room) { send(ws, { type: 'error', msg: 'Room not found' }); break; }
         if (room.players.size >= room.maxPlayers) { send(ws, { type: 'error', msg: 'Room full' }); break; }
@@ -1169,6 +1212,57 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(conn.roomId);
         if (!room || !room.rami?.active || room.rami?.roundActive) break;
         startRamiRound(room);
+        break;
+      }
+
+      // ── Pool: match start ─────────────────────────────────
+      case 'pool-match-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'pool') break;
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2 players to start' }); break; }
+        const mode   = (msg.mode === '9ball') ? '9ball' : '8ball';
+        const seats  = Array.isArray(msg.seats) ? msg.seats.slice(0, 2) : [];
+        const pNames = Array.isArray(msg.players) ? msg.players.slice(0, 2) : [];
+        room.status = 'playing';
+        broadcastLobby();
+        broadcastRoom(room.id, { type: 'pool-match-start', mode, seats, players: pNames });
+        log('info', 'pool-match-start', { startedBy: conn.name, ip: conn.ip, roomId: room.id, mode, players: room.players.size });
+        break;
+      }
+
+      // ── Pool: relay shot to opponent ──────────────────────
+      case 'pool-shot': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'pool') break;
+        // Relay to all OTHER players in the room (not back to sender)
+        broadcastRoom(room.id, { type: 'pool-shot', vx: msg.vx, vy: msg.vy, balls: msg.balls }, id);
+        break;
+      }
+
+      // ── Pool: relay authoritative end-of-turn state ───────
+      case 'pool-state': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'pool') break;
+        broadcastRoom(room.id, { type: 'pool-state', state: msg.state }, id);
+        break;
+      }
+
+      // ── Pool: relay mouse position ────────────────────────
+      case 'pool-mouse': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'pool') break;
+        broadcastRoom(room.id, { type: 'pool-mouse', x: msg.x, y: msg.y }, id);
+        break;
+      }
+
+      // ── Pool: game over ───────────────────────────────────
+      case 'pool-gameover': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'pool') break;
+        broadcastRoom(room.id, { type: 'pool-gameover', winner: msg.winner, reason: msg.reason }, id);
+        room.status = 'waiting';
+        broadcastLobby();
+        log('info', 'pool-gameover', { id, name: conn.name, ip: conn.ip, roomId: room.id, winner: msg.winner });
         break;
       }
 

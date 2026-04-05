@@ -93,7 +93,7 @@
       myName = sessionStorage.getItem('arena-name') || 'Player';
       const pw = sessionStorage.getItem('arena-room-password') || '';
       sessionStorage.removeItem('arena-room-password');
-      ws.send(JSON.stringify({ type: 'join-room', roomId, name: myName, password: pw }));
+      ws.send(JSON.stringify({ type: 'join-room', roomId, name: myName, password: pw, token: sessionStorage.getItem('arena-token') || '' }));
     };
 
     ws.onmessage = (e) => {

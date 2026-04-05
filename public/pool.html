@@ -81,6 +81,21 @@
     <p class="mode-hint">🖱️ Move mouse to aim &nbsp;·&nbsp; Distance from cue ball = power &nbsp;·&nbsp; Click to shoot</p>
   </div>
 
+  <!-- Online Room Lobby (shown when ?room= param present) -->
+  <div id="onlineRoom" style="display:none">
+    <div class="room-lobby">
+      <h2 class="room-lobby-title">🎱 Pool Room</h2>
+      <div class="room-lobby-status" id="roomStatus">Connecting…</div>
+      <div class="room-lobby-players" id="roomPlayers"></div>
+      <div class="room-lobby-actions" id="roomActions" style="display:none">
+        <p class="room-lobby-hint">Choose mode to start:</p>
+        <button class="room-start-btn" data-mode="8ball">🎱 8-Ball</button>
+        <button class="room-start-btn" data-mode="9ball">🔢 9-Ball</button>
+      </div>
+      <button class="room-leave-btn" id="btnLeaveRoom">← Back to Lobby</button>
+    </div>
+  </div>
+
   <!-- Game area -->
   <div id="gameArea" style="display:none">
     <!-- Player 1 ball tracker -->
