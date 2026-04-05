@@ -241,17 +241,15 @@
   function renderPlacementGrid() {
     const grid = $('placementGrid');
     const cells = grid.querySelectorAll('.cell');
-    // Clear all
     for (const c of cells) c.className = 'cell';
-    // Draw placed ships
     for (const ship of placedShips) {
       for (let i = 0; i < ship.cells.length; i++) {
         const { r, c } = ship.cells[i];
         const el = cells[r * GRID + c];
         el.classList.add('ship');
-        if (i === 0) el.classList.add(ship.horiz ? 'ship-head' : 'ship-head vert'.trim());
-        if (i === ship.cells.length - 1) el.classList.add(ship.horiz ? 'ship-tail' : 'ship-tail vert'.trim());
-        if (!ship.horiz) { el.classList.add('vert'); }
+        if (!ship.horiz) el.classList.add('vert');
+        if (i === 0) el.classList.add('ship-head');
+        if (i === ship.cells.length - 1) el.classList.add('ship-tail');
       }
     }
   }
@@ -306,53 +304,107 @@
     }
   }
 
-  // ── Drag & Drop (HTML5 + mouse fallback) ────────────────────────
-  let dragHoriz     = true;
-  let mouseDragging = false;
-  let ghostEl       = null;
+  // ── Drag & Drop (Pointer Events — mouse + touch + stylus) ──────────
+  let dragHoriz   = true;
+  let isDragging  = false;
+  let ghostEl     = null;
+  let activePtrId = null;
+  let lastPtrX = 0, lastPtrY = 0;
 
-  function onDockDragStart(e, def) {
-    dragShip = { def, horiz: dragHoriz, fromDock: true, fromPlaced: null };
-    dragOffset = { r: 0, c: 0 };
-    e.dataTransfer.effectAllowed = 'move';
+  /* Called when user presses down on a dock ship row */
+  function onDockPointerDown(e, def) {
+    if (isDragging) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    activePtrId = e.pointerId;
+    isDragging  = true;
+    dragShip    = { def, horiz: dragHoriz, fromDock: true, fromPlaced: null };
+    dragOffset  = { r: 0, c: 0 };
+    lastPtrX    = e.clientX; lastPtrY = e.clientY;
+    createGhost();
   }
 
-  function onDockMouseDown(e, def) {
-    if (e.button !== 0) return;
-    dragShip = { def, horiz: dragHoriz, fromDock: true, fromPlaced: null };
-    dragOffset = { r: 0, c: 0 };
-    startMouseDrag(e);
-  }
-
-  function startMouseDrag(e) {
-    mouseDragging = true;
+  function createGhost() {
+    if (ghostEl) { ghostEl.remove(); ghostEl = null; }
     ghostEl = document.createElement('div');
-    ghostEl.className = 'ship-blocks';
-    ghostEl.style.cssText = `position:fixed;pointer-events:none;z-index:500;opacity:.7;display:flex;gap:2px;${dragShip.horiz ? '' : 'flex-direction:column;'}`;
+    ghostEl.style.cssText = 'position:fixed;pointer-events:none;z-index:9999;display:flex;gap:2px;opacity:.8;'
+      + (dragShip.horiz ? '' : 'flex-direction:column;');
     for (let i = 0; i < dragShip.def.size; i++) {
       const b = document.createElement('div');
-      b.className = 'ship-block';
-      b.style.cssText = 'width:30px;height:30px;border-radius:4px;background:linear-gradient(135deg,#2563eb,#3b82f6);border:1px solid #60a5fa;';
+      b.style.cssText = 'width:30px;height:30px;flex-shrink:0;border-radius:4px;'
+        + 'background:linear-gradient(135deg,#2563eb,#3b82f6);border:1px solid #60a5fa;';
       ghostEl.appendChild(b);
     }
     document.body.appendChild(ghostEl);
-    moveGhost(e);
+    positionGhost();
   }
 
-  function moveGhost(e) {
+  function positionGhost() {
     if (!ghostEl) return;
-    ghostEl.style.left = (e.clientX + 4) + 'px';
-    ghostEl.style.top  = (e.clientY + 4) + 'px';
+    ghostEl.style.left = (lastPtrX + 10) + 'px';
+    ghostEl.style.top  = (lastPtrY + 10) + 'px';
   }
 
-  function endMouseDrag() {
-    mouseDragging = false;
+  function cleanupDrag() {
+    isDragging = false; activePtrId = null;
     if (ghostEl) { ghostEl.remove(); ghostEl = null; }
     highlightPlacement(null, null, 0, true, null);
     dragShip = null;
   }
 
-  // Cell events for placement grid (drag-over)
+  function getCellUnderPointer(x, y) {
+    if (ghostEl) ghostEl.style.visibility = 'hidden';
+    const el = document.elementFromPoint(x, y);
+    if (ghostEl) ghostEl.style.visibility = '';
+    if (!el) return null;
+    return el.classList && el.classList.contains('cell') ? el : el.closest && el.closest('.cell[data-r]');
+  }
+
+  document.addEventListener('pointermove', e => {
+    if (!isDragging || e.pointerId !== activePtrId) return;
+    e.preventDefault();
+    lastPtrX = e.clientX; lastPtrY = e.clientY;
+    positionGhost();
+    if (dragShip) {
+      const cell = getCellUnderPointer(e.clientX, e.clientY);
+      if (cell && cell.closest('#placementGrid')) {
+        highlightPlacement(
+          +cell.dataset.r - dragOffset.r,
+          +cell.dataset.c - dragOffset.c,
+          dragShip.def.size, dragShip.horiz, dragShip.fromPlaced
+        );
+      } else {
+        highlightPlacement(null, null, 0, true, null);
+      }
+    }
+  }, { passive: false });
+
+  document.addEventListener('pointerup', e => {
+    if (!isDragging || e.pointerId !== activePtrId) return;
+    if (dragShip) {
+      const cell = getCellUnderPointer(e.clientX, e.clientY);
+      if (cell && cell.closest('#placementGrid')) {
+        tryDropShip(+cell.dataset.r - dragOffset.r, +cell.dataset.c - dragOffset.c);
+      } else if (dragShip.fromPlaced) {
+        const s = dragShip.fromPlaced;
+        placeShip(s.def, s.row, s.col, s.horiz);
+        renderPlacementGrid(); renderDock();
+      }
+    }
+    cleanupDrag();
+  });
+
+  document.addEventListener('pointercancel', e => {
+    if (e.pointerId !== activePtrId) return;
+    if (dragShip && dragShip.fromPlaced) {
+      const s = dragShip.fromPlaced;
+      placeShip(s.def, s.row, s.col, s.horiz);
+      renderPlacementGrid(); renderDock();
+    }
+    cleanupDrag();
+  });
+
+  // ── Placement grid setup ────────────────────────────────────────
   function setupPlacementGrid() {
     const grid = $('placementGrid');
     buildGrid(grid, null);
@@ -361,68 +413,38 @@
   }
 
   function setupCellEvents(grid) {
-    const cells = grid.querySelectorAll('.cell');
-    for (const cell of cells) {
-      const r = +cell.dataset.r;
-      const c = +cell.dataset.c;
+    for (const cell of grid.querySelectorAll('.cell')) {
+      const r = +cell.dataset.r, c = +cell.dataset.c;
 
-      cell.addEventListener('dragover', e => {
-        e.preventDefault();
-        if (!dragShip) return;
-        const tr = r - dragOffset.r;
-        const tc = c - dragOffset.c;
-        highlightPlacement(tr, tc, dragShip.def.size, dragShip.horiz, dragShip.fromPlaced);
-      });
-
-      cell.addEventListener('drop', e => {
-        e.preventDefault();
-        if (!dragShip) return;
-        const tr = r - dragOffset.r;
-        const tc = c - dragOffset.c;
-        tryDropShip(tr, tc);
-      });
-
-      cell.addEventListener('mouseenter', () => {
-        if (!mouseDragging || !dragShip) return;
-        const tr = r - dragOffset.r;
-        const tc = c - dragOffset.c;
-        highlightPlacement(tr, tc, dragShip.def.size, dragShip.horiz, dragShip.fromPlaced);
-      });
-
-      cell.addEventListener('mouseup', () => {
-        if (!mouseDragging || !dragShip) return;
-        const tr = r - dragOffset.r;
-        const tc = c - dragOffset.c;
-        tryDropShip(tr, tc);
-        endMouseDrag();
-      });
-
-      // Right-click to rotate while hovering
+      // Right-click: rotate dragged ship or placed ship
       cell.addEventListener('contextmenu', e => {
         e.preventDefault();
-        if (dragShip) { dragShip.horiz = !dragShip.horiz; dragHoriz = dragShip.horiz; }
-        else {
-          // Rotate placed ship under cursor
+        if (isDragging && dragShip) {
+          dragShip.horiz = !dragShip.horiz;
+          dragHoriz = dragShip.horiz;
+          if (ghostEl) { ghostEl.remove(); ghostEl = null; createGhost(); }
+        } else {
           const existing = myBoard[r][c];
           if (existing && existing.def) rotateExistingShip(existing);
         }
       });
 
-      // Click on placed ship to pick it up
-      cell.addEventListener('mousedown', e => {
-        if (e.button !== 0) return;
+      // Pick up a placed ship from the grid
+      cell.addEventListener('pointerdown', e => {
+        if (isDragging) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
         const existing = myBoard[r][c];
         if (!existing || !existing.def) return;
-        // Find offset within ship
+        e.preventDefault(); e.stopPropagation();
         const idx = existing.cells.findIndex(p => p.r === r && p.c === c);
-        dragOffset = existing.horiz ? { r: 0, c: idx } : { r: idx, c: 0 };
-        dragShip   = { def: existing.def, horiz: existing.horiz, fromDock: false, fromPlaced: existing };
-        removeShip(existing);
-        renderPlacementGrid();
-        renderDock();
-        startMouseDrag(e);
-        e.stopPropagation();
-      });
+        dragOffset  = existing.horiz ? { r: 0, c: idx } : { r: idx, c: 0 };
+        dragShip    = { def: existing.def, horiz: existing.horiz, fromDock: false, fromPlaced: existing };
+        activePtrId = e.pointerId;
+        isDragging  = true;
+        lastPtrX = e.clientX; lastPtrY = e.clientY;
+        removeShip(existing); renderPlacementGrid(); renderDock();
+        createGhost();
+      }, { passive: false });
     }
   }
 
@@ -431,18 +453,10 @@
     if (canPlace(row, col, dragShip.def.size, dragShip.horiz, dragShip.fromPlaced)) {
       if (dragShip.fromPlaced) removeShip(dragShip.fromPlaced);
       placeShip(dragShip.def, row, col, dragShip.horiz);
-      renderPlacementGrid();
-      renderDock();
-      updateReadyBtn();
-    } else {
-      // Invalid: if picked from board, put it back
-      if (dragShip.fromPlaced) {
-        const s = dragShip.fromPlaced;
-        placeShip(s.def, s.row, s.col, s.horiz);
-        renderPlacementGrid();
-        renderDock();
-      }
+    } else if (dragShip.fromPlaced) {
+      placeShip(dragShip.fromPlaced.def, dragShip.fromPlaced.row, dragShip.fromPlaced.col, dragShip.fromPlaced.horiz);
     }
+    renderPlacementGrid(); renderDock(); updateReadyBtn();
     dragShip = null;
     highlightPlacement(null, null, 0, true, null);
   }
@@ -462,24 +476,13 @@
     updateReadyBtn();
   }
 
-  // Global keyboard: R = rotate ship being dragged
+  // R key while dragging: rotate ghost ship
   document.addEventListener('keydown', e => {
-    if (e.key === 'r' || e.key === 'R') {
-      dragHoriz = !dragHoriz;
-      if (dragShip) dragShip.horiz = dragHoriz;
+    if ((e.key === 'r' || e.key === 'R') && isDragging && dragShip) {
+      dragShip.horiz = !dragShip.horiz;
+      dragHoriz = dragShip.horiz;
+      if (ghostEl) { ghostEl.remove(); ghostEl = null; createGhost(); }
     }
-  });
-
-  // Global mouse events for drag
-  document.addEventListener('mousemove', e => {
-    moveGhost(e);
-  });
-  document.addEventListener('mouseup', e => {
-    if (mouseDragging) endMouseDrag();
-  });
-  // Cancel drag if leaving window
-  document.addEventListener('mouseleave', () => {
-    if (mouseDragging) endMouseDrag();
   });
 
   // ── Auto-placement ───────────────────────────────────────────────
@@ -749,7 +752,7 @@
       dragHoriz = !dragHoriz;
       if (isDragging && dragShip) {
         dragShip.horiz = dragHoriz;
-        rebuildGhost();
+        createGhost();
       }
       $('placementMsg').textContent = `Orientation: ${dragHoriz ? 'Horizontal \u2192' : 'Vertical \u2193'}`;
       setTimeout(updateReadyBtn, 1200);
