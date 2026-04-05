@@ -25,6 +25,19 @@
       <button class="skin-pill active" data-skin="classic">🎱 Classic</button>
       <button class="skin-pill" data-skin="neon">⚡ Neon</button>
       <button class="skin-pill" data-skin="crystal">💎 Crystal</button>
+      <button class="skin-pill" data-skin="marble">🪨 Marble</button>
+      <button class="skin-pill" data-skin="gold">✨ Gold</button>
+    </div>
+    <div class="skin-row">
+      <span class="skin-label">Cue Stick:</span>
+      <button class="cue-pill active" data-cue="classic">🟤 Classic</button>
+      <button class="cue-pill" data-cue="maple">🪵 Maple</button>
+      <button class="cue-pill" data-cue="ebony">⬛ Ebony</button>
+      <button class="cue-pill" data-cue="neon">⚡ Neon</button>
+      <button class="cue-pill" data-cue="carbon">🔩 Carbon</button>
+      <button class="cue-pill" data-cue="ivory">🦷 Ivory</button>
+      <button class="cue-pill" data-cue="rosewood">🌹 Rosewood</button>
+      <button class="cue-pill" data-cue="chrome">🪞 Chrome</button>
     </div>
 
     <div class="mode-grid">
@@ -70,8 +83,36 @@
 
   <!-- Game area -->
   <div id="gameArea" style="display:none">
+    <!-- Player 1 ball tracker -->
+    <div class="ball-tracker" id="trackerP1">
+      <div class="tracker-name" id="trackerNameP1">Player 1</div>
+      <div class="tracker-section">
+        <div class="tracker-label">Pocketed</div>
+        <div class="tracker-balls" id="pocketedP1"></div>
+      </div>
+      <div class="tracker-section">
+        <div class="tracker-label">Remaining</div>
+        <div class="tracker-balls" id="remainingP1"></div>
+      </div>
+      <div class="tracker-score" id="scoreP1">Wins: 0</div>
+    </div>
+
     <div class="canvas-wrap">
       <canvas id="poolCanvas"></canvas>
+    </div>
+
+    <!-- Player 2 ball tracker -->
+    <div class="ball-tracker" id="trackerP2">
+      <div class="tracker-name" id="trackerNameP2">Player 2</div>
+      <div class="tracker-section">
+        <div class="tracker-label">Pocketed</div>
+        <div class="tracker-balls" id="pocketedP2"></div>
+      </div>
+      <div class="tracker-section">
+        <div class="tracker-label">Remaining</div>
+        <div class="tracker-balls" id="remainingP2"></div>
+      </div>
+      <div class="tracker-score" id="scoreP2">Wins: 0</div>
     </div>
   </div>
 

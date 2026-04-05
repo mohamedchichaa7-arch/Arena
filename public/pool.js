@@ -58,6 +58,103 @@
     '#7d572e', // 15 maroon stripe
   ];
 
+  // ── Ball tracker UI ─────────────────────────────────────────────────────
+  function makeTball(id, dimmed) {
+    const col = BALL_COL[id] || '#aaa';
+    const isStripe = id >= 9;
+    const isEight  = id === 8;
+    const div = document.createElement('div');
+    div.className = 'tball' + (isStripe ? ' striped' : '') + (dimmed ? ' pocketed-ball' : '') + (isEight ? ' eight-ball' : '');
+    if (!isEight) {
+      div.style.background = isStripe
+        ? `linear-gradient(#fff 30%, ${col} 30%, ${col} 70%, #fff 70%)`
+        : `radial-gradient(circle at 35% 35%, ${lighten(col, 50)}, ${col} 60%, ${darken(col, 30)})`;
+    }
+    div.style.border = `1.5px solid ${isEight ? 'rgba(255,255,255,.38)' : 'rgba(255,255,255,.22)'}`;
+    div.textContent = String(id);
+    div.title = `Ball ${id}`;
+    return div;
+  }
+
+  function updateTrackerUI() {
+    const p1Name = $('trackerNameP1');
+    const p2Name = $('trackerNameP2');
+    const t1 = $('trackerP1');
+    const t2 = $('trackerP2');
+
+    if (!t1 || !t2) return;
+
+    // In practice or single-player modes, hide P2 tracker
+    const isSolo = (gameMode === 'practice');
+    t2.style.display = isSolo ? 'none' : '';
+
+    // Update names
+    const n1 = players[0] || 'Player 1';
+    const n2 = (vsMode === 'ai') ? 'AI' : (players[1] || 'Player 2');
+    if (p1Name) p1Name.textContent = n1;
+    if (p2Name) p2Name.textContent = n2;
+
+    // Turn indicator arrow
+    const arrow1 = t1.querySelector('.tracker-turn-arrow');
+    const arrow2 = t2.querySelector('.tracker-turn-arrow');
+    if (arrow1) arrow1.style.visibility = (turn === 0 && gamePhase !== 'over') ? 'visible' : 'hidden';
+    if (arrow2) arrow2.style.visibility = (turn === 1 && gamePhase !== 'over') ? 'visible' : 'hidden';
+
+    // Scores
+    const s1 = $('scoreP1');
+    const s2 = $('scoreP2');
+    if (s1) s1.textContent = `Wins: ${scores[0]}`;
+    if (s2) s2.textContent = `Wins: ${scores[1]}`;
+
+    // Determine each player's ball set
+    for (let p = 0; p < 2; p++) {
+      const pocketedEl  = $(p === 0 ? 'pocketedP1' : 'pocketedP2');
+      const remainingEl = $(p === 0 ? 'remainingP1' : 'remainingP2');
+      if (!pocketedEl || !remainingEl) continue;
+
+      pocketedEl.innerHTML  = '';
+      remainingEl.innerHTML = '';
+
+      if (gameMode === 'practice') continue;
+
+      if (gameMode === '8ball') {
+        const grp = playerGroup[p];
+        if (!grp) {
+          // Groups not assigned yet — show what they've pocketed so far
+          const myIds = pocketedByPlayer[p].filter(id => id !== 8);
+          if (myIds.length === 0) {
+            const hint = document.createElement('span');
+            hint.style.cssText = 'font-size:6px;color:#94a3b8;line-height:1.3;';
+            hint.textContent = 'First pocket\nassigns group';
+            pocketedEl.appendChild(hint);
+          }
+          myIds.forEach(id => pocketedEl.appendChild(makeTball(id, true)));
+          remainingEl.innerHTML = '<span style="font-size:6px;color:#94a3b8;">TBD</span>';
+        } else {
+          const myNums = grp === 'solid' ? [1,2,3,4,5,6,7] : [9,10,11,12,13,14,15];
+          const pocketed  = myNums.filter(id => !balls.some(b => b.id === id && b.active));
+          const remaining = myNums.filter(id => balls.some(b => b.id === id && b.active));
+
+          pocketed.forEach(id  => pocketedEl.appendChild(makeTball(id, true)));
+          remaining.forEach(id => remainingEl.appendChild(makeTball(id, false)));
+
+          // Show 8-ball status
+          if (eightLegal[p]) {
+            remainingEl.appendChild(makeTball(8, false));
+          }
+        }
+      } else if (gameMode === '9ball') {
+        // In 9-ball, both players share all balls; show who's pocketed what
+        const myPocketed = pocketedByPlayer[p];
+        myPocketed.forEach(id => pocketedEl.appendChild(makeTball(id, true)));
+
+        // Remaining = all active balls 1-9 not yet pocketed by anyone
+        const remaining = balls.filter(b => b.active && b.id >= 1 && b.id <= 9).map(b => b.id).sort((a,b)=>a-b);
+        remaining.forEach(id => remainingEl.appendChild(makeTball(id, false)));
+      }
+    }
+  }
+
   // ── Utilities ───────────────────────────────────────────────────────────
   const $    = id => document.getElementById(id);
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
@@ -107,7 +204,11 @@
 
   // Input
   let mouse = { x: CVW / 2, y: CVH / 2 };
-  let activeSkin = 'classic';
+  let activeSkin    = 'classic';
+  let activeCueSkin = 'classic';
+
+  // Ball tracking per player: pocketedByPlayer[p] = array of ball ids pocketed
+  let pocketedByPlayer = [[], []];
 
   // ── Ball factory ────────────────────────────────────────────────────────
   function makeBall(id, x, y) {
@@ -198,6 +299,7 @@
     cueHitValidFirst = false;
     cueHitAnyBall    = false;
     aiThinking = false;
+    pocketedByPlayer = [[], []];
     if (aiTimerRef) clearTimeout(aiTimerRef);
 
     if (mode === '8ball')    startGame8Ball();
@@ -208,8 +310,21 @@
     $('gameArea').style.display   = '';
     $('goOverlay').classList.remove('show');
 
+    // Inject turn arrows into trackers if not present
+    for (let p = 0; p < 2; p++) {
+      const tid = p === 0 ? 'trackerP1' : 'trackerP2';
+      const el  = $(tid);
+      if (el && !el.querySelector('.tracker-turn-arrow')) {
+        const arr = document.createElement('div');
+        arr.className = 'tracker-turn-arrow';
+        arr.textContent = '▶';
+        el.insertBefore(arr, el.firstChild);
+      }
+    }
+
     gamePhase = 'aiming';
     turn = 0;
+    updateTrackerUI();
   }
 
   // ── Physics ─────────────────────────────────────────────────────────────
@@ -350,7 +465,12 @@
     if (gamePhase !== 'rolling') return;
     pocketedThisTurn.push(b);
 
-    if (b.id === 0) return; // cue scratch handled in endTurn
+    if (b.id === 0) { updateTrackerUI(); return; } // cue scratch handled in endTurn
+
+    // Track pocketed ball ownership for tracker
+    // We record immediately; tracker shows per-group assignment
+    pocketedByPlayer[turn].push(b.id);
+    updateTrackerUI();
 
     if (gameMode === '8ball') {
       if (b.id === 8) {
@@ -372,6 +492,10 @@
           b.y = CY + CH / 2;
           b.vx = 0; b.vy = 0;
           pocketedThisTurn.pop();
+          // Remove from tracker too
+          const idx = pocketedByPlayer[turn].lastIndexOf(b.id);
+          if (idx !== -1) pocketedByPlayer[turn].splice(idx, 1);
+          updateTrackerUI();
         }
       }
     }
@@ -395,7 +519,7 @@
     if (gameMode === '8ball') {
       process8BallTurn(pocketed, scratched, foul);
     } else if (gameMode === '9ball') {
-      process9BallTurn(pocketed, foul);
+      process9BallTurn(pocketed, scratched, foul);
     }
   }
 
@@ -439,39 +563,53 @@
 
     resetTurnTracking();
 
-    if (foul) {
-      if (scratched) respawnCueBall(CX + CW * 0.27, CY + CH / 2);
+    if (scratched) {
+      // Scratch: cue ball was pocketed → opponent gets ball-in-hand anywhere
       turn = 1 - turn;
       beginBallInHand();
+    } else if (foul) {
+      // Non-scratch foul (wrong ball first / no ball hit): just switch turns,
+      // cue ball stays where it is
+      turn = 1 - turn;
+      gamePhase = 'aiming';
+      checkAI();
     } else if (validPocketed > 0) {
-      // Keep turn
+      // Legal pocket(s): keep turn
       gamePhase = 'aiming';
       checkAI();
     } else {
-      // Switch turn
+      // No pocket, no foul: switch turn
       turn = 1 - turn;
       gamePhase = 'aiming';
       checkAI();
     }
+    updateTrackerUI();
   }
 
-  function process9BallTurn(pocketed, foul) {
+  function process9BallTurn(pocketed, scratched, foul) {
     if (gamePhase === 'over') return;
     resetTurnTracking();
 
-    if (foul) {
-      respawnCueBall(CX + CW * 0.5, CY + CH / 2);
+    if (scratched) {
+      // Scratch: cue ball pocketed → ball-in-hand anywhere
       turn = 1 - turn;
       beginBallInHand();
+    } else if (foul) {
+      // Non-scratch foul (didn't hit lowest ball): switch turn, cue stays
+      turn = 1 - turn;
+      gamePhase = 'aiming';
+      checkAI();
     } else if (pocketed.length > 0) {
-      // Keep turn (pocketed something legally)
+      // Legal pocket(s): keep turn
       gamePhase = 'aiming';
       checkAI();
     } else {
+      // No pocket, no foul: switch turn
       turn = 1 - turn;
       gamePhase = 'aiming';
       checkAI();
     }
+    updateTrackerUI();
   }
 
   function resetTurnTracking() {
@@ -495,6 +633,7 @@
     gamePhase = 'placing';
     // Position cue ball at a safe default (will follow mouse)
     respawnCueBall(CX + CW * 0.25, CY + CH / 2);
+    updateTrackerUI();
   }
 
   function checkAI() {
@@ -518,6 +657,7 @@
       : `${players[winner]} Wins!`;
     $('goReason').textContent = reason || '';
     $('goOverlay').classList.add('show');
+    updateTrackerUI();
   }
 
   // ── AI opponent ──────────────────────────────────────────────────────────
@@ -718,6 +858,8 @@
 
     if      (activeSkin === 'neon')    drawBallNeon(x, y, col, isStripe, isCue, b);
     else if (activeSkin === 'crystal') drawBallCrystal(x, y, col, isStripe, isCue, b);
+    else if (activeSkin === 'marble')  drawBallMarble(x, y, col, isStripe, isCue, b);
+    else if (activeSkin === 'gold')    drawBallGold(x, y, col, isStripe, isCue, b);
     else                               drawBallClassic(x, y, col, isStripe, isCue, b);
   }
 
@@ -937,6 +1079,120 @@
     ctx.restore();
   }
 
+  // ── Skin: Marble ────────────────────────────────────────────────────────
+  function drawBallMarble(x, y, col, isStripe, isCue, b) {
+    function hRGB(h) { const n = parseInt(h.replace('#',''), 16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+    const [cr, cg2, cb2] = isCue ? [240,237,230] : hRGB(col);
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, BR, 0, Math.PI * 2); ctx.clip();
+
+    // Base marble gradient
+    const bg = ctx.createRadialGradient(x - BR*0.25, y - BR*0.25, 0, x, y, BR);
+    bg.addColorStop(0,    `rgb(${clamp(cr+80,0,255)},${clamp(cg2+80,0,255)},${clamp(cb2+80,0,255)})`);
+    bg.addColorStop(0.5,  `rgb(${clamp(cr+30,0,255)},${clamp(cg2+30,0,255)},${clamp(cb2+30,0,255)})`);
+    bg.addColorStop(1,    `rgb(${clamp(cr-40,0,255)},${clamp(cg2-40,0,255)},${clamp(cb2-40,0,255)})`);
+    ctx.fillStyle = bg;
+    ctx.fillRect(x - BR, y - BR, BD, BD);
+
+    // Marble veins
+    ctx.strokeStyle = `rgba(255,255,255,0.28)`;
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < 3; i++) {
+      const ang = (i * 1.3 + (b.id * 0.7));
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(ang) * BR, y + Math.sin(ang) * BR);
+      ctx.bezierCurveTo(
+        x + Math.cos(ang + 0.9) * BR * 0.6, y + Math.sin(ang + 0.9) * BR * 0.6,
+        x - Math.cos(ang + 0.3) * BR * 0.5, y - Math.sin(ang + 0.3) * BR * 0.5,
+        x - Math.cos(ang) * BR, y  - Math.sin(ang) * BR
+      );
+      ctx.stroke();
+    }
+
+    if (isStripe) {
+      // Stripe band on top of marble
+      const bw = BR * 0.52;
+      ctx.fillStyle = `rgba(${cr},${cg2},${cb2},0.55)`;
+      ctx.fillRect(x - BR, y - bw, BD, bw * 2);
+    }
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth   = 0.8;
+    ctx.beginPath(); ctx.arc(x, y, BR - 0.4, 0, Math.PI * 2); ctx.stroke();
+
+    if (!isCue) drawBallNumber(x, y, b.id, '#111');
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, BR, 0, Math.PI * 2); ctx.clip();
+    const hi = ctx.createRadialGradient(x - BR*0.38, y - BR*0.42, 0, x - BR*0.3, y - BR*0.34, BR*0.6);
+    hi.addColorStop(0,   'rgba(255,255,255,0.72)');
+    hi.addColorStop(0.4, 'rgba(255,255,255,0.18)');
+    hi.addColorStop(1,   'transparent');
+    ctx.fillStyle = hi;
+    ctx.fillRect(x - BR, y - BR, BD, BD);
+    ctx.restore();
+  }
+
+  // ── Skin: Gold ──────────────────────────────────────────────────────────
+  function drawBallGold(x, y, col, isStripe, isCue, b) {
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, BR, 0, Math.PI * 2); ctx.clip();
+
+    if (isCue) {
+      const cg = ctx.createRadialGradient(x - BR*0.35, y - BR*0.38, 0, x, y, BR);
+      cg.addColorStop(0,    '#fffde0');
+      cg.addColorStop(0.35, '#f5d060');
+      cg.addColorStop(0.72, '#c8900a');
+      cg.addColorStop(1,    '#7a5200');
+      ctx.fillStyle = cg;
+      ctx.fillRect(x - BR, y - BR, BD, BD);
+    } else if (isStripe) {
+      const bg = ctx.createRadialGradient(x - BR*0.28, y - BR*0.28, 0, x, y, BR);
+      bg.addColorStop(0,    '#fffde8');
+      bg.addColorStop(0.55, '#f0e8c8');
+      bg.addColorStop(1,    '#c8a850');
+      ctx.fillStyle = bg;
+      ctx.fillRect(x - BR, y - BR, BD, BD);
+      const bw = BR * 0.54;
+      const bandGr = ctx.createLinearGradient(x, y - bw, x, y + bw);
+      bandGr.addColorStop(0,   '#ffe066');
+      bandGr.addColorStop(0.5, '#e8a800');
+      bandGr.addColorStop(1,   '#b87800');
+      ctx.fillStyle = bandGr;
+      ctx.fillRect(x - BR, y - bw, BD, bw * 2);
+    } else {
+      const grad = ctx.createRadialGradient(x - BR*0.3, y - BR*0.32, 0, x, y, BR);
+      grad.addColorStop(0,    '#fffce0');
+      grad.addColorStop(0.25, '#ffe066');
+      grad.addColorStop(0.58, '#e8a800');
+      grad.addColorStop(0.82, '#c07800');
+      grad.addColorStop(1,    '#7a4800');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x - BR, y - BR, BD, BD);
+    }
+    ctx.restore();
+
+    // Gold rim ring
+    ctx.strokeStyle = '#e0a020';
+    ctx.lineWidth   = 1.2;
+    ctx.beginPath(); ctx.arc(x, y, BR - 0.6, 0, Math.PI * 2); ctx.stroke();
+
+    if (!isCue) drawBallNumber(x, y, b.id, '#3a2000');
+
+    // Metallic sheen
+    ctx.save();
+    ctx.beginPath(); ctx.arc(x, y, BR, 0, Math.PI * 2); ctx.clip();
+    const hi = ctx.createRadialGradient(x - BR*0.38, y - BR*0.44, 0, x - BR*0.28, y - BR*0.34, BR*0.62);
+    hi.addColorStop(0,   'rgba(255,255,240,0.88)');
+    hi.addColorStop(0.35,'rgba(255,240,180,0.28)');
+    hi.addColorStop(1,   'transparent');
+    ctx.fillStyle = hi;
+    ctx.fillRect(x - BR, y - BR, BD, BD);
+    ctx.restore();
+  }
+
   function drawAim() {
     if ((gamePhase !== 'aiming' && gamePhase !== 'placing') || aiThinking) return;
     const cb = getCueBall();
@@ -1001,44 +1257,249 @@
 
   function drawCueStick(cx, cy, nx, ny, pullback) {
     const tipDist = BR + pullback;
-    const len     = 132;
+    const len     = 148;
 
     const tx = cx - nx * tipDist;
     const ty = cy - ny * tipDist;
     const bx = cx - nx * (tipDist + len);
     const by = cy - ny * (tipDist + len);
 
-    // Gradient along cue shaft
-    const cg = ctx.createLinearGradient(bx, by, tx, ty);
-    cg.addColorStop(0,    '#3e1f08');  // butt end
-    cg.addColorStop(0.35, '#5c3010');
-    cg.addColorStop(0.7,  '#c4a060');  // shaft
-    cg.addColorStop(0.92, '#dfc890');
-    cg.addColorStop(1,    '#a07840');  // tip
+    const px = -ny, py = nx;  // perpendicular for width
 
-    // Perpendicular for width
-    const px = -ny, py = nx;
+    // ── Cue skin definitions ─────────────────────────────────────────
+    const CUE_SKINS = {
+      classic: {
+        stops: [
+          [0,    '#3e1f08'],  // butt
+          [0.22, '#5c3010'],
+          [0.42, '#8b5e2a'],
+          [0.65, '#c4a060'],  // shaft
+          [0.88, '#e8d298'],
+          [1,    '#a07840'],  // tip end
+        ],
+        tipCol: '#2c6fad',
+        rimCol: '#c8902a',
+        buttW: 5.5, tipW: 1.4,
+        outline: 'rgba(0,0,0,0.32)',
+        wrap: { col: '#b8380a', spacing: 0.18, count: 3 } // decorative wraps
+      },
+      maple: {
+        stops: [
+          [0,    '#1c0e04'],
+          [0.18, '#3d2108'],
+          [0.38, '#7a5230'],
+          [0.62, '#d4a96a'],
+          [0.84, '#f0d090'],
+          [1,    '#bfa060'],
+        ],
+        tipCol: '#1a5a8a',
+        rimCol: '#e6b040',
+        buttW: 5.2, tipW: 1.3,
+        outline: 'rgba(0,0,0,0.28)',
+        wrap: { col: '#2c4a90', spacing: 0.20, count: 2 }
+      },
+      ebony: {
+        stops: [
+          [0,    '#090909'],
+          [0.20, '#1a1a1a'],
+          [0.45, '#2e2e2e'],
+          [0.72, '#3d3d3d'],
+          [0.90, '#555'],
+          [1,    '#1c1c1c'],
+        ],
+        tipCol: '#c84040',
+        rimCol: '#888',
+        buttW: 5.0, tipW: 1.3,
+        outline: 'rgba(0,0,0,0.5)',
+        wrap: { col: '#c84040', spacing: 0.22, count: 4 }
+      },
+      neon: {
+        stops: [
+          [0,    '#0a001a'],
+          [0.25, '#1a0038'],
+          [0.50, '#2a006a'],
+          [0.72, '#5500cc'],
+          [0.88, '#8833ff'],
+          [1,    '#aa66ff'],
+        ],
+        tipCol: '#00ffee',
+        rimCol: '#ff00cc',
+        buttW: 5.2, tipW: 1.4,
+        outline: 'rgba(150,0,255,0.55)',
+        glow: '#9933ff',
+        wrap: { col: '#00ffee', spacing: 0.16, count: 5 }
+      },
+      carbon: {
+        stops: [
+          [0,    '#0e0e0e'],
+          [0.15, '#1e1e1e'],
+          [0.40, '#111'],
+          [0.65, '#2a2a2a'],
+          [0.85, '#3a3a3a'],
+          [1,    '#1a1a1a'],
+        ],
+        tipCol: '#44aaff',
+        rimCol: '#555',
+        buttW: 5.3, tipW: 1.3,
+        outline: 'rgba(0,80,180,0.3)',
+        carbonFiber: true,
+        wrap: { col: '#44aaff', spacing: 0.24, count: 2 }
+      },
+      ivory: {
+        stops: [
+          [0,    '#b8a870'],
+          [0.20, '#d4c898'],
+          [0.42, '#f2ecd8'],
+          [0.68, '#faf6ea'],
+          [0.88, '#f0ebda'],
+          [1,    '#d8d0b8'],
+        ],
+        tipCol: '#2C6FAD',
+        rimCol: '#c8a840',
+        buttW: 5.0, tipW: 1.3,
+        outline: 'rgba(100,80,20,0.3)',
+        wrap: { col: '#c8a840', spacing: 0.19, count: 3 }
+      },
+      rosewood: {
+        stops: [
+          [0,    '#2a0808'],
+          [0.18, '#5a1818'],
+          [0.38, '#8b2828'],
+          [0.62, '#c45050'],
+          [0.84, '#d88080'],
+          [1,    '#a03030'],
+        ],
+        tipCol: '#2c6fad',
+        rimCol: '#e0a040',
+        buttW: 5.5, tipW: 1.4,
+        outline: 'rgba(80,0,0,0.35)',
+        wrap: { col: '#e0a040', spacing: 0.17, count: 4 }
+      },
+      chrome: {
+        stops: [
+          [0,    '#1a1a2e'],
+          [0.10, '#2e2e4e'],
+          [0.28, '#5e6080'],
+          [0.48, '#b0b8d0'],
+          [0.62, '#e8ecf8'],
+          [0.74, '#c0c8e0'],
+          [0.88, '#909ab8'],
+          [1,    '#6070a0'],
+        ],
+        tipCol: '#00ccff',
+        rimCol: '#c0c8e0',
+        buttW: 5.4, tipW: 1.4,
+        outline: 'rgba(100,120,200,0.4)',
+        glow: '#88aaff',
+        wrap: { col: '#00ccff', spacing: 0.20, count: 3 }
+      },
+    };
+
+    const sk = CUE_SKINS[activeCueSkin] || CUE_SKINS.classic;
+
+    // Build shaft gradient
+    const cg = ctx.createLinearGradient(bx, by, tx, ty);
+    for (const [stop, col] of sk.stops) cg.addColorStop(stop, col);
 
     ctx.save();
+
+    // Glow for neon/chrome
+    if (sk.glow) {
+      ctx.shadowBlur  = 18;
+      ctx.shadowColor = sk.glow;
+    }
+
+    // Main shaft
     ctx.beginPath();
-    ctx.moveTo(bx + px * 4.5, by + py * 4.5);
-    ctx.lineTo(bx - px * 4.5, by - py * 4.5);
-    ctx.lineTo(tx - px * 1.3, ty - py * 1.3);
-    ctx.lineTo(tx + px * 1.3, ty + py * 1.3);
+    ctx.moveTo(bx + px * sk.buttW, by + py * sk.buttW);
+    ctx.lineTo(bx - px * sk.buttW, by - py * sk.buttW);
+    ctx.lineTo(tx - px * sk.tipW,  ty - py * sk.tipW);
+    ctx.lineTo(tx + px * sk.tipW,  ty + py * sk.tipW);
     ctx.closePath();
     ctx.fillStyle = cg;
     ctx.fill();
 
-    // Dark outline for depth
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    // Outline
+    ctx.strokeStyle = sk.outline;
+    ctx.lineWidth   = 0.8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Carbon fiber cross-hatch overlay
+    if (sk.carbonFiber) {
+      ctx.save();
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(80,120,200,0.18)';
+      ctx.lineWidth   = 0.7;
+      for (let i = -len; i < len; i += 6) {
+        ctx.beginPath();
+        ctx.moveTo(tx + nx * i + px * sk.buttW, ty + ny * i + py * sk.buttW);
+        ctx.lineTo(tx + nx * i - px * sk.buttW, ty + ny * i - py * sk.buttW);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Specular highlight (right edge of shaft)
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(bx + px * sk.buttW, by + py * sk.buttW);
+    ctx.lineTo(bx - px * sk.buttW, by - py * sk.buttW);
+    ctx.lineTo(tx - px * sk.tipW,  ty - py * sk.tipW);
+    ctx.lineTo(tx + px * sk.tipW,  ty + py * sk.tipW);
+    ctx.closePath();
+    ctx.clip();
+    const hiGr = ctx.createLinearGradient(
+      cx - py * sk.buttW, cy + px * sk.buttW,
+      cx + py * sk.buttW, cy - px * sk.buttW
+    );
+    hiGr.addColorStop(0,    'rgba(255,255,255,0.22)');
+    hiGr.addColorStop(0.35, 'rgba(255,255,255,0.06)');
+    hiGr.addColorStop(1,    'rgba(0,0,0,0.12)');
+    ctx.fillStyle = hiGr;
+    ctx.fillRect(bx - sk.buttW * 2, by - sk.buttW * 2, len + sk.buttW * 4, len + sk.buttW * 4);
+    ctx.restore();
+
+    // Decorative wraps (rings)
+    if (sk.wrap) {
+      const { col: wc, spacing, count } = sk.wrap;
+      for (let i = 0; i < count; i++) {
+        const t2 = 0.10 + i * spacing;
+        if (t2 > 0.92) continue;
+        const wx = bx + (tx - bx) * t2;
+        const wy = by + (ty - by) * t2;
+        const hw = sk.buttW * (1 - t2 * 0.5) + sk.tipW * t2 * 0.5 + 0.5;
+        ctx.strokeStyle = wc;
+        ctx.lineWidth   = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(wx + px * hw, wy + py * hw);
+        ctx.lineTo(wx - px * hw, wy - py * hw);
+        ctx.stroke();
+      }
+    }
+
+    // Butt cap
+    ctx.fillStyle   = sk.rimCol;
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
     ctx.lineWidth   = 0.7;
+    ctx.beginPath();
+    ctx.ellipse(bx, by, sk.buttW + 1.2, 2.2, Math.atan2(ny, nx) + Math.PI / 2, 0, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
 
-    // Cue tip (blue chalk)
-    ctx.fillStyle = '#2c6fad';
+    // Cue tip
+    ctx.shadowBlur  = sk.glow ? 8 : 0;
+    ctx.shadowColor = sk.glow || 'transparent';
+    ctx.fillStyle   = sk.tipCol;
     ctx.beginPath();
-    ctx.arc(tx, ty, 2.2, 0, Math.PI * 2);
+    ctx.ellipse(tx, ty, 2.4, 1.4, Math.atan2(ny, nx) + Math.PI / 2, 0, Math.PI * 2);
     ctx.fill();
+    // Chalk mark on tip
+    ctx.fillStyle = 'rgba(100,160,255,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(tx, ty, 1.2, 0.7, Math.atan2(ny, nx) + Math.PI / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
 
     ctx.restore();
   }
@@ -1303,12 +1764,22 @@
   function init() {
     setupCanvas();
     players[0] = sessionStorage.getItem('arena-name') || 'Player 1';
+    players[1] = 'Player 2';
 
-    // Skin picker
+    // Skin picker (ball skins)
     document.querySelectorAll('.skin-pill').forEach(pill => {
       pill.addEventListener('click', () => {
         activeSkin = pill.dataset.skin;
         document.querySelectorAll('.skin-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+      });
+    });
+
+    // Cue skin picker
+    document.querySelectorAll('.cue-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        activeCueSkin = pill.dataset.cue;
+        document.querySelectorAll('.cue-pill').forEach(p => p.classList.remove('active'));
         pill.classList.add('active');
       });
     });
@@ -1318,7 +1789,11 @@
       card.addEventListener('click', () => {
         const mode = card.dataset.mode;
         const vs   = card.dataset.vs;
-        players[1] = vs === 'ai' ? 'AI' : 'Player 2';
+        if (vs === 'ai') {
+          players[1] = 'AI';
+        } else {
+          players[1] = sessionStorage.getItem('arena-p2name') || 'Player 2';
+        }
         initGame(mode, vs);
       });
     });

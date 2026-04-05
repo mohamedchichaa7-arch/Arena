@@ -1173,6 +1173,8 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'game-over': {
+        const room = rooms.get(conn.roomId);
+        if (!room) break;
         broadcastRoom(room.id, { type: 'player-gameover', id, name: conn.name }, id);
         const elapsedGame = room.battle?.startedAt ? Math.floor((Date.now() - room.battle.startedAt) / 1000) : null;
         log('info', 'game-over', { id, name: conn.name, ip: conn.ip, roomId: room.id, elapsedSec: elapsedGame });
