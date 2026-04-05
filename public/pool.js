@@ -281,6 +281,7 @@
     const asgn    = new Array(15);
     // Standard 8-ball rack: apex=1(head), centre=8, back corners: 1 solid + 1 stripe
     asgn[0]  = 1;
+    solids.splice(solids.indexOf(1), 1); // remove ball 1 — already placed at apex
     asgn[4]  = 8;
     asgn[10] = solids.pop();
     asgn[14] = stripes.pop();
@@ -496,9 +497,10 @@
 
     if (gameMode === '8ball') {
       if (b.id === 8) {
-        // Potting 8-ball ends the game immediately
-        if (!groupAssigned || !eightLegal[turn]) {
-          endGame(1 - turn, '8-ball pocketed too early!');
+        // Potting 8-ball: check for simultaneous scratch (cue already in pocketedThisTurn)
+        const simultScratch = pocketedThisTurn.some(pb => pb.id === 0);
+        if (!groupAssigned || !eightLegal[turn] || simultScratch) {
+          endGame(1 - turn, simultScratch ? '8-ball + scratch — you lose!' : '8-ball pocketed too early!');
         } else {
           endGame(turn, '8-ball pocketed — victory!');
         }
@@ -2077,8 +2079,8 @@
       });
     });
 
-    // Canvas events
-    canvas.addEventListener('mousemove', onMove);
+    // Canvas events — mousemove on window so aim tracks even when cursor leaves canvas
+    window.addEventListener('mousemove', onMove);
     canvas.addEventListener('mousedown', onDown);
     canvas.addEventListener('touchmove', e => { e.preventDefault(); onMove(e); }, { passive: false });
     canvas.addEventListener('touchstart', e => { e.preventDefault(); onDown(e); }, { passive: false });
