@@ -466,9 +466,6 @@
       img.draggable = false;
       el.appendChild(img);
 
-      // Click to play
-      el.addEventListener('click', () => onCardClick(card, i));
-
       // Hover: lift card out of fan
       el.addEventListener('mouseenter', () => {
         if (dragSrcIdx !== null) return;
@@ -483,15 +480,58 @@
         el.style.filter = '';
       });
 
-      // ── Drag to sort ──────────────────────────────────────
+      // ── Click or drag (mouse) ─────────────────────────────
+      // Only commit to drag after movement > 5px; otherwise treat as click.
       el.addEventListener('mousedown', e => {
         if (e.button !== 0) return;
         e.preventDefault();
-        startDrag(e, i, card, el);
+        const sx = e.clientX, sy = e.clientY;
+        let dragging = false;
+        function onMove(me) {
+          if (!dragging && (Math.abs(me.clientX - sx) > 5 || Math.abs(me.clientY - sy) > 5)) {
+            dragging = true;
+            cleanup();
+            startDrag({ clientX: sx, clientY: sy }, i, card, el);
+          }
+        }
+        function onUp() {
+          cleanup();
+          if (!dragging) onCardClick(card, i);
+        }
+        function cleanup() {
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
       });
+
+      // ── Click or drag (touch) ─────────────────────────────
+      // Same threshold approach: tap fires onCardClick, slide starts drag.
       el.addEventListener('touchstart', e => {
         e.preventDefault();
-        startDrag(e.touches[0], i, card, el);
+        const t0 = e.touches[0];
+        const sx = t0.clientX, sy = t0.clientY;
+        let dragging = false;
+        function onMove(te) {
+          te.preventDefault();
+          const t = te.touches[0];
+          if (!dragging && (Math.abs(t.clientX - sx) > 8 || Math.abs(t.clientY - sy) > 8)) {
+            dragging = true;
+            cleanup();
+            startDrag({ clientX: sx, clientY: sy }, i, card, el);
+          }
+        }
+        function onEnd() {
+          cleanup();
+          if (!dragging) onCardClick(card, i);
+        }
+        function cleanup() {
+          document.removeEventListener('touchmove', onMove);
+          document.removeEventListener('touchend', onEnd);
+        }
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('touchend', onEnd);
       }, { passive: false });
 
       handCardsEl.appendChild(el);
