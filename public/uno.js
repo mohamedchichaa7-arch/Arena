@@ -684,7 +684,7 @@
       nameEl.className = 'seat-name';
       nameEl.textContent = p.name;
       seat.appendChild(nameEl);
-
+ 
       const cardsEl = document.createElement('div');
       cardsEl.className = 'seat-cards';
       cardsEl.textContent = `${p.cardCount} card${p.cardCount !== 1 ? 's' : ''}`;
