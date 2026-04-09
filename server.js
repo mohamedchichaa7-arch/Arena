@@ -1732,11 +1732,6 @@ wss.on('connection', (ws, req) => {
         const card = playerHand[cardIndex];
         // Validate play
         if (!unoIsPlayable(card, uno.topCard, uno.currentColor)) break;
-        // Wild Draw Four: enforce that player has no card matching current color
-        if (card.type === 'wild_draw_four') {
-          const hasMatchingColor = playerHand.some((c, i) => i !== cardIndex && c.color === uno.currentColor);
-          if (hasMatchingColor) break; // illegal play — silently reject
-        }
         // Wild cards need chosen color
         let chosenColor = null;
         if (card.type === 'wild' || card.type === 'wild_draw_four') {
