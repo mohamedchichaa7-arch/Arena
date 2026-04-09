@@ -48,17 +48,14 @@
         <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
       </header>
 
-      <!-- Pre-game controls -->
+      <!-- Pre-game controls (only visible to room leader) -->
       <div class="controls" id="controls">
         <button class="btn btn-primary" id="btnStartGame">▶ Start Game</button>
         <div class="twist-config" id="twistConfig">
-          <div class="tc-label">
-            <span class="tc-icon">🎲</span>
-            <span>Twist&nbsp;Frequency:&nbsp;</span>
-            <span class="tc-value" id="twistFreqVal">25%</span>
+          <div class="tc-header">🎲 Twist Settings</div>
+          <div class="tc-grid" id="tcGrid">
+            <!-- rows injected by JS -->
           </div>
-          <input class="tc-slider" type="range" id="twistFreqSlider" min="0" max="100" step="5" value="25">
-          <span class="tc-hint" id="twistFreqHint"></span>
         </div>
       </div>
 
@@ -147,12 +144,14 @@
   <!-- Confetti canvas -->
   <canvas id="confetti"></canvas>
 
-  <!-- Twist announcement overlay -->
-  <div class="twist-overlay" id="twistOverlay" style="display:none">
+  <!-- Twist announcement toast (non-blocking) -->
+  <div class="twist-overlay" id="twistOverlay">
     <div class="twist-card">
       <div class="twist-emoji" id="twistOvEmoji"></div>
-      <div class="twist-name"  id="twistOvName"></div>
-      <div class="twist-desc"  id="twistOvDesc"></div>
+      <div class="twist-text-wrap">
+        <div class="twist-name" id="twistOvName"></div>
+        <div class="twist-desc" id="twistOvDesc"></div>
+      </div>
     </div>
   </div>
 

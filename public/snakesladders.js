@@ -110,26 +110,8 @@
   const freeMoveBar       = $('freeMoveBar');
   const freeMoveCountdown = $('freeMoveCountdown');
   const btnFreeMoveSkip   = $('btnFreeMoveSkip');
-  // Twist frequency slider
-  const twistFreqSlider = $('twistFreqSlider');
-  const twistFreqVal    = $('twistFreqVal');
-  const twistFreqHint   = $('twistFreqHint');
-  if (twistFreqSlider) {
-    const updateFreqUI = () => {
-      const v = parseInt(twistFreqSlider.value);
-      if (v === 0) {
-        twistFreqVal.textContent = 'Off';
-        twistFreqVal.classList.add('disabled');
-        twistFreqHint.textContent = 'No twists will occur';
-      } else {
-        twistFreqVal.textContent = v + '%';
-        twistFreqVal.classList.remove('disabled');
-        twistFreqHint.textContent = v <= 15 ? 'Rare' : v <= 40 ? 'Occasional' : v <= 65 ? 'Common' : 'Very frequent';
-      }
-    };
-    twistFreqSlider.addEventListener('input', updateFreqUI);
-    updateFreqUI();
-  }
+  // Twist config (per-twist sliders, built dynamically for leader only)
+  const tcGrid = $('tcGrid');
 
   roomBadge.textContent = 'Room ' + roomId;
 
@@ -142,6 +124,55 @@
   let gameActive   = false;
   let animating    = false;
   let lobby        = new Map(); // id → name (everyone in room)
+  let leaderId     = null;      // first player — only they see controls
+
+  // ── Per-twist sliders (leader only) ─────────────────────────────
+  const TWIST_SLIDER_DEF = [
+    { id: 'swap',       emoji: '🔁', label: 'Swap',        def: 50 },
+    { id: 'shield',     emoji: '🛡️', label: 'Shield',      def: 50 },
+    { id: 'bomb',       emoji: '💣', label: 'Bomb',        def: 50 },
+    { id: 'doubleroll', emoji: '🎲', label: 'Double Roll', def: 50 },
+    { id: 'chaos',      emoji: '🔀', label: 'Chaos',       def: 50 },
+    { id: 'freemove',   emoji: '⭐', label: 'Free Move',   def: 50 },
+  ];
+
+  function buildTwistSliders() {
+    if (!tcGrid) return;
+    tcGrid.innerHTML = '';
+    for (const t of TWIST_SLIDER_DEF) {
+      const row = document.createElement('div');
+      row.className = 'tc-row';
+      const valId = 'tcv-' + t.id;
+      row.innerHTML =
+        `<span class="tc-emoji">${t.emoji}</span>` +
+        `<input class="tc-slider" type="range" id="tcs-${t.id}" min="0" max="100" step="10" value="${t.def}">` +
+        `<span class="tc-value" id="${valId}">${t.def}%</span>`;
+      tcGrid.appendChild(row);
+
+      const slider = row.querySelector('input');
+      const valEl  = row.querySelector('.tc-value');
+      slider.addEventListener('input', () => {
+        const v = parseInt(slider.value);
+        if (v === 0) { valEl.textContent = 'Off'; valEl.classList.add('tc-off'); }
+        else         { valEl.textContent = v + '%'; valEl.classList.remove('tc-off'); }
+      });
+    }
+  }
+
+  function getTwistWeights() {
+    const w = {};
+    for (const t of TWIST_SLIDER_DEF) {
+      const el = document.getElementById('tcs-' + t.id);
+      w[t.id] = el ? parseInt(el.value) : t.def;
+    }
+    return w;
+  }
+
+  function syncLeaderControls() {
+    const isLeader = myId && leaderId && myId === leaderId;
+    $('btnStartGame').style.display  = isLeader ? '' : 'none';
+    $('twistConfig').style.display   = isLeader ? '' : 'none';
+  }
 
   // Twist die flip state
   let twistCardRy  = 0;   // cumulative Y-rotation of the flip card
@@ -491,19 +522,30 @@
     await sleep(700);
   }
 
-  // ── Twist announcement overlay ───────────────────────────────────
-  function showTwistOverlay(twistName) {
+  // ── Twist announcement toast ─────────────────────────────────────
+  let twistToastTimer = null;
+  function showTwistOverlay(twistName, durationMs = 1800) {
     const meta = TWIST_META[twistName] || TWIST_META.blank;
     twistOvEmoji.textContent = meta.emoji;
     twistOvName.textContent  = meta.label;
     twistOvDesc.textContent  = meta.desc;
     twistOvName.style.color  = meta.color || '#fff';
-    twistOverlay.style.display = 'flex';
-    return sleep(1600);
+    // Colour the border to match the twist
+    twistOverlay.querySelector('.twist-card').style.borderColor =
+      (meta.color || 'rgba(255,255,255,.15)') + 'aa';
+    clearTimeout(twistToastTimer);
+    twistOverlay.classList.add('toast-visible');
+    return new Promise(res => {
+      twistToastTimer = setTimeout(() => {
+        hideTwistOverlay();
+        res();
+      }, durationMs);
+    });
   }
 
   function hideTwistOverlay() {
-    twistOverlay.style.display = 'none';
+    clearTimeout(twistToastTimer);
+    twistOverlay.classList.remove('toast-visible');
   }
 
   // ── Target selection UI (swap / bomb only) ──────────────────────
@@ -793,15 +835,19 @@
 
       case 'room-joined':
         myId = msg.myId;
+        leaderId = msg.leaderId || msg.myId; // first in room is leader
         lobby.set(myId, myName);
         for (const p of (msg.players || [])) lobby.set(p.id, p.name);
         statusEl.textContent = 'Waiting for players… (' + lobby.size + ' in room)';
         controls.style.display = '';
+        buildTwistSliders();
+        syncLeaderControls();
         renderPlayerList();
         break;
 
       case 'player-joined':
         lobby.set(msg.id, msg.name);
+        if (msg.leaderId) leaderId = msg.leaderId;
         chat('system', '', esc(msg.name) + ' joined the room.');
         statusEl.textContent = lobby.size + ' player' + (lobby.size !== 1 ? 's' : '') + ' in room.';
         renderPlayerList();
@@ -809,6 +855,9 @@
 
       case 'player-left':
         lobby.delete(msg.id);
+        // If leader left, first remaining lobby key becomes leader
+        if (msg.id === leaderId) leaderId = lobby.keys().next().value || null;
+        syncLeaderControls();
         chat('system', '', (msg.name || 'A player') + ' left.');
         renderPlayerList();
         break;
@@ -857,11 +906,18 @@
 
         const who = playerId === myId ? 'You' : esc(playerName);
 
-        // Animate both dice simultaneously, then handle movement + twist
-        Promise.all([
-          animateDice(moveDice),
-          animateTwistCard(twist),
-        ]).then(async () => {
+        (async () => {
+          // For double-roll: animate first die + twist card simultaneously,
+          // show toast, brief pause, then animate second die
+          if (twist === 'doubleroll' && moveDice2 !== null) {
+            await Promise.all([animateDice(moveDice), animateTwistCard(twist)]);
+            showTwistOverlay('doubleroll', 2400); // toast while second die plays
+            await sleep(420);
+            await animateDice(moveDice2);
+          } else {
+            await Promise.all([animateDice(moveDice), animateTwistCard(twist)]);
+          }
+
           // ── Movement result ──
           if (overshoot) {
             chat('system', '', `${who} rolled ${moveDice}${moveDice2 ? '+'+moveDice2 : ''} — overshoot! Stays at ${from}.`);
@@ -921,8 +977,7 @@
               chat('system', '', `${who} gained 🛡️ Shield — snake-proof for 2 turns!`);
               renderPlayerList();
             } else if (twist === 'doubleroll') {
-              await showTwistOverlay(twist);
-              hideTwistOverlay();
+              // Toast already shown during animation above — just log
               addEvent(`🎲 ${playerName}: Double Roll! +${moveDice2} total ${moveDice}+${moveDice2}`);
               chat('system', '', `${who} triggered 🎲 Double Roll (${moveDice}+${moveDice2}=${moveDice+moveDice2})!`);
             } else if (awaitingTwist && playerId === myId) {
@@ -981,7 +1036,7 @@
               : (nextPlayer?.name || 'Opponent') + "'s turn…";
             renderPlayerList();
           }
-        });
+        })();
         break;
       }
 
@@ -1123,8 +1178,8 @@
 
   // ── Event listeners ──────────────────────────────────────────────
   btnStartGame.addEventListener('click', () => {
-    const freq = twistFreqSlider ? parseInt(twistFreqSlider.value) : 25;
-    wsSend({ type: 'sl-start', twistFrequency: freq });
+    const twistWeights = getTwistWeights();
+    wsSend({ type: 'sl-start', twistWeights });
   });
 
   btnRoll.addEventListener('click', () => {

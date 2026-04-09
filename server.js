@@ -676,8 +676,12 @@ wss.on('connection', (ws, req) => {
         send(ws, {
           type: 'room-joined', roomId: room.id, roomType: room.type,
           roomName: room.name, myId: id, players: roomPlayerList(room, id),
+          leaderId: room.players.keys().next().value,
         });
-        broadcastRoom(room.id, { type: 'player-joined', id, name: conn.name }, id);
+        broadcastRoom(room.id, {
+          type: 'player-joined', id, name: conn.name,
+          leaderId: room.players.keys().next().value,
+        }, id);
 
         // Restore BR hand on reconnect
         if (isBrReconnect) {
@@ -1447,8 +1451,19 @@ wss.on('connection', (ws, req) => {
         if (!room || room.type !== 'snakesladders') return;
         if (room.sl?.active) { send(ws, { type: 'error', msg: 'A game is already in progress' }); return; }
         if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need at least 2 players' }); return; }
-        const twistFreq = Math.min(100, Math.max(0, parseInt(msg.twistFrequency) || 25));
-        startSnakesLadders(room, twistFreq);
+        // Only the leader (first player) may start
+        if (room.players.keys().next().value !== id) return;
+        // Per-twist weights: object { swap:0-100, shield:0-100, ... } defaults to 50 each
+        const DEFAULT_W = 50;
+        const twistWeights = {
+          swap:       Math.min(100, Math.max(0, parseInt(msg.twistWeights?.swap)       || DEFAULT_W)),
+          shield:     Math.min(100, Math.max(0, parseInt(msg.twistWeights?.shield)     || DEFAULT_W)),
+          bomb:       Math.min(100, Math.max(0, parseInt(msg.twistWeights?.bomb)       || DEFAULT_W)),
+          doubleroll: Math.min(100, Math.max(0, parseInt(msg.twistWeights?.doubleroll) || DEFAULT_W)),
+          chaos:      Math.min(100, Math.max(0, parseInt(msg.twistWeights?.chaos)      || DEFAULT_W)),
+          freemove:   Math.min(100, Math.max(0, parseInt(msg.twistWeights?.freemove)   || DEFAULT_W)),
+        };
+        startSnakesLadders(room, twistWeights);
         break;
       }
       case 'sl-roll': {
@@ -1459,12 +1474,18 @@ wss.on('connection', (ws, req) => {
         if (sl.playerOrder[sl.turnIdx] !== id) return;
 
         // Roll both dice
-        const moveDice  = Math.floor(Math.random() * 6) + 1;
-        const freq      = sl.twistFrequency ?? 25;
-        let twist       = (freq > 0 && Math.random() * 100 < freq)
-          ? SL_TWIST_NAMES[Math.floor(Math.random() * SL_TWIST_NAMES.length)]
+        const moveDice = Math.floor(Math.random() * 6) + 1;
+        // Weighted twist roll: build a pool where each twist appears proportional to its weight
+        const tw = sl.twistWeights || {};
+        const TWIST_POOL = [];
+        for (const name of SL_TWIST_NAMES) {
+          const w = Math.round((tw[name] ?? 50) / 10); // 0-10 slots
+          for (let i = 0; i < w; i++) TWIST_POOL.push(name);
+        }
+        let twist = TWIST_POOL.length > 0
+          ? TWIST_POOL[Math.floor(Math.random() * TWIST_POOL.length)]
           : 'blank';
-        let moveDice2   = null;
+        let moveDice2 = null;
         if (twist === 'doubleroll') moveDice2 = Math.floor(Math.random() * 6) + 1;
         const totalMove = moveDice + (moveDice2 || 0);
 
@@ -1668,18 +1689,18 @@ const SL_SNAKES       = { 17:7, 54:34, 62:19, 64:60, 87:24, 93:73, 95:75, 99:78 
 const SL_LADDERS      = { 4:14, 9:31, 20:38, 28:84, 40:59, 51:67, 63:81, 71:91 };
 const SL_TWIST_NAMES  = ['swap','shield','bomb','doubleroll','chaos','freemove'];
 
-function startSnakesLadders(room, twistFrequency = 25) {
+function startSnakesLadders(room, twistWeights = {}) {
   const playerOrder = [...room.players.keys()];
   const positions = {}, shields = {};
   for (const pid of playerOrder) { positions[pid] = 0; shields[pid] = 0; }
-  room.sl = { active: true, positions, playerOrder, turnIdx: 0, shields, pendingTwist: null, pendingTimer: null, twistFrequency };
+  room.sl = { active: true, positions, playerOrder, turnIdx: 0, shields, pendingTwist: null, pendingTimer: null, twistWeights };
   room.status = 'playing';
   broadcastLobby();
   const playersInfo = playerOrder.map((pid, i) => ({ id: pid, name: room.players.get(pid).name, colorIdx: i }));
   for (const [pid, p] of room.players) {
-    send(p.ws, { type: 'sl-start', yourId: pid, players: playersInfo, positions: { ...positions }, shields: { ...shields }, turnId: playerOrder[0], twistFrequency });
+    send(p.ws, { type: 'sl-start', yourId: pid, players: playersInfo, positions: { ...positions }, shields: { ...shields }, turnId: playerOrder[0], twistWeights });
   }
-  log('info', 'sl-start', { roomId: room.id, players: playerOrder.length, twistFrequency });
+  log('info', 'sl-start', { roomId: room.id, players: playerOrder.length });
 }
 
 // ── E-Game helpers ──────────────────────────────────────────────
