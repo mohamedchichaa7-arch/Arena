@@ -430,14 +430,15 @@
 
   function fanAngle(i, total) {
     if (total <= 1) return 0;
-    const spread = Math.min(3.5 * (total - 1), 40); // max ±20deg total
-    return -spread / 2 + (spread / (total - 1)) * i;
+    const maxSpread = Math.min(total * 2.5, 35);
+    const t = (i / (total - 1)) - 0.5;
+    return t * maxSpread;
   }
   function fanRise(i, total) {
     if (total <= 1) return 0;
-    // Cards arc up from both ends toward centre (parabola)
-    const mid = (total - 1) / 2;
-    return -Math.pow((i - mid) / (mid || 1), 2) * 14;
+    // Edges droop DOWN (positive translateY), center is highest — matches BluffRummy felt-table arc
+    const t = (i / (total - 1)) - 0.5;
+    return Math.abs(t) * 18;
   }
 
   function applyFanTransform(el, i, total, extraY) {
@@ -451,6 +452,9 @@
     handCardsEl.innerHTML = '';
     const total = hand.length;
 
+    // Dynamic overlap: fewer cards → spread wider apart; many cards → tighten up
+    const overlap = Math.min(22, Math.max(6, 600 / Math.max(total, 1)));
+
     hand.forEach((card, i) => {
       const el = document.createElement('div');
       el.className = 'hand-card';
@@ -458,6 +462,7 @@
       if (playable) el.classList.add('playable');
       if (!isMyTurn) el.classList.add('not-my-turn');
 
+      el.style.marginLeft = i === 0 ? '0' : `-${overlap}px`;
       applyFanTransform(el, i, total, 0);
 
       const img = document.createElement('img');
@@ -466,11 +471,12 @@
       img.draggable = false;
       el.appendChild(img);
 
-      // Hover: lift card out of fan
+      // Hover: lift card up from its drooped/fanned position
       el.addEventListener('mouseenter', () => {
         if (dragSrcIdx !== null) return;
         const rot = fanAngle(i, total);
-        el.style.transform = `rotate(${rot}deg) translateY(-18px) scale(1.1)`;
+        const rise = fanRise(i, total);
+        el.style.transform = `rotate(${rot}deg) translateY(${rise - 22}px)`;
         el.style.zIndex = 100;
         el.style.filter = playable ? 'brightness(1.12)' : '';
       });
@@ -782,12 +788,14 @@
 
   // ── Color picker ─────────────────────────────────────────
   document.querySelectorAll('.color-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('pointerdown', e => {
+      e.preventDefault(); // prevent any downstream click/drag interference
       if (!pendingWildCard) return;
       const chosenColor = btn.dataset.color;
-      wsSend({ type: 'uno-play', cardIndex: pendingWildCard.index, chosenColor });
+      const idx = pendingWildCard.index;
       pendingWildCard = null;
       colorPicker.style.display = 'none';
+      wsSend({ type: 'uno-play', cardIndex: idx, chosenColor });
     });
   });
 
