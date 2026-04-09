@@ -110,6 +110,26 @@
   const freeMoveBar       = $('freeMoveBar');
   const freeMoveCountdown = $('freeMoveCountdown');
   const btnFreeMoveSkip   = $('btnFreeMoveSkip');
+  // Twist frequency slider
+  const twistFreqSlider = $('twistFreqSlider');
+  const twistFreqVal    = $('twistFreqVal');
+  const twistFreqHint   = $('twistFreqHint');
+  if (twistFreqSlider) {
+    const updateFreqUI = () => {
+      const v = parseInt(twistFreqSlider.value);
+      if (v === 0) {
+        twistFreqVal.textContent = 'Off';
+        twistFreqVal.classList.add('disabled');
+        twistFreqHint.textContent = 'No twists will occur';
+      } else {
+        twistFreqVal.textContent = v + '%';
+        twistFreqVal.classList.remove('disabled');
+        twistFreqHint.textContent = v <= 15 ? 'Rare' : v <= 40 ? 'Occasional' : v <= 65 ? 'Common' : 'Very frequent';
+      }
+    };
+    twistFreqSlider.addEventListener('input', updateFreqUI);
+    updateFreqUI();
+  }
 
   roomBadge.textContent = 'Room ' + roomId;
 
@@ -981,7 +1001,7 @@
             addEvent(`⏱ ${playerName}: ${meta.emoji || ''} twist timed out — skipped`);
             chat('system', '', `${who} ran out of time — twist skipped.`);
           } else {
-            const { twist, targetId, targetName, myNewPos, theirNewPos, from: bFrom, to: bTo, square } = twistDetail || {};
+            const { twist, targetId, targetName, myNewPos, theirNewPos, from: bFrom, to: bTo, square, fmFinalPos, fmEvent } = twistDetail || {};
             if (twist === 'swap') {
               getOrCreateToken(playerId);
               if (targetId) getOrCreateToken(targetId);
@@ -998,10 +1018,34 @@
               addEvent(`💣 ${playerName}: bombed ${targetName} ${bFrom}→${bTo}`);
               chat('system', '', `${who} 💣 bombed ${esc(targetName)} back to sq ${bTo}!`);
             } else if (twist === 'freemove') {
+              // Step to chosen square, then apply snake/ladder if triggered
               placeToken(playerId, square, 0);
               await sleep(300);
-              addEvent(`⭐ ${playerName}: free-moved to sq ${square}`);
-              chat('system', '', `${who} ⭐ moved to square ${square}!`);
+              if (fmEvent === 'snake') {
+                chat('system', '', `${who} ⭐ free-moved to sq ${square} 🐍 then slid to ${fmFinalPos}!`);
+                addEvent(`⭐ ${playerName}: free-moved to sq ${square} 🐍 → ${fmFinalPos}`);
+                await sleep(200);
+                const tok = getOrCreateToken(playerId);
+                tok.classList.add('snake-slide');
+                placeToken(playerId, fmFinalPos, 0);
+                await sleep(620);
+                tok.classList.remove('snake-slide');
+              } else if (fmEvent === 'ladder') {
+                chat('system', '', `${who} ⭐ free-moved to sq ${square} 🪜 then climbed to ${fmFinalPos}!`);
+                addEvent(`⭐ ${playerName}: free-moved to sq ${square} 🪜 → ${fmFinalPos}`);
+                await sleep(200);
+                const tok = getOrCreateToken(playerId);
+                tok.classList.add('ladder-climb');
+                placeToken(playerId, fmFinalPos, 0);
+                await sleep(500);
+                tok.classList.remove('ladder-climb');
+              } else if (fmEvent === 'shield-block') {
+                chat('system', '', `${who} ⭐ free-moved to sq ${square} 🛡️ shield blocked a snake!`);
+                addEvent(`⭐🛡️ ${playerName}: free-moved to sq ${square}, shield blocked snake`);
+              } else {
+                chat('system', '', `${who} ⭐ moved to square ${square}!`);
+                addEvent(`⭐ ${playerName}: free-moved to sq ${square}`);
+              }
             }
           }
 
@@ -1078,11 +1122,15 @@
   }
 
   // ── Event listeners ──────────────────────────────────────────────
-  btnStartGame.addEventListener('click', () => wsSend({ type: 'sl-start' }));
+  btnStartGame.addEventListener('click', () => {
+    const freq = twistFreqSlider ? parseInt(twistFreqSlider.value) : 25;
+    wsSend({ type: 'sl-start', twistFrequency: freq });
+  });
 
   btnRoll.addEventListener('click', () => {
     if (!gameActive || currentTurnId !== myId || animating) return;
     btnRoll.disabled = true;
+    resetTwistCard();   // snap back to "?" before the new spin arrives
     wsSend({ type: 'sl-roll' });
   });
 

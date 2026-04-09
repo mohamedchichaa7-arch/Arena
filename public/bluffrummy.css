@@ -542,6 +542,7 @@ html, body {
   padding: 0 1rem 8px;
   position: relative;
   z-index: 10;
+  overflow: visible;
 }
 
 .hand-actions {
@@ -677,7 +678,7 @@ html, body {
 
 /* ── Drag reorder ────────────────────────────────────────── */
 .game-card.dragging { opacity: .3; transform: scale(.9) !important; box-shadow: none !important; }
-.drag-ghost { position: fixed; pointer-events: none; z-index: 1000; opacity: .88; transform: rotate(-4deg) scale(1.06); box-shadow: 0 20px 60px rgba(0,0,0,.7); transition: none !important; border-radius: 8px; }
+.drag-ghost { position: fixed; pointer-events: none; z-index: 9999; opacity: .92; transform: rotate(-4deg) scale(1.06); box-shadow: 0 20px 60px rgba(0,0,0,.7); transition: none !important; border-radius: 8px; }
 
 /* ── Play modal ──────────────────────────────────────────── */
 .modal-backdrop {

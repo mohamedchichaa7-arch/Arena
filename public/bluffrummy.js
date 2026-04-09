@@ -479,6 +479,9 @@
       brGhostEl.style.top    = (e.clientY - brPtrOffY - 8) + 'px';
       document.body.appendChild(brGhostEl);
       srcCard.classList.add('dragging');
+      // Drop hand-tray below the ghost so it can't obscure it
+      const ht = document.getElementById('handTray');
+      if (ht) ht.style.zIndex = '1';
     }
 
     if (!brGhostEl) return;
@@ -516,6 +519,10 @@
     document.removeEventListener('pointermove', brOnPtrMove);
     document.removeEventListener('pointerup', brOnPtrUp);
     document.removeEventListener('pointercancel', brOnPtrUp);
+
+    // Restore hand-tray stacking
+    const ht = document.getElementById('handTray');
+    if (ht) ht.style.zIndex = '';
 
     handCards.querySelectorAll('.game-card').forEach(c => {
       c.style.transform  = c.dataset.baseTransform || '';

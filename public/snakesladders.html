@@ -51,6 +51,15 @@
       <!-- Pre-game controls -->
       <div class="controls" id="controls">
         <button class="btn btn-primary" id="btnStartGame">▶ Start Game</button>
+        <div class="twist-config" id="twistConfig">
+          <div class="tc-label">
+            <span class="tc-icon">🎲</span>
+            <span>Twist&nbsp;Frequency:&nbsp;</span>
+            <span class="tc-value" id="twistFreqVal">25%</span>
+          </div>
+          <input class="tc-slider" type="range" id="twistFreqSlider" min="0" max="100" step="5" value="25">
+          <span class="tc-hint" id="twistFreqHint"></span>
+        </div>
       </div>
 
       <div class="status" id="status">Connecting…</div>
