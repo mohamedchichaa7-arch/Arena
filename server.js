@@ -767,10 +767,23 @@ wss.on('connection', (ws, req) => {
       }
       case 'garbage': {
         if (conn.mode !== 'room') return;
-        broadcastRoom(conn.roomId, {
-          type: 'garbage', from: id,
-          lines: Math.min(20, Math.max(0, parseInt(msg.lines) || 0)),
-        }, id);
+        const room = rooms.get(conn.roomId);
+        if (!room) return;
+        const lines = Math.min(20, Math.max(0, parseInt(msg.lines) || 0));
+        // In an active battle, target one random alive opponent instead of everyone
+        if (room.battle && room.battle.started) {
+          const targets = [];
+          for (const [pid] of room.players) {
+            if (pid !== id && !room.battle.eliminated.has(pid)) targets.push(pid);
+          }
+          if (targets.length > 0) {
+            const target = targets[Math.floor(Math.random() * targets.length)];
+            const tp = room.players.get(target);
+            if (tp) send(tp.ws, { type: 'garbage', from: id, lines });
+          }
+        } else {
+          broadcastRoom(conn.roomId, { type: 'garbage', from: id, lines }, id);
+        }
         break;
       }
       case 'chat': {

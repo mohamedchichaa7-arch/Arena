@@ -62,6 +62,9 @@
   const SUIT_COLORS = { '♠': 'black', '♥': 'red', '♦': 'red', '♣': 'black' };
 
   // ── Helpers ───────────────────────────────────────────────
+  function sortHand() {
+    hand.sort((a, b) => a.num - b.num || SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit));
+  }
   function escapeHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
@@ -134,6 +137,7 @@
     'br-state'(msg) {
       myId = msg.yourId;
       hand = msg.hand || [];
+      sortHand();
       gameActive = msg.active;
       myTurn = msg.currentTurn === myId;
       canChallenge = msg.canChallenge;
@@ -164,6 +168,7 @@
 
     'br-dealt'(msg) {
       hand = msg.hand;
+      sortHand();
       gameActive = true;
       btnStart.style.display = 'none';
       discardHistory = msg.discards || [];
@@ -208,6 +213,7 @@
       renderPlayers();
       if (msg.playerId === myId) {
         hand = msg.newHand || hand;
+        sortHand();
         selectedIndices.clear();
         renderHand();
       }
@@ -229,6 +235,7 @@
 
     'br-hand-update'(msg) {
       hand = msg.hand;
+      sortHand();
       selectedIndices.clear();
       renderHand();
     },
@@ -376,11 +383,6 @@
     selectedIndices.clear();
     handCount.textContent = hand.length;
 
-    // Sort by number then suit
-    const sorted = hand.map((c, i) => ({ ...c, origIdx: i }));
-    sorted.sort((a, b) => a.num - b.num || SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit));
-    hand = sorted.map(c => ({ num: c.num, suit: c.suit }));
-
     const total = hand.length;
     const maxSpread = Math.min(total * 2.5, 35); // max fan angle
 
@@ -393,12 +395,15 @@
       const angle = t * maxSpread;
       const yOffset = Math.abs(t) * 18; // arc: edges lower
       const overlap = Math.min(22, Math.max(8, 600 / total));
+      const baseTransform = `rotate(${angle}deg) translateY(${yOffset}px)`;
 
       el.className = `game-card ${colorClass}` + (animate ? ' dealt' : '');
-      el.style.transform = `rotate(${angle}deg) translateY(${yOffset}px)`;
-      el.style.setProperty('--rest-transform', `rotate(${angle}deg) translateY(${yOffset}px)`);
+      el.style.transform = baseTransform;
+      el.style.setProperty('--rest-transform', baseTransform);
       el.style.marginLeft = i === 0 ? '0' : `-${overlap}px`;
       el.style.zIndex = i;
+      el.dataset.idx = i;
+      el.dataset.baseTransform = baseTransform;
       if (animate) el.style.animationDelay = `${i * 0.04}s`;
 
       el.innerHTML =
@@ -407,6 +412,7 @@
         `<span class="card-suit">${card.suit}</span>`;
 
       el.addEventListener('click', () => {
+        if (brDragHappened) { brDragHappened = false; return; }
         if (!myTurn || !gameActive) return;
         if (selectedIndices.has(i)) {
           selectedIndices.delete(i);
@@ -422,6 +428,115 @@
 
       handCards.appendChild(el);
     });
+
+    attachPointerDrag();
+  }
+
+  // ── Pointer drag reorder ──────────────────────────────────
+  let brDragIdx = -1, brDropIdx = -1;
+  let brGhostEl = null;
+  let brPtrOffX = 0, brPtrOffY = 0;
+  let brStartX = 0, brStartY = 0;
+  let brDragLive = false;
+  let brDragHappened = false;
+
+  function attachPointerDrag() {
+    const cards = handCards.querySelectorAll('.game-card');
+    cards.forEach(card => card.addEventListener('pointerdown', brOnPtrDown, { passive: false }));
+  }
+
+  function brOnPtrDown(e) {
+    if (e.button && e.button !== 0) return;
+    const card = e.currentTarget;
+    brDragIdx = parseInt(card.dataset.idx);
+    if (isNaN(brDragIdx)) return;
+    brStartX = e.clientX; brStartY = e.clientY;
+    brDragLive = false;
+    const rect = card.getBoundingClientRect();
+    brPtrOffX = e.clientX - rect.left;
+    brPtrOffY = e.clientY - rect.top;
+    document.addEventListener('pointermove', brOnPtrMove, { passive: false });
+    document.addEventListener('pointerup', brOnPtrUp);
+    document.addEventListener('pointercancel', brOnPtrUp);
+  }
+
+  function brOnPtrMove(e) {
+    e.preventDefault();
+    const dx = e.clientX - brStartX, dy = e.clientY - brStartY;
+    if (!brDragLive && Math.hypot(dx, dy) < 8) return;
+
+    if (!brDragLive) {
+      brDragLive = true;
+      const srcCard = handCards.querySelector(`[data-idx="${brDragIdx}"]`);
+      if (!srcCard) return;
+      const rect = srcCard.getBoundingClientRect();
+      brGhostEl = srcCard.cloneNode(true);
+      brGhostEl.classList.add('drag-ghost');
+      brGhostEl.classList.remove('selected');
+      brGhostEl.style.width  = rect.width  + 'px';
+      brGhostEl.style.height = rect.height + 'px';
+      brGhostEl.style.left   = (e.clientX - brPtrOffX) + 'px';
+      brGhostEl.style.top    = (e.clientY - brPtrOffY - 8) + 'px';
+      document.body.appendChild(brGhostEl);
+      srcCard.classList.add('dragging');
+    }
+
+    if (!brGhostEl) return;
+    brGhostEl.style.left = (e.clientX - brPtrOffX) + 'px';
+    brGhostEl.style.top  = (e.clientY - brPtrOffY - 8) + 'px';
+
+    const cards = [...handCards.querySelectorAll('.game-card:not(.dragging)')];
+    let newDrop = hand.length;
+    if (cards.length > 0) {
+      let minDist = Infinity, nearCard = null;
+      for (const c of cards) {
+        const r = c.getBoundingClientRect();
+        const dist = Math.abs(e.clientX - (r.left + r.width / 2));
+        if (dist < minDist) { minDist = dist; nearCard = c; }
+      }
+      const nr = nearCard.getBoundingClientRect();
+      const ni = parseInt(nearCard.dataset.idx);
+      newDrop = e.clientX < nr.left + nr.width * 0.5 ? ni : ni + 1;
+      newDrop = Math.max(0, Math.min(newDrop, hand.length));
+    }
+
+    if (newDrop !== brDropIdx) {
+      brDropIdx = newDrop;
+      cards.forEach(c => {
+        const ci = parseInt(c.dataset.idx);
+        c.style.transition = 'transform 0.15s ease';
+        c.style.transform  = ci >= newDrop
+          ? 'translateX(52px) ' + (c.dataset.baseTransform || '')
+          : (c.dataset.baseTransform || '');
+      });
+    }
+  }
+
+  function brOnPtrUp() {
+    document.removeEventListener('pointermove', brOnPtrMove);
+    document.removeEventListener('pointerup', brOnPtrUp);
+    document.removeEventListener('pointercancel', brOnPtrUp);
+
+    handCards.querySelectorAll('.game-card').forEach(c => {
+      c.style.transform  = c.dataset.baseTransform || '';
+      c.style.transition = '';
+      c.classList.remove('dragging');
+    });
+
+    if (brGhostEl) { brGhostEl.remove(); brGhostEl = null; }
+
+    if (brDragLive && brDragIdx !== -1 && brDropIdx !== -1) {
+      brDragHappened = true;
+      const effectiveTarget = brDropIdx > brDragIdx ? brDropIdx - 1 : brDropIdx;
+      if (effectiveTarget !== brDragIdx) {
+        const card = hand.splice(brDragIdx, 1)[0];
+        hand.splice(Math.min(effectiveTarget, hand.length), 0, card);
+        selectedIndices.clear();
+        renderHand();
+      }
+    }
+
+    brDragIdx = -1; brDropIdx = -1; brDragLive = false;
   }
 
   // ── Pile rendering ────────────────────────────────────────
