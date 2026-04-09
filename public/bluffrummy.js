@@ -61,6 +61,21 @@
   const SUITS = ['♠', '♥', '♦', '♣'];
   const SUIT_COLORS = { '♠': 'black', '♥': 'red', '♦': 'red', '♣': 'black' };
 
+  // ── Card asset configuration ────────────────────────────────
+  // Change the directory to switch quality:
+  //   'assets/better_cards/Cards (large)'   ← high quality  (default)
+  //   'assets/better_cards/Cards (medium)'  ← medium
+  //   'assets/better_cards/Cards (small)'   ← small
+  const CARD_ASSET_DIR = 'assets/better_cards/Cards (large)';
+  const SUIT_NAMES = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' };
+  function cardImgPath(num, suit) {
+    const s = SUIT_NAMES[suit] || 'spades';
+    const r = num === 1 ? 'A' : num === 11 ? 'J' : num === 12 ? 'Q' : num === 13 ? 'K'
+                             : String(num).padStart(2, '0');
+    return `${CARD_ASSET_DIR}/card_${s}_${r}.png`;
+  }
+  function cardBackPath() { return `${CARD_ASSET_DIR}/card_back.png`; }
+
   // ── Helpers ───────────────────────────────────────────────
   function sortHand() {
     hand.sort((a, b) => a.num - b.num || SUITS.indexOf(a.suit) - SUITS.indexOf(b.suit));
@@ -388,8 +403,6 @@
 
     hand.forEach((card, i) => {
       const el = document.createElement('div');
-      const colorClass = SUIT_COLORS[card.suit] || 'black';
-
       // Fan geometry
       const t = total > 1 ? (i / (total - 1)) - 0.5 : 0;
       const angle = t * maxSpread;
@@ -397,7 +410,7 @@
       const overlap = Math.min(22, Math.max(8, 600 / total));
       const baseTransform = `rotate(${angle}deg) translateY(${yOffset}px)`;
 
-      el.className = `game-card ${colorClass}` + (animate ? ' dealt' : '');
+      el.className = 'game-card' + (animate ? ' dealt' : '');
       el.style.transform = baseTransform;
       el.style.setProperty('--rest-transform', baseTransform);
       el.style.marginLeft = i === 0 ? '0' : `-${overlap}px`;
@@ -406,10 +419,7 @@
       el.dataset.baseTransform = baseTransform;
       if (animate) el.style.animationDelay = `${i * 0.04}s`;
 
-      el.innerHTML =
-        `<span class="card-corner">${cardLabel(card.num)}<br>${card.suit}</span>` +
-        `<span class="card-num">${cardLabel(card.num)}</span>` +
-        `<span class="card-suit">${card.suit}</span>`;
+      el.innerHTML = `<img class="card-img" src="${cardImgPath(card.num, card.suit)}" alt="${cardLabel(card.num)}${card.suit}" draggable="false">`;
 
       el.addEventListener('click', () => {
         if (brDragHappened) { brDragHappened = false; return; }
@@ -564,6 +574,8 @@
     for (let i = 0; i < show; i++) {
       const el = document.createElement('div');
       el.className = 'pile-card face-down';
+      el.style.backgroundImage = `url('${cardBackPath()}')`;
+      el.style.backgroundSize = 'cover';
       el.style.animationDelay = `${i * 0.06}s`;
       pileCards.appendChild(el);
     }
@@ -626,9 +638,8 @@
     modalCards.innerHTML = '';
     selectedCards.forEach(card => {
       const el = document.createElement('div');
-      const colorClass = SUIT_COLORS[card.suit] || 'black';
-      el.className = `modal-card ${colorClass}`;
-      el.innerHTML = `<span class="mc-num">${cardLabel(card.num)}</span><span class="mc-suit">${card.suit}</span>`;
+      el.className = 'modal-card';
+      el.innerHTML = `<img class="card-img" src="${cardImgPath(card.num, card.suit)}" alt="${cardLabel(card.num)}${card.suit}" draggable="false">`;
       modalCards.appendChild(el);
     });
 
@@ -762,8 +773,8 @@
     lpCrds.innerHTML = '';
     for (const card of cards) {
       const el = document.createElement('div');
-      el.className = `lp-card ${SUIT_COLORS[card.suit] || 'black'}`;
-      el.innerHTML = `<span class="lp-num">${cardLabel(card.num)}</span><span class="lp-suit">${card.suit}</span>`;
+      el.className = 'lp-card';
+      el.innerHTML = `<img class="card-img" src="${cardImgPath(card.num, card.suit)}" alt="${cardLabel(card.num)}${card.suit}" draggable="false">`;
       lpCrds.appendChild(el);
     }
     lpAnn.textContent = `${cardLabel(announcedNum)}s`;
@@ -806,6 +817,8 @@
       const tx = targetX - srcX;
       const ty = targetY - srcY;
       ghost.style.cssText = `left:${srcX - 21}px;top:${srcY - 30}px;--tx:${tx}px;--ty:${ty}px;animation-delay:${i * 0.07}s`;
+      ghost.style.backgroundImage = `url('${cardBackPath()}')`;
+      ghost.style.backgroundSize = 'cover';
       document.body.appendChild(ghost);
       setTimeout(() => ghost.remove(), 600 + i * 70);
     }
@@ -855,6 +868,9 @@
     for (let i = 0; i < show; i++) {
       const card = document.createElement('div');
       card.className = 'discard-pile-card';
+      card.style.backgroundImage = `url('${cardBackPath()}')`;
+      card.style.backgroundSize = 'cover';
+      card.style.backgroundPosition = 'center';
       card.style.animationDelay = `${i * 0.04}s`;
       stack.appendChild(card);
     }
@@ -894,8 +910,8 @@
       cardsDiv.className = 'dt-cards';
       SUITS.forEach((suit) => {
         const c = document.createElement('div');
-        c.className = `dt-card ${SUIT_COLORS[suit] || 'black'}`;
-        c.innerHTML = `<span>${cardLabel(num)}</span><span class="dt-suit">${suit}</span>`;
+        c.className = 'dt-card';
+        c.innerHTML = `<img class="card-img" src="${cardImgPath(num, suit)}" alt="${cardLabel(num)}${suit}" draggable="false">`;
         cardsDiv.appendChild(c);
       });
       setDiv.appendChild(cardsDiv);

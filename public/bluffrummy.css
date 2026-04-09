@@ -279,16 +279,13 @@ html, body {
 }
 
 .pile-card.face-down {
-  background: linear-gradient(145deg, #3b0a0a, #6b1a1a, #4a0e0e);
+  /* background-image set by JS from CARD_ASSET_DIR */
+  background-color: #3b0a0a;
+  background-size: cover;
+  background-position: center;
   border: 1.5px solid rgba(255,255,255,.12);
   box-shadow: 0 4px 16px rgba(0,0,0,.5);
-}
-.pile-card.face-down::after {
-  content: '';
-  position: absolute;
-  inset: 4px;
-  border: 1px solid rgba(255,255,255,.06);
-  border-radius: 4px;
+  overflow: hidden;
 }
 
 .pile-count-badge {
@@ -488,20 +485,10 @@ html, body {
 .dt-cards { display: flex; gap: 3px; }
 .dt-card {
   width: 28px; height: 40px;
-  background: var(--card-face);
   border-radius: 3px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: .5rem;
-  gap: 1px;
+  overflow: hidden;
   box-shadow: 0 2px 6px rgba(0,0,0,.4);
 }
-.dt-card.red   { color: #dc2626; }
-.dt-card.black { color: #1a1a2e; }
-.dt-card .dt-suit { font-size: .6rem; }
 .dt-empty { font-size: .6rem; color: rgba(255,255,255,.2); text-align: center; padding: 6px 0; font-style: italic; }
 
 /* ── Start button ────────────────────────────────────────── */
@@ -612,47 +599,30 @@ html, body {
   margin-top: 2px;
 }
 
+/* ── Card image (fills all card containers) ─────────────── */
+.card-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
 /* ── Playing cards (hand) ────────────────────────────────── */
 .game-card {
   width: var(--card-w);
   height: var(--card-h);
-  background: var(--card-face);
   border: 1.5px solid var(--card-border);
   border-radius: var(--radius);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  overflow: hidden;
   cursor: pointer;
   position: relative;
   flex-shrink: 0;
   transition: transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s;
-  box-shadow: 0 2px 8px rgba(0,0,0,.3), inset 0 0 0 1px rgba(255,255,255,.5);
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
   transform-origin: bottom center;
 }
-
-.game-card .card-num {
-  font-size: 1.3rem;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.game-card .card-suit {
-  font-size: 1.1rem;
-  margin-top: 1px;
-}
-
-.game-card .card-corner {
-  position: absolute;
-  top: 4px;
-  left: 6px;
-  font-size: .5rem;
-  font-weight: 700;
-  line-height: 1.1;
-}
-
-.game-card.red   { color: #c0392b; }
-.game-card.black { color: #1a1a2e; }
 
 .game-card:hover {
   box-shadow: 0 8px 24px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.5);
@@ -727,19 +697,11 @@ html, body {
 .modal-card {
   width: 50px;
   height: 70px;
-  background: var(--card-face);
   border: 1.5px solid var(--card-border);
   border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  overflow: hidden;
   box-shadow: 0 2px 8px rgba(0,0,0,.3);
 }
-.modal-card .mc-num { font-weight: 900; font-size: .85rem; }
-.modal-card .mc-suit { font-size: .8rem; }
-.modal-card.red   { color: #c0392b; }
-.modal-card.black { color: #1a1a2e; }
 
 .modal-divider {
   height: 1px;
@@ -862,19 +824,10 @@ html, body {
 .lp-cards { display: flex; gap: 3px; }
 .lp-card {
   width: 30px; height: 42px;
-  background: var(--card-face);
   border-radius: 4px;
   border: 1px solid var(--card-border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0;
+  overflow: hidden;
 }
-.lp-num { font-weight: 900; font-size: .5rem; line-height: 1; }
-.lp-suit { font-size: .6rem; line-height: 1; }
-.lp-card.red  { color: #c0392b; }
-.lp-card.black { color: #1a1a2e; }
 .lp-as { font-size: .6rem; color: var(--text-dim); }
 .lp-as strong { color: var(--gold); }
 
@@ -1083,7 +1036,9 @@ html, body {
   position: fixed;
   width: 42px;
   height: 60px;
-  background: linear-gradient(145deg, #3b0a0a, #6b1a1a, #4a0e0e);
+  background-color: #3b0a0a; /* fallback; bg-image set by JS */
+  background-size: cover;
+  background-position: center;
   border: 1.5px solid rgba(255,255,255,.15);
   border-radius: 6px;
   pointer-events: none;
@@ -1212,9 +1167,6 @@ html, body {
   .feed-entry { font-size: .6rem; padding: 3px 8px; }
 
   .hand-fan { padding: 0 .5rem; justify-content: flex-start; }
-  .game-card .card-num { font-size: 1rem; }
-  .game-card .card-suit { font-size: .85rem; }
-  .game-card .card-corner { font-size: .4rem; }
 
   .modal { min-width: unset; width: 90vw; padding: 1rem 1.2rem; }
   .announce-grid { grid-template-columns: repeat(5, 1fr); }
@@ -1232,9 +1184,6 @@ html, body {
   .announce-grid { grid-template-columns: repeat(4, 1fr); }
   .seat-avatar { width: 32px; height: 32px; font-size: .6rem; }
   .hand-fan { padding: 0 .3rem; justify-content: flex-start; }
-  .game-card .card-num { font-size: .85rem; }
-  .game-card .card-suit { font-size: .7rem; }
-  .game-card .card-corner { font-size: .35rem; }
 }
 
 @media (max-width: 360px) {
@@ -1244,7 +1193,6 @@ html, body {
     --tray-h: 95px;
   }
   .hand-fan { padding: 0 .2rem; }
-  .game-card .card-corner { display: none; }
 }
 
 /*  Turn arrow on opponent seats  */

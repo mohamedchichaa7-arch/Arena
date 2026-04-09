@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>UNO — Game Arena</title>
+  <link rel="stylesheet" href="uno.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+  <!-- Top bar -->
+  <header class="topbar">
+    <button class="topbar-btn" id="btnBack" title="Back to lobby">&larr;</button>
+    <h1 class="topbar-logo">UNO</h1>
+    <span class="topbar-room" id="roomBadge"></span>
+    <span class="topbar-status" id="status">Connecting&hellip;</span>
+    <div class="direction-indicator" id="directionIndicator" title="Turn direction">
+      <svg class="dir-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2a10 10 0 0 1 7.07 17.07" stroke-linecap="round"/>
+        <path d="M16 16l3.07 3.07L22 16" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <button class="topbar-btn" id="btnToggleChat" title="Chat">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    </button>
+  </header>
+
+  <!-- The Table -->
+  <div class="table" id="table">
+    <!-- Player seats -->
+    <div class="seats" id="playerSeats"></div>
+
+    <!-- Center pile area -->
+    <div class="table-center" id="tableCenter">
+      <div class="pile-group">
+        <div class="draw-pile" id="drawPile" title="Draw a card">
+          <img class="card-back-img" src="assets/uno_cards/card_uno_card_back.png" alt="Draw pile">
+          <div class="draw-count" id="drawCount">0</div>
+        </div>
+        <div class="discard-pile" id="discardPile">
+          <div class="discard-card" id="discardCard"></div>
+        </div>
+      </div>
+      <div class="current-color-ring" id="currentColorRing"></div>
+    </div>
+
+    <!-- Game log -->
+    <div class="game-log" id="actionLog"></div>
+
+    <!-- Scoreboard -->
+    <div class="scoreboard" id="scoreboard">
+      <div class="sb-header">Scoreboard</div>
+      <div class="sb-list" id="scoreList"></div>
+    </div>
+
+    <!-- Pre-game start -->
+    <button class="btn-start" id="btnStartGame">▶ Start Game</button>
+  </div>
+
+  <!-- Hand tray -->
+  <div class="hand-tray" id="handTray">
+    <div class="hand-scroll" id="handScroll">
+      <div class="hand-cards" id="handCards"></div>
+    </div>
+    <div class="hand-info">
+      <span class="hand-count"><span id="handCount">0</span> cards</span>
+      <button class="btn-uno" id="btnUno" style="display:none">UNO!</button>
+    </div>
+  </div>
+
+  <!-- Color picker overlay -->
+  <div class="color-picker-overlay" id="colorPicker" style="display:none">
+    <div class="color-picker-card">
+      <h3>Choose a color</h3>
+      <div class="color-options">
+        <button class="color-btn color-red" data-color="red"></button>
+        <button class="color-btn color-yellow" data-color="yellow"></button>
+        <button class="color-btn color-green" data-color="green"></button>
+        <button class="color-btn color-blue" data-color="blue"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Round summary overlay -->
+  <div class="overlay" id="roundOverlay" style="display:none">
+    <div class="overlay-card round-summary">
+      <h2 id="roundTitle">Round Over!</h2>
+      <div class="round-winner" id="roundWinner"></div>
+      <div class="round-hands" id="roundHands"></div>
+      <div class="round-points" id="roundPoints"></div>
+      <div class="round-scores" id="roundScores"></div>
+      <div class="round-timer" id="roundTimer"></div>
+      <button class="btn-ready" id="btnRoundReady">Ready</button>
+    </div>
+  </div>
+
+  <!-- Game over overlay -->
+  <div class="overlay" id="gameOverOverlay" style="display:none">
+    <div class="overlay-card game-over-card">
+      <h2 class="go-title" id="goTitle">🏆 Game Over!</h2>
+      <div class="go-winner" id="goWinner"></div>
+      <div class="go-history" id="goHistory"></div>
+      <button class="btn-play-again" id="btnPlayAgain">Back to Lobby</button>
+    </div>
+  </div>
+
+  <!-- Chat panel -->
+  <aside class="chat-panel" id="chatPanel">
+    <div class="chat-header">
+      <span>Chat</span>
+      <button class="chat-close" id="chatClose">&times;</button>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" placeholder="Type a message…" maxlength="200" autocomplete="off">
+      <button class="chat-send" id="chatSend">Send</button>
+    </div>
+  </aside>
+  <div class="chat-backdrop" id="chatBackdrop"></div>
+
+  <!-- Draw animation container -->
+  <div class="draw-anim-container" id="drawAnimContainer"></div>
+
+  <script src="uno.js"></script>
+</body>
+</html>

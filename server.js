@@ -114,14 +114,14 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
 
-const PORT = process.env.PORT || 3008;
+const PORT = process.env.PORT || 3009;
 
 // ── Logging ─────────────────────────────────────────────────────
 const startTime = Date.now();
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -488,13 +488,38 @@ function removeFromRoom(conn) {
       broadcastRoom(room.id, { type: 'sl-player-left', id: conn.id, nextTurnId: room.sl.playerOrder[room.sl.turnIdx] });
     }
   }
+  if (room.uno && room.uno.active) {
+    const unoHand = room.uno.hands.get(conn.id);
+    room.uno.turnOrder = room.uno.turnOrder.filter(pid => pid !== conn.id);
+    room.uno.hands.delete(conn.id);
+    if (room.uno.turnIdx >= room.uno.turnOrder.length) room.uno.turnIdx = 0;
+    if (room.players.size === 0) {
+      if (room.uno.roundTimer) clearTimeout(room.uno.roundTimer);
+      room.uno = null;
+    } else if (room.uno.turnOrder.length < 2) {
+      room.uno.active = false;
+      room.status = 'waiting';
+      broadcastRoom(room.id, { type: 'uno-aborted', reason: 'Not enough players' });
+    } else {
+      if (!room.uno.disconnects) room.uno.disconnects = new Map();
+      if (unoHand) room.uno.disconnects.set(conn.name, { hand: [...unoHand], at: Date.now() });
+      // If it was this player's turn, advance
+      if (room.uno.turnOrder.length > 0) {
+        if (room.uno.turnIdx >= room.uno.turnOrder.length) room.uno.turnIdx = 0;
+        sendUnoTurn(room);
+      }
+      broadcastUnoPlayerUpdate(room);
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
     if (room.countdown) clearInterval(room.countdown);
     rooms.delete(conn.roomId);
   } else {
-    room.status = 'waiting';
+    // Don't reset status if an active game is still running
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive);
+    if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
   conn.roomId = null;
@@ -589,9 +614,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -652,6 +677,10 @@ wss.on('connection', (ws, req) => {
               room.br.turnOrder = room.br.turnOrder.filter(p => p !== existingId);
               if (room.br.turnIdx >= room.br.turnOrder.length) room.br.turnIdx = 0;
             }
+            if (room.uno?.active) {
+              room.uno.turnOrder = room.uno.turnOrder.filter(p => p !== existingId);
+              if (room.uno.turnIdx >= room.uno.turnOrder.length) room.uno.turnIdx = 0;
+            }
             break;
           }
         }
@@ -667,6 +696,13 @@ wss.on('connection', (ws, req) => {
         // Lock game-in-progress rooms to new players (allow BR reconnects)
         if (room.status === 'playing' && room.type === 'bluffrummy' && !isBrReconnect) {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
+        // Lock UNO rooms while game is running (allow reconnect by same name)
+        if (room.status === 'playing' && room.type === 'uno') {
+          const isUnoReconnect = room.uno?.active && room.uno.disconnects?.has(conn.name);
+          if (!isUnoReconnect) {
+            send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+          }
         }
 
         removeFromRoom(conn); // leave any existing room
@@ -699,6 +735,20 @@ wss.on('connection', (ws, req) => {
           send(ws, { type: 'br-hand-update', hand: disc.hand });
           sendBrFullState(room);
           sendBrTurn(room);
+        }
+
+        // Restore UNO hand on reconnect
+        if (room.uno?.active && room.uno.disconnects?.has(conn.name)) {
+          const disc = room.uno.disconnects.get(conn.name);
+          room.uno.disconnects.delete(conn.name);
+          room.uno.hands.set(id, disc.hand);
+          if (!room.uno.turnOrder.includes(id)) {
+            const insertAt = Math.min(room.uno.turnIdx, room.uno.turnOrder.length);
+            room.uno.turnOrder.splice(insertAt, 0, id);
+          }
+          broadcastRoom(room.id, { type: 'player-joined', id, name: conn.name, leaderId: room.players.keys().next().value }, id);
+          sendUnoFullState(room, id);
+          sendUnoTurn(room);
         }
 
         broadcastLobby();
@@ -1520,7 +1570,8 @@ wss.on('connection', (ws, req) => {
           const order   = sl.playerOrder;
           const posCopy = { ...sl.positions };
           for (let i = 0; i < order.length; i++)
-            sl.positions[order[i]] = posCopy[order[(i + 1) % order.length]];
+            // Clamp to 1 so nobody gets sent to the off-board (position 0) slot
+            sl.positions[order[i]] = Math.max(1, posCopy[order[(i + 1) % order.length]]);
           chaosPositions = { ...sl.positions };
         }
 
@@ -1657,6 +1708,162 @@ wss.on('connection', (ws, req) => {
           winner,
         });
         log('info', 'sl-twist', { roomId: room.id, player: conn.name, twist, detail: twistDetail });
+        break;
+      }
+
+      // ── UNO ───────────────────────────────────────────────
+      case 'uno-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'uno') break;
+        if (room.uno?.active) { send(ws, { type: 'error', msg: 'A game is already in progress' }); break; }
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2-6 players' }); break; }
+        startUno(room);
+        break;
+      }
+
+      case 'uno-play': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.uno?.active) break;
+        const uno = room.uno;
+        if (uno.turnOrder[uno.turnIdx] !== id) break; // not your turn
+        const cardIndex = parseInt(msg.cardIndex);
+        const playerHand = uno.hands.get(id);
+        if (!playerHand || cardIndex < 0 || cardIndex >= playerHand.length) break;
+        const card = playerHand[cardIndex];
+        // Validate play
+        if (!unoIsPlayable(card, uno.topCard, uno.currentColor)) break;
+        // Wild Draw Four: enforce that player has no card matching current color
+        if (card.type === 'wild_draw_four') {
+          const hasMatchingColor = playerHand.some((c, i) => i !== cardIndex && c.color === uno.currentColor);
+          if (hasMatchingColor) break; // illegal play — silently reject
+        }
+        // Wild cards need chosen color
+        let chosenColor = null;
+        if (card.type === 'wild' || card.type === 'wild_draw_four') {
+          chosenColor = msg.chosenColor;
+          if (!['red', 'yellow', 'green', 'blue'].includes(chosenColor)) break;
+        }
+        // Remove card from hand
+        playerHand.splice(cardIndex, 1);
+        // Update top card and current color
+        uno.topCard = card;
+        uno.currentColor = chosenColor || card.color;
+        // Clear drawn-this-turn state
+        uno.drawnThisTurn = false;
+        // Handle special cards
+        let skipNext = false;
+        if (card.type === 'skip') {
+          skipNext = true;
+        } else if (card.type === 'reverse') {
+          if (uno.turnOrder.length === 2) { skipNext = true; } // acts as skip in 2-player
+          else { uno.direction *= -1; }
+        } else if (card.type === 'draw_two') {
+          skipNext = true;
+          const nextIdx = unoNextIdx(uno);
+          const nextPid = uno.turnOrder[nextIdx];
+          const nextHand = uno.hands.get(nextPid);
+          if (nextHand) {
+            for (let d = 0; d < 2; d++) {
+              if (uno.drawPile.length === 0) unoReshuffleDraw(uno);
+              if (uno.drawPile.length > 0) nextHand.push(uno.drawPile.pop());
+            }
+          }
+          // Notify penalty
+          const nextP = room.players.get(nextPid);
+          if (nextP) {
+            send(nextP.ws, { type: 'uno-penalty-draw', playerId: nextPid, count: 2, cardCount: nextHand.length, drawPileCount: uno.drawPile.length, handUpdate: nextHand });
+          }
+          broadcastRoom(room.id, { type: 'uno-penalty-draw', playerId: nextPid, count: 2, cardCount: nextHand.length, drawPileCount: uno.drawPile.length }, nextPid);
+        } else if (card.type === 'wild_draw_four') {
+          skipNext = true;
+          const nextIdx = unoNextIdx(uno);
+          const nextPid = uno.turnOrder[nextIdx];
+          const nextHand = uno.hands.get(nextPid);
+          if (nextHand) {
+            for (let d = 0; d < 4; d++) {
+              if (uno.drawPile.length === 0) unoReshuffleDraw(uno);
+              if (uno.drawPile.length > 0) nextHand.push(uno.drawPile.pop());
+            }
+          }
+          const nextP = room.players.get(nextPid);
+          if (nextP) {
+            send(nextP.ws, { type: 'uno-penalty-draw', playerId: nextPid, count: 4, cardCount: nextHand.length, drawPileCount: uno.drawPile.length, handUpdate: nextHand });
+          }
+          broadcastRoom(room.id, { type: 'uno-penalty-draw', playerId: nextPid, count: 4, cardCount: nextHand.length, drawPileCount: uno.drawPile.length }, nextPid);
+        }
+        // Broadcast play to all
+        for (const [pid, p] of room.players) {
+          const payload = {
+            type: 'uno-played', playerId: id, card, currentColor: uno.currentColor,
+            direction: uno.direction, cardCount: playerHand.length,
+            drawPileCount: uno.drawPile.length, chosenColor,
+          };
+          if (pid === id) payload.handUpdate = playerHand;
+          send(p.ws, payload);
+        }
+        // Check if player won the round — hand is empty
+        if (playerHand.length === 0) {
+          unoEndRound(room, id);
+          break;
+        }
+        // UNO flag: auto-clear if hand > 1
+        if (playerHand.length !== 1) uno.unoFlags.delete(id);
+        // Advance turn
+        unoAdvanceTurn(uno, skipNext);
+        sendUnoTurn(room);
+        log('info', 'uno-play', { roomId: room.id, player: conn.name, card: cardLabelServer(card) });
+        break;
+      }
+
+      case 'uno-draw': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.uno?.active) break;
+        const uno = room.uno;
+        if (uno.turnOrder[uno.turnIdx] !== id) break;
+        if (uno.drawnThisTurn) break; // already drew
+        // Draw one card
+        if (uno.drawPile.length === 0) unoReshuffleDraw(uno);
+        if (uno.drawPile.length === 0) break; // no cards
+        const drawn = uno.drawPile.pop();
+        const playerHand = uno.hands.get(id);
+        playerHand.push(drawn);
+        uno.drawnThisTurn = true;
+        const canPlay = unoIsPlayable(drawn, uno.topCard, uno.currentColor);
+        // Send to drawing player (with their new hand)
+        send(ws, { type: 'uno-drew', playerId: id, handUpdate: playerHand, drawnCard: drawn, canPlay, cardCount: playerHand.length, drawPileCount: uno.drawPile.length });
+        // Broadcast to others (without revealing card)
+        broadcastRoom(room.id, { type: 'uno-drew', playerId: id, cardCount: playerHand.length, drawPileCount: uno.drawPile.length, count: 1 }, id);
+        if (!canPlay) {
+          // Auto-pass: card not playable
+          unoAdvanceTurn(uno, false);
+          sendUnoTurn(room);
+        }
+        // If canPlay, player can either play it or pass
+        log('info', 'uno-draw', { roomId: room.id, player: conn.name });
+        break;
+      }
+
+      case 'uno-pass': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.uno?.active) break;
+        const uno = room.uno;
+        if (uno.turnOrder[uno.turnIdx] !== id) break;
+        if (!uno.drawnThisTurn) break; // must draw first
+        uno.drawnThisTurn = false;
+        broadcastRoom(room.id, { type: 'uno-pass', playerId: id });
+        unoAdvanceTurn(uno, false);
+        sendUnoTurn(room);
+        break;
+      }
+
+      case 'uno-call-uno': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.uno?.active) break;
+        const uno = room.uno;
+        const playerHand = uno.hands.get(id);
+        if (!playerHand || playerHand.length > 2) break; // can only call when at 2 or 1 cards
+        uno.unoFlags.add(id);
+        broadcastRoom(room.id, { type: 'uno-flag', playerId: id, flag: true });
         break;
       }
 
@@ -2561,6 +2768,341 @@ function endBluffRummy(room) {
   broadcastRoom(room.id, { type: 'br-gameover', rankings });
   broadcastLobby();
   log('info', 'br-gameover', { roomId: room.id, winner: rankings[0]?.name });
+}
+
+// ── UNO helpers ─────────────────────────────────────────────────
+function buildUnoDeck() {
+  const colors = ['red', 'yellow', 'green', 'blue'];
+  const deck = [];
+  for (const color of colors) {
+    // One zero
+    deck.push({ color, type: 'number', value: 0 });
+    // Two each of 1-9
+    for (let v = 1; v <= 9; v++) {
+      deck.push({ color, type: 'number', value: v });
+      deck.push({ color, type: 'number', value: v });
+    }
+    // Two each of Skip, Reverse, Draw Two
+    for (let n = 0; n < 2; n++) {
+      deck.push({ color, type: 'skip' });
+      deck.push({ color, type: 'reverse' });
+      deck.push({ color, type: 'draw_two' });
+    }
+  }
+  // 4 Wild, 4 Wild Draw Four
+  for (let n = 0; n < 4; n++) {
+    deck.push({ color: null, type: 'wild' });
+    deck.push({ color: null, type: 'wild_draw_four' });
+  }
+  return deck; // 108 cards
+}
+
+function shuffleDeck(deck) {
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+}
+
+function unoIsPlayable(card, topCard, currentColor) {
+  if (card.type === 'wild' || card.type === 'wild_draw_four') return true;
+  if (card.color === currentColor) return true;
+  if (card.type === 'number' && topCard.type === 'number' && card.value === topCard.value) return true;
+  if (card.type !== 'number' && card.type === topCard.type) return true;
+  return false;
+}
+
+function unoNextIdx(uno) {
+  return ((uno.turnIdx + uno.direction) % uno.turnOrder.length + uno.turnOrder.length) % uno.turnOrder.length;
+}
+
+function unoAdvanceTurn(uno, skip) {
+  uno.turnIdx = unoNextIdx(uno);
+  if (skip && uno.turnOrder.length > 1) {
+    uno.turnIdx = unoNextIdx(uno);
+  }
+  uno.drawnThisTurn = false;
+}
+
+function unoReshuffleDraw(uno) {
+  if (uno.discardPile.length <= 1) return;
+  const top = uno.discardPile.pop();
+  uno.drawPile = [...uno.discardPile];
+  uno.discardPile = [top];
+  shuffleDeck(uno.drawPile);
+}
+
+function cardLabelServer(card) {
+  if (!card) return '?';
+  if (card.type === 'wild') return 'Wild';
+  if (card.type === 'wild_draw_four') return 'Wild+4';
+  const c = card.color || '';
+  if (card.type === 'number') return `${c}${card.value}`;
+  return `${c}_${card.type}`;
+}
+
+function unoCardPoints(card) {
+  if (card.type === 'number') return card.value;
+  if (card.type === 'skip' || card.type === 'reverse' || card.type === 'draw_two') return 20;
+  if (card.type === 'wild' || card.type === 'wild_draw_four') return 50;
+  return 0;
+}
+
+function startUno(room) {
+  const deck = buildUnoDeck();
+  shuffleDeck(deck);
+  const playerIds = [...room.players.keys()];
+  const hands = new Map();
+  for (const pid of playerIds) hands.set(pid, []);
+  // Deal 7 cards each
+  for (let i = 0; i < 7; i++) {
+    for (const pid of playerIds) {
+      hands.get(pid).push(deck.pop());
+    }
+  }
+  // Flip top card for discard pile — if Wild Draw Four, put back and retry
+  let topCard = deck.pop();
+  while (topCard.type === 'wild_draw_four') {
+    deck.unshift(topCard);
+    shuffleDeck(deck);
+    topCard = deck.pop();
+  }
+  // If first card is Wild, set a random color
+  let currentColor = topCard.color;
+  if (topCard.type === 'wild') {
+    currentColor = ['red','yellow','green','blue'][Math.floor(Math.random()*4)];
+  }
+
+  // Determine starting player
+  const prevWinner = room.uno?.lastWinner;
+  let startIdx = 0;
+  if (prevWinner) {
+    const wi = playerIds.indexOf(prevWinner);
+    if (wi >= 0) startIdx = wi;
+  }
+
+  // Restore or init scores
+  const scores = {};
+  for (const pid of playerIds) {
+    scores[pid] = room.uno?.scores?.[pid] || 0;
+  }
+
+  const roundNum = (room.uno?.roundNum || 0) + 1;
+
+  room.uno = {
+    deck: null, // not used — we use drawPile
+    drawPile: deck,
+    discardPile: [topCard],
+    hands,
+    topCard,
+    currentColor,
+    direction: 1,
+    turnOrder: playerIds,
+    turnIdx: startIdx,
+    active: true,
+    scores,
+    roundNum,
+    roundHistory: room.uno?.roundHistory || [],
+    lastWinner: prevWinner || null,
+    unoFlags: new Set(),
+    disconnects: new Map(),
+    drawnThisTurn: false,
+    roundTimer: null,
+  };
+
+  // Handle first-card effects
+  let skipFirst = false;
+  if (topCard.type === 'skip') {
+    skipFirst = true;
+  } else if (topCard.type === 'reverse') {
+    if (playerIds.length === 2) skipFirst = true;
+    else room.uno.direction = -1;
+  } else if (topCard.type === 'draw_two') {
+    skipFirst = true;
+    const firstPid = playerIds[startIdx];
+    const firstHand = hands.get(firstPid);
+    for (let d = 0; d < 2; d++) {
+      if (room.uno.drawPile.length > 0) firstHand.push(room.uno.drawPile.pop());
+    }
+  }
+
+  if (skipFirst) {
+    unoAdvanceTurn(room.uno, false);
+  }
+
+  room.status = 'playing';
+  broadcastLobby();
+
+  // Build card counts
+  const cardCounts = {};
+  for (const pid of playerIds) cardCounts[pid] = hands.get(pid).length;
+
+  // Send dealt hands to each player
+  for (const [pid, p] of room.players) {
+    send(p.ws, {
+      type: 'uno-dealt',
+      hand: hands.get(pid),
+      topCard, currentColor: room.uno.currentColor,
+      direction: room.uno.direction,
+      drawPileCount: room.uno.drawPile.length,
+      turnOrder: playerIds,
+      cardCounts,
+      scores,
+    });
+  }
+
+  sendUnoTurn(room);
+  log('info', 'uno-start', { roomId: room.id, players: playerIds.length, round: roundNum });
+}
+
+function sendUnoTurn(room) {
+  const uno = room.uno;
+  if (!uno || !uno.active || uno.turnOrder.length === 0) return;
+  const currentTurnId = uno.turnOrder[uno.turnIdx];
+  broadcastRoom(room.id, { type: 'uno-turn', currentTurn: currentTurnId });
+}
+
+function sendUnoFullState(room, toId) {
+  const uno = room.uno;
+  if (!uno) return;
+  const playersList = [];
+  for (const [pid,] of room.players) {
+    const hand = uno.hands.get(pid);
+    playersList.push({
+      id: pid,
+      name: room.players.get(pid)?.name || 'Player',
+      cardCount: hand ? hand.length : 0,
+      score: uno.scores[pid] || 0,
+      unoFlag: uno.unoFlags.has(pid),
+    });
+  }
+  const targetPlayer = room.players.get(toId);
+  if (!targetPlayer) return;
+  send(targetPlayer.ws, {
+    type: 'uno-state',
+    hand: uno.hands.get(toId) || [],
+    topCard: uno.topCard,
+    currentColor: uno.currentColor,
+    direction: uno.direction,
+    drawPileCount: uno.drawPile.length,
+    turnOrder: uno.turnOrder,
+    currentTurn: uno.turnOrder[uno.turnIdx],
+    active: uno.active,
+    players: playersList,
+  });
+}
+
+function broadcastUnoPlayerUpdate(room) {
+  const uno = room.uno;
+  if (!uno) return;
+  for (const [pid, p] of room.players) {
+    const playersList = [];
+    for (const [oid,] of room.players) {
+      const hand = uno.hands.get(oid);
+      playersList.push({
+        id: oid,
+        name: room.players.get(oid)?.name || 'Player',
+        cardCount: hand ? hand.length : 0,
+        score: uno.scores[oid] || 0,
+        unoFlag: uno.unoFlags.has(oid),
+      });
+    }
+    send(p.ws, { type: 'uno-state',
+      hand: uno.hands.get(pid) || [],
+      topCard: uno.topCard,
+      currentColor: uno.currentColor,
+      direction: uno.direction,
+      drawPileCount: uno.drawPile.length,
+      turnOrder: uno.turnOrder,
+      currentTurn: uno.turnOrder[uno.turnIdx],
+      active: uno.active,
+      players: playersList,
+    });
+  }
+}
+
+function unoEndRound(room, winnerId) {
+  const uno = room.uno;
+  uno.active = false;
+
+  // Calculate points from other players' hands
+  let roundScore = 0;
+  const playerHands = [];
+  for (const [pid,] of room.players) {
+    const hand = uno.hands.get(pid) || [];
+    let pts = 0;
+    for (const c of hand) pts += unoCardPoints(c);
+    playerHands.push({
+      id: pid,
+      name: room.players.get(pid)?.name || 'Player',
+      cards: hand,
+      points: pts,
+    });
+    if (pid !== winnerId) roundScore += pts;
+  }
+
+  // Update scores
+  uno.scores[winnerId] = (uno.scores[winnerId] || 0) + roundScore;
+  uno.lastWinner = winnerId;
+
+  // Record round history
+  uno.roundHistory.push({
+    round: uno.roundNum,
+    winnerId, winnerName: room.players.get(winnerId)?.name || 'Player',
+    points: roundScore,
+    scores: { ...uno.scores },
+  });
+
+  const winnerName = room.players.get(winnerId)?.name || 'Player';
+
+  // Check if someone hit 500
+  let gameWinnerId = null;
+  let gameWinnerScore = 0;
+  for (const [pid, sc] of Object.entries(uno.scores)) {
+    if (sc >= 500 && sc > gameWinnerScore) {
+      gameWinnerId = pid;
+      gameWinnerScore = sc;
+    }
+  }
+
+  if (gameWinnerId) {
+    // Game over!
+    const gwName = room.players.get(gameWinnerId)?.name || 'Player';
+    broadcastRoom(room.id, {
+      type: 'uno-game-over',
+      winnerId: gameWinnerId,
+      winnerName: gwName,
+      winnerScore: gameWinnerScore,
+      finalScores: { ...uno.scores },
+      roundHistory: uno.roundHistory,
+    });
+    room.status = 'waiting';
+    uno.roundHistory = [];
+    broadcastLobby();
+    log('info', 'uno-game-over', { roomId: room.id, winner: gwName, score: gameWinnerScore });
+    return;
+  }
+
+  // Broadcast round summary
+  broadcastRoom(room.id, {
+    type: 'uno-round-over',
+    winnerId,
+    winnerName,
+    roundNum: uno.roundNum,
+    roundScore,
+    playerHands,
+    scores: { ...uno.scores },
+  });
+
+  log('info', 'uno-round-over', { roomId: room.id, winner: winnerName, roundScore, round: uno.roundNum });
+
+  // Auto-start next round after 10 seconds
+  uno.roundTimer = setTimeout(() => {
+    const r = rooms.get(room.id);
+    if (!r || !r.uno) return;
+    if (r.players.size < 2) return;
+    startUno(r);
+  }, 10000);
 }
 
 // ── Start ───────────────────────────────────────────────────────
