@@ -17,17 +17,53 @@
 
   const PLAYER_COLORS = ['#f472b6', '#38bdf8', '#4ade80', '#fbbf24'];
 
-  // Dot positions (0..8 = 3×3 grid index) for each dice face
-  const DOT_PATTERNS = {
-    1: [4],
-    2: [0, 8],
-    3: [0, 4, 8],
-    4: [0, 2, 6, 8],
-    5: [0, 2, 4, 6, 8],
-    6: [0, 2, 3, 5, 6, 8],
+  const STEP_MS = 150; // delay per square during step-by-step animation
+
+  // ── 3D Dice constants ────────────────────────────────────────────
+  // Physical face layout:
+  //   face-1 (front, die:1)  face-2 (back, die:6)
+  //   face-3 (right, die:3)  face-4 (left, die:4)
+  //   face-5 (top,  die:2)   face-6 (bottom, die:5)
+  // Cube rotations (rx,ry) to bring each die value to face the camera
+  const FACE_ANGLES = {
+    1: { rx: -15, ry:  20  },
+    2: { rx:  78, ry:  15  },
+    3: { rx: -12, ry: -78  },
+    4: { rx: -12, ry:  78  },
+    5: { rx: -78, ry:  15  },
+    6: { rx: -15, ry: 200  },
   };
 
-  const STEP_MS = 150; // delay per square during step-by-step animation
+  // Pip center positions [x%, y%] for each physical face
+  const PIP_POSITIONS = [
+    null,                                                           // index 0 unused
+    [[50, 50]],                                                     // face-1: 1 pip  (die 1)
+    [[28,22],[72,22],[28,50],[72,50],[28,78],[72,78]],               // face-2: 6 pips (die 6)
+    [[28,28],[50,50],[72,72]],                                       // face-3: 3 pips (die 3)
+    [[28,28],[72,28],[28,72],[72,72]],                               // face-4: 4 pips (die 4)
+    [[28,28],[72,72]],                                              // face-5: 2 pips (die 2)
+    [[28,25],[72,25],[50,50],[28,75],[72,75]],                       // face-6: 5 pips (die 5)
+  ];
+
+  const DICE_SKINS = [
+    { id: 'dark',    label: 'Dark'    },
+    { id: 'classic', label: 'Classic' },
+    { id: 'neon',    label: 'Neon'    },
+    { id: 'fire',    label: 'Fire'    },
+    { id: 'ice',     label: 'Ice'     },
+    { id: 'gold',    label: 'Gold'    },
+  ];
+
+  // ── Twist die constants ──────────────────────────────────────────
+  const TWIST_META = {
+    blank:      { emoji: '—',  label: 'No Twist',    desc: 'Nothing happens.',                      color: '#6b7280' },
+    swap:       { emoji: '🔁', label: 'Swap!',        desc: 'Choose a player to swap positions with.', color: '#0ea5e9' },
+    shield:     { emoji: '🛡️', label: 'Shield!',      desc: 'Snake-proof for your next 2 turns.',     color: '#22c55e' },
+    bomb:       { emoji: '💣', label: 'Bomb!',        desc: 'Choose a player to send back 10 squares.', color: '#ef4444' },
+    doubleroll: { emoji: '🎲', label: 'Double Roll!', desc: 'Your movement dice was rolled twice!',    color: '#f59e0b' },
+    chaos:      { emoji: '🔀', label: 'Chaos!',       desc: "Everyone's positions rotate clockwise.", color: '#a78bfa' },
+    freemove:   { emoji: '⭐', label: 'Free Move!',   desc: 'Jump to any square within ±5 of here.',  color: '#06b6d4' },
+  };
 
   // ── DOM refs ─────────────────────────────────────────────────────
   const $ = s => document.getElementById(s);
@@ -39,8 +75,7 @@
   const btnStartGame   = $('btnStartGame');
   const controls       = $('controls');
   const diceArea       = $('diceArea');
-  const diceEl         = $('diceEl');
-  const dotGrid        = $('dotGrid');
+  const diceCube       = $('diceCube');
   const btnRoll        = $('btnRoll');
   const turnTag        = $('turnTag');
   const boardOuter     = $('boardOuter');
@@ -56,6 +91,21 @@
   const chatSend       = $('chatSend');
   const confettiCvs    = $('confetti');
   const cctx           = confettiCvs.getContext('2d');
+  // Twist system DOM refs
+  const twistDiceInner = $('twistDiceInner');
+  const twistDiceBack  = $('twistDiceBack');
+  const twistOverlay   = $('twistOverlay');
+  const twistOvEmoji   = $('twistOvEmoji');
+  const twistOvName    = $('twistOvName');
+  const twistOvDesc    = $('twistOvDesc');
+  const targetOverlay  = $('targetOverlay');
+  const targetTitle    = $('targetTitle');
+  const targetSubtitle = $('targetSubtitle');
+  const targetOptions  = $('targetOptions');
+  const targetCountdown= $('targetCountdown');
+  const btnSkipTwist   = $('btnSkipTwist');
+  const eventLog       = $('eventLog');
+  const eventLogList   = $('eventLogList');
 
   roomBadge.textContent = 'Room ' + roomId;
 
@@ -63,10 +113,14 @@
   let ws = null, myId = null;
   let players      = [];  // [{ id, name, colorIdx }]  ordered by turn
   let positions    = {};  // { [id]: squareNumber }  0 = off-board
+  let shields      = {};  // { [id]: turnsRemaining }
   let currentTurnId = null;
   let gameActive   = false;
   let animating    = false;
   let lobby        = new Map(); // id → name (everyone in room)
+
+  // Twist die flip state
+  let twistCardRy  = 0;   // cumulative Y-rotation of the flip card
 
   // ── Board geometry ───────────────────────────────────────────────
   // Returns 0-based { col, rowFromTop } for square n (1-100)
@@ -304,31 +358,205 @@
     });
   }
 
-  // ── Dice ─────────────────────────────────────────────────────────
-  function renderDice(face) {
-    dotGrid.innerHTML = '';
-    const dots = DOT_PATTERNS[face] || [];
-    for (let i = 0; i < 9; i++) {
-      const d = document.createElement('div');
-      d.className = dots.includes(i) ? 'dot' : 'dot empty';
-      dotGrid.appendChild(d);
+  // ── 3D Dice ───────────────────────────────────────────────────────
+  let diceRx = -15, diceRy = 20;   // current cube rotation (deg)
+  let currentSkin = 'dark';
+
+  function buildDice() {
+    for (let f = 1; f <= 6; f++) {
+      const faceEl = $('diceFace' + f);
+      if (!faceEl) continue;
+      faceEl.innerHTML = '';
+      for (const [x, y] of PIP_POSITIONS[f]) {
+        const pip = document.createElement('div');
+        pip.className = 'pip';
+        pip.style.left = x + '%';
+        pip.style.top  = y + '%';
+        faceEl.appendChild(pip);
+      }
+    }
+    // Set initial resting angle
+    setDiceRotation(FACE_ANGLES[1].rx, FACE_ANGLES[1].ry, false);
+  }
+
+  function buildSkinPicker() {
+    const pickerEl = $('skinPicker');
+    if (!pickerEl) return;
+    pickerEl.innerHTML = '';
+    for (const sk of DICE_SKINS) {
+      const btn = document.createElement('button');
+      btn.className = `skin-btn sb-${sk.id}` + (sk.id === currentSkin ? ' active' : '');
+      btn.title = sk.label;
+      btn.type = 'button';
+      btn.addEventListener('click', () => {
+        currentSkin = sk.id;
+        diceCube.className = `dice-cube skin-${sk.id}`;
+        pickerEl.querySelectorAll('.skin-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+      pickerEl.appendChild(btn);
     }
   }
 
-  function animateDice(finalFace) {
+  function setDiceRotation(rx, ry, animate) {
+    diceCube.style.transition = animate
+      ? 'transform .55s cubic-bezier(.2,.82,.2,1)'
+      : 'none';
+    diceCube.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg)`;
+    diceRx = rx;
+    diceRy = ry;
+  }
+
+  // Shortest-path angle adjustment (keeps cumulative rotation valid)
+  function adjustAngle(current, target) {
+    let delta = ((target - current) % 360 + 360) % 360;
+    if (delta > 180) delta -= 360;
+    return current + delta;
+  }
+
+  async function animateDice(finalFace) {
+    // Phase 1: rapid tumbling — no smooth transition
+    diceCube.style.transition = 'none';
+    for (let i = 0; i < 13; i++) {
+      diceRx += (Math.random() < .5 ? 1 : -1) * (78 + Math.random() * 88);
+      diceRy += (Math.random() < .5 ? 1 : -1) * (78 + Math.random() * 88);
+      diceCube.style.transform = `rotateX(${diceRx}deg) rotateY(${diceRy}deg)`;
+      await sleep(50);
+    }
+    // Phase 2: smooth settle to target face
+    const target = FACE_ANGLES[finalFace];
+    const rx = adjustAngle(diceRx, target.rx);
+    const ry = adjustAngle(diceRy, target.ry);
+    diceCube.getBoundingClientRect(); // force reflow
+    diceCube.style.transition = 'transform .58s cubic-bezier(.2,.82,.2,1)';
+    diceCube.style.transform  = `rotateX(${rx}deg) rotateY(${ry}deg)`;
+    diceRx = rx; diceRy = ry;
+    await sleep(600);
+  }
+
+  // ── Twist die (flip card) ────────────────────────────────────────
+  // Reset flip card to show "?" front face
+  function resetTwistCard() {
+    twistDiceInner.style.transition = 'none';
+    const base = Math.ceil(twistCardRy / 360) * 360;
+    twistCardRy = base;
+    twistDiceInner.style.transform = `rotateY(${base}deg)`;
+  }
+
+  async function animateTwistCard(twistName) {
+    const meta = TWIST_META[twistName] || TWIST_META.blank;
+    // Prepare back face content
+    twistDiceBack.className = 'twist-die-back tw-' + twistName;
+    twistDiceBack.innerHTML =
+      `<span class="tw-emoji">${meta.emoji}</span>` +
+      `<span class="tw-text">${meta.label}</span>`;
+
+    // Rapid spinning phase
+    twistDiceInner.style.transition = 'none';
+    for (let i = 0; i < 10; i++) {
+      twistCardRy += 72 + Math.random() * 80;
+      twistDiceInner.style.transform = `rotateY(${twistCardRy}deg)`;
+      await sleep(60);
+    }
+    // Settle on back face (nearest multiple of 360 + 180)
+    const base   = Math.ceil(twistCardRy / 360) * 360;
+    const target = base + 180;
+    twistDiceInner.getBoundingClientRect(); // force reflow
+    twistDiceInner.style.transition = 'transform .65s cubic-bezier(.2,.82,.2,1)';
+    twistCardRy = target;
+    twistDiceInner.style.transform = `rotateY(${target}deg)`;
+    await sleep(700);
+  }
+
+  // ── Twist announcement overlay ───────────────────────────────────
+  function showTwistOverlay(twistName) {
+    const meta = TWIST_META[twistName] || TWIST_META.blank;
+    twistOvEmoji.textContent = meta.emoji;
+    twistOvName.textContent  = meta.label;
+    twistOvDesc.textContent  = meta.desc;
+    twistOvName.style.color  = meta.color || '#fff';
+    twistOverlay.style.display = 'flex';
+    return sleep(1600);
+  }
+
+  function hideTwistOverlay() {
+    twistOverlay.style.display = 'none';
+  }
+
+  // ── Target selection UI ──────────────────────────────────────────
+  // Returns a Promise that resolves with { targetId? , square? } or null on skip/timeout
+  function showTargetUI(twist, validTargets) {
     return new Promise(resolve => {
-      diceEl.classList.add('rolling');
-      let t = 0;
-      const iv = setInterval(() => {
-        renderDice(Math.floor(Math.random() * 6) + 1);
-        if (++t >= 10) {
-          clearInterval(iv);
-          diceEl.classList.remove('rolling');
-          renderDice(finalFace);
-          resolve();
+      const meta = TWIST_META[twist];
+      targetTitle.textContent = meta.emoji + ' ' + meta.label;
+
+      let countdownSec = 15;
+      targetCountdown.textContent = countdownSec;
+      targetCountdown.classList.remove('urgent');
+
+      let resolved = false;
+      let interval = null;
+
+      function done(choice) {
+        if (resolved) return;
+        resolved = true;
+        clearInterval(interval);
+        targetOverlay.style.display = 'none';
+        resolve(choice);
+      }
+
+      // Countdown
+      interval = setInterval(() => {
+        countdownSec--;
+        targetCountdown.textContent = countdownSec;
+        if (countdownSec <= 5) targetCountdown.classList.add('urgent');
+        if (countdownSec <= 0) done(null);
+      }, 1000);
+
+      // Build option buttons
+      targetOptions.innerHTML = '';
+      if (twist === 'freemove') {
+        targetSubtitle.textContent = 'Jump to any square within ±5:';
+        for (const sq of validTargets) {
+          const btn = document.createElement('button');
+          btn.className = 'target-btn sq-btn';
+          btn.textContent = sq;
+          btn.addEventListener('click', () => done({ square: sq }));
+          targetOptions.appendChild(btn);
         }
-      }, 55);
+      } else {
+        targetSubtitle.textContent = twist === 'swap'
+          ? 'Choose a player to swap positions with:'
+          : 'Choose a player to send back 10 squares:';
+        for (const tid of validTargets) {
+          const p = players.find(x => x.id === tid);
+          if (!p) continue;
+          const sq  = positions[tid] || 0;
+          const btn = document.createElement('button');
+          btn.className = 'target-btn';
+          btn.style.borderColor = PLAYER_COLORS[p.colorIdx] || '#aaa';
+          btn.innerHTML = `<span style="color:${PLAYER_COLORS[p.colorIdx]||'#aaa'}">${esc(p.name)}</span> <small style="color:var(--dim)">(sq ${sq})</small>`;
+          btn.addEventListener('click', () => done({ targetId: tid }));
+          targetOptions.appendChild(btn);
+        }
+      }
+
+      btnSkipTwist.onclick = () => done(null);
+      targetOverlay.style.display = 'flex';
     });
+  }
+
+  // ── Event log ────────────────────────────────────────────────────
+  const MAX_EVENTS = 8;
+  function addEvent(text) {
+    eventLog.style.display = '';
+    const item = document.createElement('div');
+    item.className = 'evl-item';
+    item.textContent = text;
+    eventLogList.prepend(item);
+    // Trim to max
+    while (eventLogList.children.length > MAX_EVENTS)
+      eventLogList.removeChild(eventLogList.lastChild);
   }
 
   // ── Movement animation ───────────────────────────────────────────
@@ -400,9 +628,13 @@
           (isTurn          ? ' turn' : '');
         const color = PLAYER_COLORS[p.colorIdx] || '#aaa';
         const sq = positions[p.id] || 0;
+        const sh = shields[p.id] || 0;
+        const shBadge = sh > 0
+          ? `<span class="shield-badge">🛡️${sh}</span>`
+          : '';
         card.innerHTML = `
           <span class="pc-dot" style="background:${color}"></span>
-          <span class="pc-name">${esc(p.name)}${p.id === myId ? ' (you)' : ''}</span>
+          <span class="pc-name">${esc(p.name)}${p.id === myId ? ' (you)' : ''}${shBadge}</span>
           <span class="pc-sq">${sq > 0 ? sq : '—'}</span>
         `;
         playerListEl.appendChild(card);
@@ -526,6 +758,7 @@
       case 'sl-start': {
         players       = msg.players; // [{ id, name, colorIdx }]
         positions     = Object.assign({}, msg.positions);
+        shields       = Object.assign({}, msg.shields || {});
         currentTurnId = msg.turnId;
         gameActive    = true;
 
@@ -533,12 +766,17 @@
         diceArea.style.display = 'flex';
         boardOuter.style.display = 'flex';
 
+        // Reset dice visuals
         buildBoard();
-        renderDice(1);
+        setDiceRotation(FACE_ANGLES[1].rx, FACE_ANGLES[1].ry, false);
+        resetTwistCard();
         refreshAllTokens();
         syncRollBtn();
         syncTurnTag();
         renderPlayerList();
+
+        eventLogList.innerHTML = '';
+        eventLog.style.display = 'none';
 
         const first = players.find(p => p.id === msg.turnId);
         const firstIsMe = msg.turnId === myId;
@@ -551,30 +789,111 @@
 
       // ── Roll result ─────────────────────────────────────────────
       case 'sl-rolled': {
-        const { playerId, playerName, dice, from, landedOn, finalPos, event, overshoot, nextTurnId, winner, positions: newPos } = msg;
+        const {
+          playerId, playerName, moveDice, moveDice2, twist,
+          from, landedOn, finalPos, event, overshoot,
+          positions: newPos, shields: newShields,
+          validTargets, awaitingTwist, nextTurnId, winner, chaosPositions,
+        } = msg;
 
-        // Show dice animation then resolve
-        animateDice(dice).then(async () => {
-          const who = playerId === myId ? 'You' : esc(playerName);
+        const who = playerId === myId ? 'You' : esc(playerName);
 
+        // Animate both dice simultaneously, then handle movement + twist
+        Promise.all([
+          animateDice(moveDice),
+          animateTwistCard(twist),
+        ]).then(async () => {
+          // ── Movement result ──
           if (overshoot) {
-            chat('system', '', `${who} rolled ${dice} — overshoot! Stays at ${from}.`);
+            chat('system', '', `${who} rolled ${moveDice}${moveDice2 ? '+'+moveDice2 : ''} — overshoot! Stays at ${from}.`);
+            addEvent(`🎲 ${playerName}: rolled ${moveDice}${moveDice2?'+'+moveDice2:''}, overshoot (sq ${from})`);
+          } else if (event === 'shield-block') {
+            chat('system', '', `${who} rolled ${moveDice}${moveDice2 ? '+'+moveDice2 : ''} 🛡️ Shield blocked a snake at ${landedOn}!`);
+            addEvent(`🛡️ ${playerName}: shield blocked snake at sq ${landedOn}!`);
           } else if (event === 'snake') {
-            chat('system', '', `${who} rolled ${dice} 🐍 Snake! ${landedOn} → ${finalPos}`);
+            chat('system', '', `${who} rolled ${moveDice}${moveDice2 ? '+'+moveDice2 : ''} 🐍 Snake! ${landedOn} → ${finalPos}`);
+            addEvent(`🐍 ${playerName}: snake ${landedOn}→${finalPos}`);
           } else if (event === 'ladder') {
-            chat('system', '', `${who} rolled ${dice} 🪜 Ladder! ${landedOn} → ${finalPos}`);
+            chat('system', '', `${who} rolled ${moveDice}${moveDice2 ? '+'+moveDice2 : ''} 🪜 Ladder! ${landedOn} → ${finalPos}`);
+            addEvent(`🪜 ${playerName}: ladder ${landedOn}→${finalPos}`);
           } else {
-            chat('system', '', `${who} rolled ${dice} → square ${finalPos}.`);
+            chat('system', '', `${who} rolled ${moveDice}${moveDice2 ? '+'+moveDice2 : ''} → sq ${finalPos}.`);
+            addEvent(`🎲 ${playerName}: rolled ${moveDice}${moveDice2?'+'+moveDice2:''} → sq ${finalPos}`);
           }
 
           // Animate token movement
-          await animateMove(playerId, from, landedOn, finalPos, event);
+          if (!overshoot) {
+            await animateMove(playerId, from, landedOn, finalPos, event);
+          }
 
-          // Sync authoritative positions from server
+          // Sync positions + shields
           Object.assign(positions, newPos);
+          shields = Object.assign({}, newShields);
           refreshAllTokens();
           renderPlayerList();
 
+          // ── Twist handling ──
+          if (twist !== 'blank') {
+            const meta = TWIST_META[twist] || TWIST_META.blank;
+
+            // Instant-effect twists handled before overlay for chaos (all tokens move)
+            if (twist === 'chaos' && chaosPositions) {
+              await showTwistOverlay(twist);
+              hideTwistOverlay();
+              // Animate everyone moving at once
+              const moveProms = players.map(p => {
+                const newSq = chaosPositions[p.id] || 0;
+                const oldSq = positions[p.id] || 0;
+                if (newSq === oldSq) return Promise.resolve();
+                const tok = getOrCreateToken(p.id);
+                positions[p.id] = newSq;
+                placeToken(p.id, newSq, 0);
+                return sleep(500);
+              });
+              await Promise.all(moveProms);
+              refreshAllTokens();
+              renderPlayerList();
+              addEvent(`🔀 ${playerName}: Chaos! Everyone rotated`);
+              chat('system', '', `${who} triggered 🔀 Chaos — all positions rotated!`);
+            } else if (twist === 'shield') {
+              await showTwistOverlay(twist);
+              hideTwistOverlay();
+              addEvent(`🛡️ ${playerName}: gained Shield (2 turns)`);
+              chat('system', '', `${who} gained 🛡️ Shield — snake-proof for 2 turns!`);
+              renderPlayerList();
+            } else if (twist === 'doubleroll') {
+              await showTwistOverlay(twist);
+              hideTwistOverlay();
+              addEvent(`🎲 ${playerName}: Double Roll! +${moveDice2} total ${moveDice}+${moveDice2}`);
+              chat('system', '', `${who} triggered 🎲 Double Roll (${moveDice}+${moveDice2}=${moveDice+moveDice2})!`);
+            } else if (awaitingTwist && playerId === myId) {
+              // Show announcement then targeting UI
+              await showTwistOverlay(twist);
+              hideTwistOverlay();
+              addEvent(`${meta.emoji} ${playerName}: ${meta.label} — choosing target…`);
+
+              const choice = await showTargetUI(twist, validTargets);
+              if (choice) {
+                wsSend({ type: 'sl-twist-choice', ...choice });
+              } else {
+                // Skip / timed-out locally — server will also time out
+                wsSend({ type: 'sl-twist-choice', skip: true });
+              }
+              return; // wait for sl-twist-resolved
+            } else if (awaitingTwist && playerId !== myId) {
+              // Another player is choosing — show announcement and wait
+              await showTwistOverlay(twist);
+              hideTwistOverlay();
+              addEvent(`${meta.emoji} ${playerName}: ${meta.label} — choosing target…`);
+              statusEl.textContent = esc(playerName) + ' is choosing a target…';
+              return; // wait for sl-twist-resolved
+            } else if (twist !== 'blank') {
+              // Non-targeting instant twist already applied (shield / doubleroll handled above)
+              // or targeting twist with no valid targets (falls through as blank)
+            }
+          }
+
+          // ── Wrap-up (also reached after non-awaitingTwist) ──
           currentTurnId = nextTurnId;
 
           if (winner) {
@@ -590,6 +909,7 @@
           } else {
             syncRollBtn();
             syncTurnTag();
+            resetTwistCard();
             const nextPlayer = players.find(p => p.id === nextTurnId);
             statusEl.textContent = nextTurnId === myId
               ? 'Your turn — roll the dice!'
@@ -600,24 +920,98 @@
         break;
       }
 
+      // ── Twist resolved (after choice or timeout) ────────────────
+      case 'sl-twist-resolved': {
+        const { playerId, playerName, timedOut, twistDetail, positions: newPos, shields: newShields, nextTurnId, winner } = msg;
+
+        // Apply position changes
+        Object.assign(positions, newPos);
+        shields = Object.assign({}, newShields);
+
+        (async () => {
+          const who  = playerId === myId ? 'You' : esc(playerName);
+          const meta = TWIST_META[twistDetail?.twist] || TWIST_META.blank;
+
+          if (timedOut) {
+            addEvent(`⏱ ${playerName}: ${meta.emoji || ''} twist timed out — skipped`);
+            chat('system', '', `${who} ran out of time — twist skipped.`);
+          } else {
+            const { twist, targetId, targetName, myNewPos, theirNewPos, from: bFrom, to: bTo, square } = twistDetail || {};
+            if (twist === 'swap') {
+              getOrCreateToken(playerId);
+              if (targetId) getOrCreateToken(targetId);
+              placeToken(playerId, myNewPos || 0, 0);
+              if (targetId) placeToken(targetId, theirNewPos || 0, 0);
+              await sleep(500);
+              addEvent(`🔁 ${playerName}: swapped with ${targetName} (sq ${myNewPos}↔${theirNewPos})`);
+              chat('system', '', `${who} swapped with ${esc(targetName)}!`);
+            } else if (twist === 'bomb') {
+              if (targetId) {
+                placeToken(targetId, bTo, 0);
+                await sleep(300);
+              }
+              addEvent(`💣 ${playerName}: bombed ${targetName} ${bFrom}→${bTo}`);
+              chat('system', '', `${who} 💣 bombed ${esc(targetName)} back to sq ${bTo}!`);
+            } else if (twist === 'freemove') {
+              placeToken(playerId, square, 0);
+              await sleep(300);
+              addEvent(`⭐ ${playerName}: free-moved to sq ${square}`);
+              chat('system', '', `${who} ⭐ moved to square ${square}!`);
+            }
+          }
+
+          refreshAllTokens();
+          renderPlayerList();
+          currentTurnId = nextTurnId;
+
+          if (winner) {
+            gameActive = false;
+            const isMe = winner.id === myId;
+            resultEmoji.textContent = isMe ? '🥳' : '😔';
+            resultTitle.textContent = isMe ? 'You Win!' : esc(winner.name) + ' Wins!';
+            resultSub.textContent   = isMe
+              ? 'You reached square 100 first! 🏆'
+              : esc(winner.name) + ' reached square 100 first.';
+            resultOverlay.style.display = 'flex';
+            if (isMe) { launchConfetti(); reportScore('snakesladders', 1); }
+          } else {
+            syncRollBtn();
+            syncTurnTag();
+            resetTwistCard();
+            const nextPlayer = players.find(p => p.id === nextTurnId);
+            statusEl.textContent = nextTurnId === myId
+              ? 'Your turn — roll the dice!'
+              : (nextPlayer?.name || 'Opponent') + "'s turn…";
+            renderPlayerList();
+          }
+        })();
+        break;
+      }
+
       // ── Player disconnected mid-game ────────────────────────────
       case 'sl-player-left': {
         const leftToken = $('tok-' + msg.id);
         if (leftToken) leftToken.remove();
         players = players.filter(p => p.id !== msg.id);
         delete positions[msg.id];
+        delete shields[msg.id];
         lobby.delete(msg.id);
         currentTurnId = msg.nextTurnId;
         syncRollBtn();
         syncTurnTag();
         renderPlayerList();
         chat('system', '', 'A player disconnected. Turn advanced.');
+        // Close any open targeting UI (skip choice)
+        targetOverlay.style.display = 'none';
+        hideTwistOverlay();
         break;
       }
 
       // ── Game aborted (too few players) ──────────────────────────
       case 'sl-aborted':
         gameActive = false;
+        targetOverlay.style.display = 'none';
+        hideTwistOverlay();
         diceArea.style.display = 'none';
         boardOuter.style.display = 'none';
         controls.style.display = '';
@@ -653,11 +1047,15 @@
   $('btnPlayAgain').addEventListener('click', () => {
     // Reset client to pre-game state — server still holds the room
     resultOverlay.style.display = 'none';
-    gameActive = false; players = []; positions = {};
+    targetOverlay.style.display = 'none';
+    hideTwistOverlay();
+    gameActive = false; players = []; positions = {}; shields = {};
     currentTurnId = null; animating = false;
     tokenLayer.innerHTML = '';
     boardGrid.innerHTML = '';
     boardSvg.innerHTML = '';
+    eventLogList.innerHTML = '';
+    eventLog.style.display = 'none';
     diceArea.style.display = 'none';
     boardOuter.style.display = 'none';
     controls.style.display = '';
@@ -696,5 +1094,7 @@
   rulesPanel.addEventListener('click', e => { if (e.target === rulesPanel) rulesPanel.style.display = 'none'; });
 
   // ── Init ─────────────────────────────────────────────────────────
+  buildDice();
+  buildSkinPicker();
   connect();
 })();

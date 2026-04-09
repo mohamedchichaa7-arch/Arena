@@ -474,9 +474,11 @@ function removeFromRoom(conn) {
     room.eg = null;
   }
   if (room.sl && room.sl.active) {
+    if (room.sl.pendingTimer) { clearTimeout(room.sl.pendingTimer); room.sl.pendingTimer = null; room.sl.pendingTwist = null; }
     const wasTurn = room.sl.playerOrder[room.sl.turnIdx] === conn.id;
     room.sl.playerOrder = room.sl.playerOrder.filter(pid => pid !== conn.id);
     delete room.sl.positions[conn.id];
+    delete room.sl.shields[conn.id];
     if (room.sl.playerOrder.length < 2) {
       room.sl.active = false;
       room.status = 'waiting';
@@ -1452,42 +1454,174 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(conn.roomId);
         if (!room || !room.sl || !room.sl.active) return;
         const sl = room.sl;
+        if (sl.pendingTwist) return;  // already awaiting a twist choice
         if (sl.playerOrder[sl.turnIdx] !== id) return;
-        const dice = Math.floor(Math.random() * 6) + 1;
-        const from = sl.positions[id] || 0;
-        const rawTo = from + dice;
-        let finalPos = from; // default: no move (overshoot)
+
+        // Roll both dice
+        const moveDice  = Math.floor(Math.random() * 6) + 1;
+        let twist       = SL_TWIST_FACES[Math.floor(Math.random() * SL_TWIST_FACES.length)];
+        let moveDice2   = null;
+        if (twist === 'doubleroll') moveDice2 = Math.floor(Math.random() * 6) + 1;
+        const totalMove = moveDice + (moveDice2 || 0);
+
+        // Apply movement
+        const from      = sl.positions[id] || 0;
+        const rawTo     = from + totalMove;
+        const overshoot = rawTo > 100;
+        let landedOn = from, finalPos = from;
         let event = null;
-        if (rawTo <= 100) {
-          finalPos = rawTo;
+
+        if (!overshoot) {
+          landedOn = finalPos = rawTo;
           if (SL_LADDERS[finalPos] !== undefined) {
             event = 'ladder'; finalPos = SL_LADDERS[finalPos];
           } else if (SL_SNAKES[finalPos] !== undefined) {
-            event = 'snake';  finalPos = SL_SNAKES[finalPos];
+            if ((sl.shields[id] || 0) > 0) {
+              event = 'shield-block';
+            } else {
+              event = 'snake'; finalPos = SL_SNAKES[finalPos];
+            }
+          }
+          sl.positions[id] = finalPos;
+          // Decay shield (one turn used up regardless of whether snake was blocked)
+          if ((sl.shields[id] || 0) > 0) sl.shields[id]--;
+        }
+
+        // Instant twists
+        let chaosPositions = null;
+        if (twist === 'shield') {
+          sl.shields[id] = (sl.shields[id] || 0) + 2;
+        } else if (twist === 'chaos' && sl.playerOrder.length > 1) {
+          const order   = sl.playerOrder;
+          const posCopy = { ...sl.positions };
+          for (let i = 0; i < order.length; i++)
+            sl.positions[order[i]] = posCopy[order[(i + 1) % order.length]];
+          chaosPositions = { ...sl.positions };
+        }
+
+        // Winner check (movement + chaos)
+        const activePos = chaosPositions ? chaosPositions[id] : sl.positions[id];
+        const winner    = activePos === 100 ? { id, name: conn.name } : null;
+        if (winner) { sl.active = false; room.status = 'waiting'; broadcastLobby(); }
+
+        // Targeting twists need a follow-up choice
+        const NEEDS_TARGET = ['swap', 'bomb', 'freemove'];
+        let validTargets   = null;
+        if (!winner && NEEDS_TARGET.includes(twist)) {
+          if (twist === 'freemove') {
+            validTargets = [];
+            for (let s = Math.max(1, finalPos - 5); s <= Math.min(100, finalPos + 5); s++)
+              if (s !== finalPos) validTargets.push(s);
+            if (validTargets.length === 0) twist = 'blank';
+          } else {
+            validTargets = sl.playerOrder.filter(pid => pid !== id && (sl.positions[pid] || 0) > 0);
+            if (validTargets.length === 0) twist = 'blank';
           }
         }
-        sl.positions[id] = finalPos;
-        const overshoot = rawTo > 100;
-        const winner = finalPos === 100 ? { id, name: conn.name } : null;
-        if (winner) {
-          sl.active = false;
-          room.status = 'waiting';
-          broadcastLobby();
+
+        if (!winner && NEEDS_TARGET.includes(twist) && validTargets && validTargets.length > 0) {
+          // Park game waiting for choice
+          sl.pendingTwist = { twist, playerId: id, finalPos, validTargets };
+          sl.pendingTimer = setTimeout(() => {
+            const r = rooms.get(room.id);
+            if (!r?.sl?.pendingTwist) return;
+            r.sl.pendingTwist = null;
+            r.sl.pendingTimer = null;
+            r.sl.turnIdx = (r.sl.turnIdx + 1) % r.sl.playerOrder.length;
+            broadcastRoom(r.id, {
+              type: 'sl-twist-resolved',
+              playerId: id, playerName: conn.name,
+              timedOut: true,
+              twistDetail: { twist: 'timeout' },
+              positions: { ...r.sl.positions },
+              shields: { ...r.sl.shields },
+              nextTurnId: r.sl.playerOrder[r.sl.turnIdx],
+              winner: null,
+            });
+          }, 15000);
+          broadcastRoom(room.id, {
+            type: 'sl-rolled',
+            playerId: id, playerName: conn.name,
+            moveDice, moveDice2, twist,
+            from, landedOn, finalPos, event, overshoot,
+            positions: { ...sl.positions },
+            shields:   { ...sl.shields },
+            validTargets, awaitingTwist: true,
+            nextTurnId: null, winner: null, chaosPositions: null,
+          });
         } else {
-          sl.turnIdx = (sl.turnIdx + 1) % sl.playerOrder.length;
+          if (!winner) sl.turnIdx = (sl.turnIdx + 1) % sl.playerOrder.length;
+          broadcastRoom(room.id, {
+            type: 'sl-rolled',
+            playerId: id, playerName: conn.name,
+            moveDice, moveDice2, twist,
+            from, landedOn, finalPos, event, overshoot,
+            positions: chaosPositions || { ...sl.positions },
+            shields:   { ...sl.shields },
+            awaitingTwist: false,
+            nextTurnId:    winner ? null : sl.playerOrder[sl.turnIdx],
+            winner, chaosPositions,
+          });
         }
+        log('info', 'sl-roll', { roomId: room.id, player: conn.name, moveDice, twist, from, finalPos, event: event||'none', overshoot });
+        if (winner) log('info', 'sl-win', { roomId: room.id, winner: conn.name });
+        break;
+      }
+
+      case 'sl-twist-choice': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.sl?.active) return;
+        const sl = room.sl;
+        if (!sl.pendingTwist || sl.pendingTwist.playerId !== id) return;
+
+        clearTimeout(sl.pendingTimer);
+        sl.pendingTimer = null;
+        const { twist, finalPos, validTargets } = sl.pendingTwist;
+        sl.pendingTwist = null;
+
+        const twistDetail = { twist };
+        if (twist === 'swap') {
+          const targetId = msg.targetId;
+          if (!validTargets.includes(targetId)) return;
+          const myPos = sl.positions[id], theirPos = sl.positions[targetId];
+          sl.positions[id] = theirPos;
+          sl.positions[targetId] = myPos;
+          twistDetail.targetId   = targetId;
+          twistDetail.targetName = room.players.get(targetId)?.name || '';
+          twistDetail.myNewPos   = theirPos;
+          twistDetail.theirNewPos = myPos;
+        } else if (twist === 'bomb') {
+          const targetId = msg.targetId;
+          if (!validTargets.includes(targetId)) return;
+          const prev = sl.positions[targetId] || 0;
+          sl.positions[targetId] = Math.max(1, prev - 10);
+          twistDetail.targetId   = targetId;
+          twistDetail.targetName = room.players.get(targetId)?.name || '';
+          twistDetail.from       = prev;
+          twistDetail.to         = sl.positions[targetId];
+        } else if (twist === 'freemove') {
+          const sq = parseInt(msg.square);
+          if (!validTargets.includes(sq)) return;
+          sl.positions[id] = sq;
+          twistDetail.square = sq;
+        }
+
+        const winner = sl.positions[id] === 100 ? { id, name: conn.name } : null;
+        if (winner) { sl.active = false; room.status = 'waiting'; broadcastLobby(); }
+        if (!winner) sl.turnIdx = (sl.turnIdx + 1) % sl.playerOrder.length;
+
         broadcastRoom(room.id, {
-          type: 'sl-rolled',
-          playerId: id, playerName: conn.name,
-          dice, from,
-          landedOn: overshoot ? from : rawTo,
-          finalPos, event, overshoot,
+          type:       'sl-twist-resolved',
+          playerId:   id,
+          playerName: conn.name,
+          timedOut:   false,
+          twistDetail,
+          positions:  { ...sl.positions },
+          shields:    { ...sl.shields },
           nextTurnId: winner ? null : sl.playerOrder[sl.turnIdx],
           winner,
-          positions: { ...sl.positions },
         });
-        log('info', 'sl-roll', { roomId: room.id, player: conn.name, dice, from, finalPos, event: event || 'none', overshoot });
-        if (winner) log('info', 'sl-win', { roomId: room.id, winner: conn.name });
+        log('info', 'sl-twist', { roomId: room.id, player: conn.name, twist, detail: twistDetail });
         break;
       }
 
@@ -1516,19 +1650,20 @@ wss.on('connection', (ws, req) => {
 });
 
 // ── Snakes & Ladders helpers ─────────────────────────────────────
-const SL_SNAKES  = { 17:7, 54:34, 62:19, 64:60, 87:24, 93:73, 95:75, 99:78 };
-const SL_LADDERS = { 4:14, 9:31, 20:38, 28:84, 40:59, 51:67, 63:81, 71:91 };
+const SL_SNAKES       = { 17:7, 54:34, 62:19, 64:60, 87:24, 93:73, 95:75, 99:78 };
+const SL_LADDERS      = { 4:14, 9:31, 20:38, 28:84, 40:59, 51:67, 63:81, 71:91 };
+const SL_TWIST_FACES  = ['blank','blank','swap','shield','bomb','doubleroll','chaos','freemove'];
 
 function startSnakesLadders(room) {
   const playerOrder = [...room.players.keys()];
-  const positions = {};
-  for (const pid of playerOrder) positions[pid] = 0;
-  room.sl = { active: true, positions, playerOrder, turnIdx: 0 };
+  const positions = {}, shields = {};
+  for (const pid of playerOrder) { positions[pid] = 0; shields[pid] = 0; }
+  room.sl = { active: true, positions, playerOrder, turnIdx: 0, shields, pendingTwist: null, pendingTimer: null };
   room.status = 'playing';
   broadcastLobby();
   const playersInfo = playerOrder.map((pid, i) => ({ id: pid, name: room.players.get(pid).name, colorIdx: i }));
   for (const [pid, p] of room.players) {
-    send(p.ws, { type: 'sl-start', yourId: pid, players: playersInfo, positions: { ...positions }, turnId: playerOrder[0] });
+    send(p.ws, { type: 'sl-start', yourId: pid, players: playersInfo, positions: { ...positions }, shields: { ...shields }, turnId: playerOrder[0] });
   }
   log('info', 'sl-start', { roomId: room.id, players: playerOrder.length });
 }

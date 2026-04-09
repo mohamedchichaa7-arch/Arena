@@ -148,7 +148,159 @@ html, body {
   flex-shrink: 0;
 }
 
-/* ── Dice area ────────────────────────────────────────────── */
+/* ── 3D Dice ─────────────────────────────────────────────── */
+.dice-scene-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .45rem;
+}
+
+.dice-scene {
+  width: 76px;
+  height: 76px;
+  perspective: 380px;
+  perspective-origin: 50% 40%;
+}
+
+.dice-cube {
+  width: 76px;
+  height: 76px;
+  position: relative;
+  transform-style: preserve-3d;
+  /* initial transform set by JS */
+}
+
+.dice-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* ── Face 3-D placement (half = 38px) ── */
+.face-1 { transform: rotateY(  0deg) translateZ(38px); }
+.face-2 { transform: rotateY(180deg) translateZ(38px); }
+.face-3 { transform: rotateY( 90deg) translateZ(38px); }
+.face-4 { transform: rotateY(-90deg) translateZ(38px); }
+.face-5 { transform: rotateX(-90deg) translateZ(38px); }
+.face-6 { transform: rotateX( 90deg) translateZ(38px); }
+
+/* pip is absolutely positioned, centered at (left%, top%) */
+.pip {
+  position: absolute;
+  width: 19%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* ──────────── Skins ──────────────────────────────────────── */
+
+/* Classic: white die, dark/red pips (casino style) */
+.skin-classic .dice-face {
+  background: #f4f4f4;
+  border: 1.5px solid rgba(0,0,0,.12);
+  box-shadow:
+    inset 3px 3px 8px rgba(255,255,255,.95),
+    inset -2px -2px 5px rgba(0,0,0,.1),
+    0 6px 22px rgba(0,0,0,.55);
+}
+.skin-classic .pip              { background: #1a1a1a; }
+.skin-classic .face-1 .pip      { background: #dc2626; } /* 1-pip is red */
+
+/* Dark: match platform palette */
+.skin-dark .dice-face {
+  background: linear-gradient(145deg, #262658, #18183e);
+  border: 1.5px solid #3e3e88;
+  box-shadow:
+    inset 1px 1px 0 rgba(255,255,255,.1),
+    0 6px 22px rgba(0,0,0,.6);
+}
+.skin-dark .pip { background: #c4c4ff; box-shadow: 0 0 6px rgba(139,92,246,.8); }
+
+/* Neon: glowing dots on black */
+.skin-neon .dice-face {
+  background: #06060f;
+  border: 1.5px solid #7c3aed;
+  box-shadow:
+    inset 0 0 14px rgba(139,92,246,.12),
+    0 0 22px rgba(139,92,246,.35),
+    0 6px 22px rgba(0,0,0,.7);
+}
+.skin-neon .pip {
+  background: #a78bfa;
+  box-shadow: 0 0 9px #8b5cf6, 0 0 20px rgba(139,92,246,.55);
+}
+
+/* Fire: lava die */
+.skin-fire .dice-face {
+  background: linear-gradient(145deg, #2a0d00, #180800);
+  border: 1.5px solid #ea580c;
+  box-shadow:
+    inset 0 0 12px rgba(251,146,60,.1),
+    0 0 16px rgba(239,68,68,.2),
+    0 6px 22px rgba(0,0,0,.7);
+}
+.skin-fire .pip {
+  background: #fb923c;
+  box-shadow: 0 0 8px #ef4444, 0 0 18px rgba(239,68,68,.45);
+}
+
+/* Ice: frozen crystal die */
+.skin-ice .dice-face {
+  background: linear-gradient(145deg, #0d2240, #081530);
+  border: 1.5px solid #38bdf8;
+  box-shadow:
+    inset 0 0 14px rgba(56,189,248,.08),
+    0 0 18px rgba(56,189,248,.18),
+    0 6px 22px rgba(0,0,0,.7);
+}
+.skin-ice .pip {
+  background: #7dd3fc;
+  box-shadow: 0 0 7px #38bdf8, 0 0 14px rgba(56,189,248,.4);
+}
+
+/* Gold: luxury edition */
+.skin-gold .dice-face {
+  background: linear-gradient(145deg, #2a1f00, #1a1400);
+  border: 1.5px solid #d97706;
+  box-shadow:
+    inset 0 0 14px rgba(251,191,36,.1),
+    0 0 18px rgba(251,191,36,.2),
+    0 6px 22px rgba(0,0,0,.7);
+}
+.skin-gold .pip {
+  background: #fbbf24;
+  box-shadow: 0 0 8px #d97706, 0 0 16px rgba(251,191,36,.5);
+}
+
+/* ── Skin picker buttons ──────────────────────────────────── */
+.skin-picker {
+  display: flex;
+  gap: .26rem;
+  align-items: center;
+}
+
+.skin-btn {
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 2px solid rgba(255,255,255,.15);
+  transition: border-color .2s, transform .15s;
+  flex-shrink: 0;
+}
+.skin-btn:hover             { transform: scale(1.2); border-color: rgba(255,255,255,.5); }
+.skin-btn.active            { border-color: #fff; box-shadow: 0 0 6px rgba(255,255,255,.4); }
+.skin-btn.sb-classic        { background: #f4f4f4; }
+.skin-btn.sb-dark           { background: linear-gradient(135deg, #262658, #18183e); }
+.skin-btn.sb-neon           { background: linear-gradient(135deg, #06060f, #7c3aed); }
+.skin-btn.sb-fire           { background: linear-gradient(135deg, #2a0d00, #ea580c); }
+.skin-btn.sb-ice            { background: linear-gradient(135deg, #081530, #38bdf8); }
+.skin-btn.sb-gold           { background: linear-gradient(135deg, #1a1400, #d97706); }
+
+/* ── Dice area layout ─────────────────────────────────────── */
 .dice-area {
   display: flex;
   align-items: center;
@@ -158,52 +310,6 @@ html, body {
   flex-wrap: wrap;
   justify-content: center;
 }
-
-.dice-wrap { perspective: 300px; }
-
-.dice {
-  width: 54px; height: 54px;
-  background: #1e1e4a;
-  border: 2px solid #3a3a6a;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  box-shadow: 0 4px 18px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.07);
-  transition: box-shadow .2s;
-}
-
-.dice.rolling {
-  animation: diceShake .6s ease;
-}
-
-@keyframes diceShake {
-  0%   { transform: translate(0,0) rotate(0deg); }
-  10%  { transform: translate(-3px, 2px) rotate(-10deg); }
-  20%  { transform: translate(3px,-2px) rotate(10deg); }
-  30%  { transform: translate(-3px, 3px) rotate(-8deg); }
-  40%  { transform: translate(3px,-1px) rotate(6deg); }
-  50%  { transform: translate(-2px, 2px) rotate(-9deg); }
-  60%  { transform: translate(2px,-2px) rotate(8deg); }
-  70%  { transform: translate(-2px, 1px) rotate(-5deg); }
-  80%  { transform: translate(2px,-1px) rotate(4deg); }
-  90%  { transform: translate(-1px, 1px) rotate(-2deg); }
-  100% { transform: translate(0,0) rotate(0deg); }
-}
-
-.dot-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  gap: 3px;
-  width: 40px; height: 40px;
-}
-
-.dot {
-  border-radius: 50%;
-  background: var(--text);
-  width: 100%; height: 100%;
-}
-.dot.empty { background: transparent; }
 
 .dice-info {
   display: flex;
@@ -472,6 +578,228 @@ html, body {
   font-size: 1.2rem; cursor: pointer;
 }
 .rules-close:hover { color: var(--text); }
+
+/* ══════════════ TWIST SYSTEM ══════════════ */
+
+/* Die area sublabel */
+.dice-sublabel {
+  font-size: .55rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-align: center;
+  margin-top: .25rem;
+}
+.twist-sublabel { color: #a78bfa; }
+
+/* ── Twist flip card ─────────────────────────────────────────── */
+.twist-die-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.twist-die-card {
+  width: 76px;
+  height: 76px;
+  perspective: 380px;
+}
+
+.twist-die-inner {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-style: preserve-3d;
+}
+
+.twist-die-front,
+.twist-die-back {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  backface-visibility: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.twist-die-front {
+  background: linear-gradient(145deg, #1e1b4b, #312e81);
+  border: 1.5px solid #4338ca;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,.1), 0 6px 22px rgba(0,0,0,.6);
+  font-size: 2rem;
+  color: #818cf8;
+}
+
+.twist-die-back {
+  transform: rotateY(180deg);
+  border: 1.5px solid rgba(255,255,255,.18);
+  box-shadow: 0 6px 22px rgba(0,0,0,.6);
+}
+
+.twist-die-back .tw-emoji { font-size: 1.9rem; line-height: 1; }
+.twist-die-back .tw-text  { font-size: .5rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: rgba(255,255,255,.82); text-align: center; line-height: 1.2; }
+
+/* Per-twist card colours */
+.tw-blank      { background: linear-gradient(145deg, #1f2937, #374151); }
+.tw-swap       { background: linear-gradient(145deg, #0c4a6e, #0369a1); }
+.tw-shield     { background: linear-gradient(145deg, #14532d, #15803d); }
+.tw-bomb       { background: linear-gradient(145deg, #7f1d1d, #b91c1c); }
+.tw-doubleroll { background: linear-gradient(145deg, #78350f, #b45309); }
+.tw-chaos      { background: linear-gradient(145deg, #4c1d95, #7c3aed); }
+.tw-freemove   { background: linear-gradient(145deg, #083344, #0e7490); }
+
+/* ── Twist announcement overlay ──────────────────────────────── */
+.twist-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.8);
+  z-index: 310;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: twFadeIn .2s ease;
+}
+
+.twist-card {
+  background: var(--surface);
+  border: 2px solid rgba(255,255,255,.12);
+  border-radius: 1.2rem;
+  padding: 2.5rem 3.5rem;
+  text-align: center;
+  animation: twPop .32s cubic-bezier(.34,1.56,.64,1);
+  min-width: 220px;
+}
+
+.twist-emoji { font-size: 3.5rem; margin-bottom: .5rem; }
+.twist-name  {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.twist-desc { margin-top: .5rem; color: var(--dim); font-size: .82rem; }
+
+@keyframes twFadeIn { from { opacity:0; } to { opacity:1; } }
+@keyframes twPop    { from { transform:scale(.65); opacity:0; } to { transform:scale(1); opacity:1; } }
+
+/* ── Target selection overlay ────────────────────────────────── */
+.target-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.82);
+  z-index: 320;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.target-card {
+  background: var(--card);
+  border: 2px solid rgba(255,255,255,.15);
+  border-radius: 1rem;
+  padding: 1.8rem 2rem;
+  text-align: center;
+  min-width: 280px;
+  max-width: 420px;
+  animation: twPop .3s ease;
+}
+
+.target-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .95rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: .06em;
+  margin-bottom: .35rem;
+}
+.target-subtitle { color: var(--dim); font-size: .78rem; margin-bottom: 1rem; }
+
+.target-options { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; margin-bottom: 1rem; }
+
+.target-btn {
+  padding: .45rem .9rem;
+  border-radius: .6rem;
+  border: 2px solid rgba(255,255,255,.2);
+  background: rgba(255,255,255,.06);
+  color: #fff;
+  font-size: .8rem;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .1s;
+}
+.target-btn:hover { background: rgba(255,255,255,.17); border-color: rgba(255,255,255,.4); transform: scale(1.04); }
+.target-btn.sq-btn { min-width: 46px; font-family: 'Orbitron', sans-serif; font-size: .75rem; }
+
+.target-timer-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.target-countdown {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.8rem;
+  font-weight: 900;
+  color: var(--accent);
+  min-width: 2.5rem;
+  transition: color .3s;
+}
+.target-countdown.urgent { color: var(--red); animation: urgentPulse .5s ease infinite alternate; }
+@keyframes urgentPulse { from { opacity:1; } to { opacity:.5; } }
+
+.btn-skip { background: var(--card); color: var(--dim); border: 1px solid var(--border); }
+.btn-skip:hover { color: var(--text); border-color: var(--dim); }
+
+/* ── Event log ───────────────────────────────────────────────── */
+.event-log {
+  padding: .4rem .5rem .6rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.event-log-header {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .58rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: .4rem;
+  padding: 0 .1rem;
+}
+.event-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.evl-item {
+  font-size: .66rem;
+  color: rgba(224,224,255,.7);
+  padding: .22rem .4rem;
+  border-radius: .25rem;
+  background: rgba(255,255,255,.03);
+  line-height: 1.35;
+}
+
+/* ── Shield badge on player card ─────────────────────────────── */
+.shield-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: .6rem;
+  background: rgba(34,197,94,.15);
+  border: 1px solid rgba(34,197,94,.35);
+  border-radius: .6rem;
+  padding: .05rem .3rem;
+  color: #4ade80;
+  margin-left: .25rem;
+  flex-shrink: 0;
+}
 
 /* ══════════════ MOBILE ══════════════ */
 @media (max-width: 768px) {

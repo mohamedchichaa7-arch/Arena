@@ -24,13 +24,17 @@
 <body>
   <div class="layout">
 
-    <!-- Left sidebar: player list -->
+    <!-- Left sidebar: player list + event log -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <h3>Players</h3>
         <span class="player-count" id="playerCount">1</span>
       </div>
       <div class="player-grid" id="playerList"></div>
+      <div class="event-log" id="eventLog" style="display:none">
+        <div class="event-log-header">Events</div>
+        <div class="event-log-list" id="eventLogList"></div>
+      </div>
     </aside>
 
     <!-- Main content -->
@@ -53,11 +57,33 @@
 
       <!-- Dice + Roll button row -->
       <div class="dice-area" id="diceArea" style="display:none">
-        <div class="dice-wrap">
-          <div class="dice" id="diceEl">
-            <div class="dot-grid" id="dotGrid"></div>
+        <!-- Movement die (3D cube with pips) -->
+        <div class="dice-scene-wrap">
+          <div class="dice-scene">
+            <div class="dice-cube skin-dark" id="diceCube">
+              <div class="dice-face face-1" id="diceFace1"></div>
+              <div class="dice-face face-2" id="diceFace2"></div>
+              <div class="dice-face face-3" id="diceFace3"></div>
+              <div class="dice-face face-4" id="diceFace4"></div>
+              <div class="dice-face face-5" id="diceFace5"></div>
+              <div class="dice-face face-6" id="diceFace6"></div>
+            </div>
           </div>
+          <div class="skin-picker" id="skinPicker"></div>
+          <div class="dice-sublabel">Move</div>
         </div>
+
+        <!-- Twist die (flip card) -->
+        <div class="twist-die-wrap">
+          <div class="twist-die-card">
+            <div class="twist-die-inner" id="twistDiceInner">
+              <div class="twist-die-front">?</div>
+              <div class="twist-die-back" id="twistDiceBack"></div>
+            </div>
+          </div>
+          <div class="dice-sublabel twist-sublabel">Twist</div>
+        </div>
+
         <div class="dice-info">
           <button class="btn btn-primary btn-roll" id="btnRoll" disabled>🎲 Roll</button>
           <div class="turn-tag" id="turnTag">Waiting…</div>
@@ -104,6 +130,28 @@
   <!-- Confetti canvas -->
   <canvas id="confetti"></canvas>
 
+  <!-- Twist announcement overlay -->
+  <div class="twist-overlay" id="twistOverlay" style="display:none">
+    <div class="twist-card">
+      <div class="twist-emoji" id="twistOvEmoji"></div>
+      <div class="twist-name"  id="twistOvName"></div>
+      <div class="twist-desc"  id="twistOvDesc"></div>
+    </div>
+  </div>
+
+  <!-- Target selection overlay -->
+  <div class="target-overlay" id="targetOverlay" style="display:none">
+    <div class="target-card">
+      <div class="target-title"    id="targetTitle"></div>
+      <div class="target-subtitle" id="targetSubtitle"></div>
+      <div class="target-options"  id="targetOptions"></div>
+      <div class="target-timer-row">
+        <div class="target-countdown" id="targetCountdown">15</div>
+        <button class="btn btn-sm btn-skip" id="btnSkipTwist">Skip</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Rules panel -->
   <div class="rules-panel" id="rulesPanel" style="display:none">
     <div class="rules-card">
@@ -112,10 +160,16 @@
       <ul>
         <li><strong>Players:</strong> 2–4 players on a 10×10 board (squares 1–100).</li>
         <li><strong>Goal:</strong> Be the first player to reach exactly square 100.</li>
-        <li><strong>Your turn:</strong> Click <em>Roll</em> to roll a 6-sided dice and advance your token.</li>
+        <li><strong>Your turn:</strong> Click <em>Roll</em> to roll two dice: a movement die and a twist die.</li>
         <li><strong>🪜 Ladders (green):</strong> Land on the foot of a ladder to climb straight to the top.</li>
         <li><strong>🐍 Snakes (red):</strong> Land on a snake's head to slide down to its tail.</li>
         <li><strong>Overshoot:</strong> If your roll would take you past square 100, you don't move this turn.</li>
+        <li><strong>🎲 Double Roll:</strong> Your movement dice is rolled twice — total both values!</li>
+        <li><strong>🛡️ Shield:</strong> Grants snake immunity for your next 2 turns.</li>
+        <li><strong>🔁 Swap:</strong> Choose a player to swap board positions with.</li>
+        <li><strong>💣 Bomb:</strong> Choose a player to send back 10 squares.</li>
+        <li><strong>🔀 Chaos:</strong> All players' positions rotate clockwise.</li>
+        <li><strong>⭐ Free Move:</strong> Jump to any square within ±5 of your current position.</li>
         <li><strong>Winning:</strong> Land exactly on square 100 to win the game!</li>
       </ul>
     </div>
