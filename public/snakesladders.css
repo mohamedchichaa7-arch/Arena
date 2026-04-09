@@ -280,6 +280,9 @@ html, body {
   display: flex;
   gap: .26rem;
   align-items: center;
+  position: relative;
+  z-index: 10;   /* stay above the 3-D cube faces that visually overflow */
+  margin-top: 6px;
 }
 
 .skin-btn {
@@ -589,6 +592,8 @@ html, body {
   color: var(--dim);
   text-align: center;
   margin-top: .25rem;
+  position: relative;
+  z-index: 10;
 }
 .twist-sublabel { color: #a78bfa; }
 
@@ -754,6 +759,72 @@ html, body {
 
 .btn-skip { background: var(--card); color: var(--dim); border: 1px solid var(--border); }
 .btn-skip:hover { color: var(--text); border-color: var(--dim); }
+
+/* ── Free Move instruction bar ────────────────────────────────── */
+#freeMoveBar {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .38rem .75rem;
+  background: rgba(6, 182, 212, .1);
+  border: 1px solid rgba(6, 182, 212, .4);
+  border-radius: .48rem;
+  margin-bottom: .4rem;
+  flex-shrink: 0;
+  animation: twFadeIn .22s ease;
+}
+.fm-star { font-size: 1.05rem; }
+.fm-text { font-size: .7rem; color: var(--accent); font-weight: 600; flex: 1; }
+.fm-countdown {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .85rem; font-weight: 700;
+  color: var(--accent);
+  min-width: 1.6rem; text-align: right;
+  transition: color .3s;
+}
+.fm-countdown.urgent { color: var(--red); animation: urgentPulse .5s ease infinite alternate; }
+.btn-fm-skip {
+  background: rgba(255,255,255,.06);
+  color: var(--dim);
+  border: 1px solid var(--border);
+  padding: .18rem .5rem;
+  font-size: .62rem;
+  border-radius: .3rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.btn-fm-skip:hover { color: var(--text); border-color: var(--dim); }
+
+/* ── Free Move target cell highlight ─────────────────────────── */
+.board-cell.freemove-target {
+  cursor: pointer !important;
+}
+.board-cell.freemove-target::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  background: rgba(6, 182, 212, .28);
+  border: 2px solid #06b6d4;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: fmCellPulse .9s ease-in-out infinite alternate;
+  z-index: 3;
+}
+.board-cell.freemove-target .cell-num {
+  color: #22d3ee !important;
+  font-weight: 900;
+  position: relative;
+  z-index: 4;
+}
+.board-cell.freemove-target:hover::after {
+  background: rgba(6, 182, 212, .6);
+  border-color: #67e8f9;
+  box-shadow: 0 0 14px rgba(6,182,212,.7);
+}
+@keyframes fmCellPulse {
+  from { background: rgba(6,182,212,.18); box-shadow: none; }
+  to   { background: rgba(6,182,212,.45); box-shadow: inset 0 0 10px rgba(6,182,212,.4); }
+}
 
 /* ── Event log ───────────────────────────────────────────────── */
 .event-log {

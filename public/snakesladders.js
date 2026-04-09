@@ -106,6 +106,10 @@
   const btnSkipTwist   = $('btnSkipTwist');
   const eventLog       = $('eventLog');
   const eventLogList   = $('eventLogList');
+  // Free move bar refs
+  const freeMoveBar       = $('freeMoveBar');
+  const freeMoveCountdown = $('freeMoveCountdown');
+  const btnFreeMoveSkip   = $('btnFreeMoveSkip');
 
   roomBadge.textContent = 'Room ' + roomId;
 
@@ -121,6 +125,7 @@
 
   // Twist die flip state
   let twistCardRy  = 0;   // cumulative Y-rotation of the flip card
+  let freeMoveCancel = null; // set while board free-move is active
 
   // ── Board geometry ───────────────────────────────────────────────
   // Returns 0-based { col, rowFromTop } for square n (1-100)
@@ -415,19 +420,18 @@
   }
 
   async function animateDice(finalFace) {
-    // Phase 1: rapid tumbling — no smooth transition
-    diceCube.style.transition = 'none';
-    for (let i = 0; i < 13; i++) {
-      diceRx += (Math.random() < .5 ? 1 : -1) * (78 + Math.random() * 88);
-      diceRy += (Math.random() < .5 ? 1 : -1) * (78 + Math.random() * 88);
+    // Phase 1: smooth tumbling — each step transitions over 92ms
+    diceCube.style.transition = 'transform 92ms ease-in-out';
+    for (let i = 0; i < 10; i++) {
+      diceRx += (Math.random() < .5 ? 1 : -1) * (82 + Math.random() * 64);
+      diceRy += (Math.random() < .5 ? 1 : -1) * (82 + Math.random() * 64);
       diceCube.style.transform = `rotateX(${diceRx}deg) rotateY(${diceRy}deg)`;
-      await sleep(50);
+      await sleep(98);
     }
     // Phase 2: smooth settle to target face
     const target = FACE_ANGLES[finalFace];
     const rx = adjustAngle(diceRx, target.rx);
     const ry = adjustAngle(diceRy, target.ry);
-    diceCube.getBoundingClientRect(); // force reflow
     diceCube.style.transition = 'transform .58s cubic-bezier(.2,.82,.2,1)';
     diceCube.style.transform  = `rotateX(${rx}deg) rotateY(${ry}deg)`;
     diceRx = rx; diceRy = ry;
@@ -451,17 +455,16 @@
       `<span class="tw-emoji">${meta.emoji}</span>` +
       `<span class="tw-text">${meta.label}</span>`;
 
-    // Rapid spinning phase
-    twistDiceInner.style.transition = 'none';
+    // Smooth spinning phase — each step transitions over 92ms
+    twistDiceInner.style.transition = 'transform 92ms ease-in-out';
     for (let i = 0; i < 10; i++) {
-      twistCardRy += 72 + Math.random() * 80;
+      twistCardRy += 90 + Math.random() * 72;
       twistDiceInner.style.transform = `rotateY(${twistCardRy}deg)`;
-      await sleep(60);
+      await sleep(98);
     }
     // Settle on back face (nearest multiple of 360 + 180)
     const base   = Math.ceil(twistCardRy / 360) * 360;
     const target = base + 180;
-    twistDiceInner.getBoundingClientRect(); // force reflow
     twistDiceInner.style.transition = 'transform .65s cubic-bezier(.2,.82,.2,1)';
     twistCardRy = target;
     twistDiceInner.style.transform = `rotateY(${target}deg)`;
@@ -483,8 +486,8 @@
     twistOverlay.style.display = 'none';
   }
 
-  // ── Target selection UI ──────────────────────────────────────────
-  // Returns a Promise that resolves with { targetId? , square? } or null on skip/timeout
+  // ── Target selection UI (swap / bomb only) ──────────────────────
+  // Returns a Promise that resolves with { targetId } or null on skip/timeout
   function showTargetUI(twist, validTargets) {
     return new Promise(resolve => {
       const meta = TWIST_META[twist];
@@ -513,36 +516,72 @@
         if (countdownSec <= 0) done(null);
       }, 1000);
 
-      // Build option buttons
+      targetSubtitle.textContent = twist === 'swap'
+        ? 'Choose a player to swap positions with:'
+        : 'Choose a player to send back 10 squares:';
+
       targetOptions.innerHTML = '';
-      if (twist === 'freemove') {
-        targetSubtitle.textContent = 'Jump to any square within ±5:';
-        for (const sq of validTargets) {
-          const btn = document.createElement('button');
-          btn.className = 'target-btn sq-btn';
-          btn.textContent = sq;
-          btn.addEventListener('click', () => done({ square: sq }));
-          targetOptions.appendChild(btn);
-        }
-      } else {
-        targetSubtitle.textContent = twist === 'swap'
-          ? 'Choose a player to swap positions with:'
-          : 'Choose a player to send back 10 squares:';
-        for (const tid of validTargets) {
-          const p = players.find(x => x.id === tid);
-          if (!p) continue;
-          const sq  = positions[tid] || 0;
-          const btn = document.createElement('button');
-          btn.className = 'target-btn';
-          btn.style.borderColor = PLAYER_COLORS[p.colorIdx] || '#aaa';
-          btn.innerHTML = `<span style="color:${PLAYER_COLORS[p.colorIdx]||'#aaa'}">${esc(p.name)}</span> <small style="color:var(--dim)">(sq ${sq})</small>`;
-          btn.addEventListener('click', () => done({ targetId: tid }));
-          targetOptions.appendChild(btn);
-        }
+      for (const tid of validTargets) {
+        const p = players.find(x => x.id === tid);
+        if (!p) continue;
+        const sq  = positions[tid] || 0;
+        const btn = document.createElement('button');
+        btn.className = 'target-btn';
+        btn.style.borderColor = PLAYER_COLORS[p.colorIdx] || '#aaa';
+        btn.innerHTML = `<span style="color:${PLAYER_COLORS[p.colorIdx]||'#aaa'}">${esc(p.name)}</span> <small style="color:var(--dim)">(sq ${sq})</small>`;
+        btn.addEventListener('click', () => done({ targetId: tid }));
+        targetOptions.appendChild(btn);
       }
 
       btnSkipTwist.onclick = () => done(null);
       targetOverlay.style.display = 'flex';
+    });
+  }
+
+  // ── Free Move board interaction ──────────────────────────────────
+  // Highlights valid squares on the board; player clicks one to choose.
+  // Returns a Promise resolving to { square } or null on skip/timeout.
+  function showFreeMoveOnBoard(validTargets) {
+    return new Promise(resolve => {
+      let countdown  = 15;
+      freeMoveCountdown.textContent = countdown;
+      freeMoveCountdown.classList.remove('urgent');
+      freeMoveBar.style.display = 'flex';
+
+      let resolved = false;
+      let interval = null;
+      const ac = new AbortController();
+
+      function done(choice) {
+        if (resolved) return;
+        resolved = true;
+        clearInterval(interval);
+        ac.abort();
+        document.querySelectorAll('.board-cell.freemove-target')
+          .forEach(el => el.classList.remove('freemove-target'));
+        freeMoveBar.style.display = 'none';
+        freeMoveCancel = null;
+        resolve(choice);
+      }
+
+      // Store a cancel hook for external callers (disconnect, abort)
+      freeMoveCancel = () => done(null);
+
+      interval = setInterval(() => {
+        countdown--;
+        freeMoveCountdown.textContent = countdown;
+        if (countdown <= 5) freeMoveCountdown.classList.add('urgent');
+        if (countdown <= 0) done(null);
+      }, 1000);
+
+      for (const sq of validTargets) {
+        const cellEl = $('sq' + sq);
+        if (!cellEl) continue;
+        cellEl.classList.add('freemove-target');
+        cellEl.addEventListener('click', () => done({ square: sq }), { signal: ac.signal });
+      }
+
+      btnFreeMoveSkip.onclick = () => done(null);
     });
   }
 
@@ -872,7 +911,13 @@
               hideTwistOverlay();
               addEvent(`${meta.emoji} ${playerName}: ${meta.label} — choosing target…`);
 
-              const choice = await showTargetUI(twist, validTargets);
+              let choice;
+              if (twist === 'freemove') {
+                choice = await showFreeMoveOnBoard(validTargets);
+              } else {
+                choice = await showTargetUI(twist, validTargets);
+              }
+
               if (choice) {
                 wsSend({ type: 'sl-twist-choice', ...choice });
               } else {
@@ -1004,6 +1049,7 @@
         // Close any open targeting UI (skip choice)
         targetOverlay.style.display = 'none';
         hideTwistOverlay();
+        if (freeMoveCancel) freeMoveCancel();
         break;
       }
 
@@ -1012,6 +1058,7 @@
         gameActive = false;
         targetOverlay.style.display = 'none';
         hideTwistOverlay();
+        if (freeMoveCancel) freeMoveCancel();
         diceArea.style.display = 'none';
         boardOuter.style.display = 'none';
         controls.style.display = '';
@@ -1049,6 +1096,7 @@
     resultOverlay.style.display = 'none';
     targetOverlay.style.display = 'none';
     hideTwistOverlay();
+    if (freeMoveCancel) freeMoveCancel();
     gameActive = false; players = []; positions = {}; shields = {};
     currentTurnId = null; animating = false;
     tokenLayer.innerHTML = '';
