@@ -596,7 +596,12 @@ html, body {
   min-height: var(--card-h);
   max-width: 100%;
   padding: 0 2rem;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.hand-fan::-webkit-scrollbar { display: none; }
 
 .hand-count {
   font-size: .55rem;
@@ -1201,7 +1206,7 @@ html, body {
   .game-log { width: min(320px, 85%); max-height: 25%; }
   .feed-entry { font-size: .6rem; padding: 3px 8px; }
 
-  .hand-fan { padding: 0 .5rem; }
+  .hand-fan { padding: 0 .5rem; justify-content: flex-start; }
   .game-card .card-num { font-size: 1rem; }
   .game-card .card-suit { font-size: .85rem; }
   .game-card .card-corner { font-size: .4rem; }
@@ -1214,13 +1219,27 @@ html, body {
 
 @media (max-width: 480px) {
   :root {
-    --card-w: 46px;
-    --card-h: 66px;
-    --tray-h: 115px;
+    --card-w: 40px;
+    --card-h: 58px;
+    --tray-h: 105px;
   }
 
   .announce-grid { grid-template-columns: repeat(4, 1fr); }
   .seat-avatar { width: 32px; height: 32px; font-size: .6rem; }
+  .hand-fan { padding: 0 .3rem; justify-content: flex-start; }
+  .game-card .card-num { font-size: .85rem; }
+  .game-card .card-suit { font-size: .7rem; }
+  .game-card .card-corner { font-size: .35rem; }
+}
+
+@media (max-width: 360px) {
+  :root {
+    --card-w: 34px;
+    --card-h: 50px;
+    --tray-h: 95px;
+  }
+  .hand-fan { padding: 0 .2rem; }
+  .game-card .card-corner { display: none; }
 }
 
 /*  Turn arrow on opponent seats  */
@@ -1322,3 +1341,15 @@ html, body {
   width: 100%;
   border-radius: 2px;
 }
+
+/* Rules panel */
+.rules-panel { position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 9500; display: flex; align-items: center; justify-content: center; }
+.rules-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem 2rem; max-width: 500px; width: 90%; position: relative; max-height: 80vh; overflow-y: auto; }
+.rules-card h2 { font-size: 1rem; margin-bottom: .8rem; color: var(--gold); }
+.rules-card ul { list-style: none; padding: 0; }
+.rules-card li { font-size: .8rem; line-height: 1.6; padding: .3rem 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+.rules-card li:last-child { border-bottom: none; }
+.rules-card li ul { margin-top: .3rem; margin-left: .8rem; }
+.rules-card li ul li { font-size: .75rem; border-bottom: none; padding: .15rem 0; }
+.rules-close { position: absolute; top: .6rem; right: .8rem; background: none; border: none; color: var(--text-dim); font-size: 1.2rem; cursor: pointer; }
+.rules-close:hover { color: var(--text); }

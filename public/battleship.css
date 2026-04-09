@@ -285,6 +285,18 @@ html, body {
   animation: popIn .35s cubic-bezier(.34,1.56,.64,1);
 }
 @keyframes popIn { from{transform:scale(.7);opacity:0} to{transform:scale(1);opacity:1} }
+
+/* Rules */
+.topbar-btn-rules { background: none; border: 1px solid var(--border); color: var(--muted); padding: 4px 10px; border-radius: 6px; font-size: .75rem; cursor: pointer; margin-left: auto; }
+.topbar-btn-rules:hover { color: #fbbf24; border-color: #fbbf24; }
+.rules-panel { position: fixed; inset: 0; background: rgba(0,0,0,.8); z-index: 9000; display: flex; align-items: center; justify-content: center; }
+.rules-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem 2rem; max-width: 500px; width: 90%; position: relative; max-height: 80vh; overflow-y: auto; color: var(--fg); }
+.rules-card h2 { font-size: 1rem; margin-bottom: .8rem; color: var(--accent); }
+.rules-card ul { list-style: none; padding: 0; }
+.rules-card li { font-size: .8rem; line-height: 1.6; padding: .3rem 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+.rules-card li:last-child { border-bottom: none; }
+.rules-close { position: absolute; top: .6rem; right: .8rem; background: none; border: none; color: var(--muted); font-size: 1.2rem; cursor: pointer; }
+.rules-close:hover { color: var(--fg); }
 .go-title {
   font-size: 2.4rem; font-weight: 900; margin-bottom: .6rem;
   background: linear-gradient(135deg, #38bdf8, #818cf8);

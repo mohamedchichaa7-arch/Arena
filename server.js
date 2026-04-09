@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -469,6 +469,10 @@ function removeFromRoom(conn) {
       room.rami.active = false;
     }
   }
+  if (room.eg && room.eg.active) {
+    room.eg.active = false;
+    room.eg = null;
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -570,9 +574,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -857,6 +861,20 @@ wss.on('connection', (ws, req) => {
         const br = room.br;
         if (br.paused) return; // game paused
         if (br.turnOrder[br.turnIdx] !== id) return; // not your turn
+        // Eliminate any player who played their last card previously (not challenged)
+        if (br.lastPlayerId && br.lastPlayerId !== id) {
+          const lastHand = br.hands.get(br.lastPlayerId);
+          if (lastHand && lastHand.length === 0 && !br.finishOrder.includes(br.lastPlayerId)) {
+            br.finishOrder.push(br.lastPlayerId);
+            const elimRank = br.finishOrder.length;
+            broadcastRoom(room.id, { type: 'br-eliminate', playerId: br.lastPlayerId, rank: elimRank });
+            log('info', 'br-eliminate', { roomId: room.id, playerId: br.lastPlayerId, rank: elimRank });
+            br.turnOrder = br.turnOrder.filter(pid => pid !== br.lastPlayerId);
+            if (br.turnOrder.length <= 1) { endBluffRummy(room); return; }
+            br.turnIdx = br.turnOrder.indexOf(id);
+            if (br.turnIdx === -1) return;
+          }
+        }
         const sentCards = msg.cards;
         const annNum = parseInt(msg.announceNum);
         if (!Array.isArray(sentCards) || sentCards.length < 1 || sentCards.length > 3) return;
@@ -894,20 +912,9 @@ wss.on('connection', (ws, req) => {
         });
         // Send updated hand to the player
         send(ws, { type: 'br-hand-update', hand: playerHand });
-        // Check if this player is now out of cards
-        if (playerHand.length === 0) {
-          br.finishOrder.push(id);
-          const rank = br.finishOrder.length;
-          broadcastRoom(room.id, { type: 'br-eliminate', playerId: id, rank });
-          log('info', 'br-eliminate', { roomId: room.id, playerId: id, name: conn.name, rank });
-          // Remove from turn order
-          br.turnOrder = br.turnOrder.filter(pid => pid !== id);
-          if (br.turnOrder.length <= 1) { endBluffRummy(room); return; }
-          // Fix turn index
-          br.turnIdx = br.turnIdx % br.turnOrder.length;
-        } else {
-          advanceBrTurn(room);
-        }
+        // If player has 0 cards, don't eliminate yet — next player gets a chance to challenge.
+        // Elimination happens when the next player plays (no challenge) or after challenge resolution.
+        advanceBrTurn(room);
         sendBrTurn(room);
         break;
       }
@@ -1362,6 +1369,46 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
+      // ── E-Game ───────────────────────────────────────────────
+      case 'eg-new': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'egame') return;
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2 players' }); return; }
+        startEGame(room);
+        break;
+      }
+      case 'eg-pick': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.eg || !room.eg.active) return;
+        const eg = room.eg;
+        const cardType = String(msg.card);
+        if (!['emperor', 'citizen', 'slave'].includes(cardType)) return;
+        // Check it's a valid player
+        if (!eg.hands.has(id)) return;
+        // Check player hasn't already picked
+        if (eg.picks.has(id)) return;
+        // Check card is in hand
+        const hand = eg.hands.get(id);
+        const cardIdx = hand.indexOf(cardType);
+        if (cardIdx === -1) return;
+        // Remove card from hand
+        hand.splice(cardIdx, 1);
+        eg.picks.set(id, cardType);
+        // Notify the picker they are waiting
+        send(ws, { type: 'eg-waiting' });
+        // Notify opponent they are being waited on
+        const oppId = eg.players.find(p => p !== id);
+        if (oppId && !eg.picks.has(oppId)) {
+          const oppPlayer = room.players.get(oppId);
+          if (oppPlayer) send(oppPlayer.ws, { type: 'eg-waiting' });
+        }
+        // If both picked, resolve
+        if (eg.picks.size === 2) {
+          resolveEGameTurn(room);
+        }
+        break;
+      }
+
       case 'game-over': {
         const room = rooms.get(conn.roomId);
         if (!room) break;
@@ -1385,6 +1432,169 @@ wss.on('connection', (ws, req) => {
     broadcastLobby();
   });
 });
+
+// ── E-Game helpers ──────────────────────────────────────────────
+function buildEGameHand(side) {
+  // Emperor side: 1 emperor + 4 citizens. Slave side: 1 slave + 4 citizens.
+  const special = side === 'emperor' ? 'emperor' : 'slave';
+  return [special, 'citizen', 'citizen', 'citizen', 'citizen'];
+}
+
+function startEGame(room) {
+  const playerIds = [...room.players.keys()];
+  // Random assignment of sides
+  const shuffle = Math.random() < 0.5;
+  const sides = new Map();
+  sides.set(playerIds[0], shuffle ? 'emperor' : 'slave');
+  sides.set(playerIds[1], shuffle ? 'slave' : 'emperor');
+
+  const hands = new Map();
+  for (const pid of playerIds) {
+    hands.set(pid, buildEGameHand(sides.get(pid)));
+  }
+
+  room.eg = {
+    players: playerIds,
+    sides,
+    hands,
+    picks: new Map(),
+    round: 1,
+    turn: 1,
+    totalTurn: 1,
+    scores: new Map(playerIds.map(pid => [pid, 0])),
+    active: true,
+  };
+  room.status = 'playing';
+  broadcastLobby();
+
+  // Send start to each player
+  for (const [pid, p] of room.players) {
+    const oppId = playerIds.find(x => x !== pid);
+    send(p.ws, {
+      type: 'eg-start',
+      side: sides.get(pid),
+      hand: hands.get(pid),
+      round: 1,
+      turn: 1,
+      scores: { you: 0, opp: 0 },
+      oppName: room.players.get(oppId)?.name || 'Opponent',
+    });
+  }
+  log('info', 'eg-start', { roomId: room.id, players: playerIds.length });
+}
+
+function resolveEGameTurn(room) {
+  const eg = room.eg;
+  const [p1, p2] = eg.players;
+  const c1 = eg.picks.get(p1);
+  const c2 = eg.picks.get(p2);
+
+  // Determine winner of this turn
+  function getResult(a, b) {
+    if (a === b) return 'draw';
+    if (a === 'emperor' && b === 'citizen') return 'win';
+    if (a === 'citizen' && b === 'slave') return 'win';
+    if (a === 'slave' && b === 'emperor') return 'win';
+    return 'lose';
+  }
+
+  const r1 = getResult(c1, c2);
+  const r2 = getResult(c2, c1);
+
+  // Award points
+  if (r1 === 'win') {
+    const pts = eg.sides.get(p1) === 'slave' ? 3 : 1;
+    eg.scores.set(p1, eg.scores.get(p1) + pts);
+  }
+  if (r2 === 'win') {
+    const pts = eg.sides.get(p2) === 'slave' ? 3 : 1;
+    eg.scores.set(p2, eg.scores.get(p2) + pts);
+  }
+
+  // Advance turn/round
+  const nextTotalTurn = eg.totalTurn + 1;
+  const isGameOver = nextTotalTurn > 12;
+  const isRoundOver = eg.turn >= 3 && !isGameOver;
+
+  const nextTurn = isRoundOver ? 1 : eg.turn + 1;
+  const nextRound = isRoundOver ? eg.round + 1 : eg.round;
+
+  // Send reveal to both players
+  for (const pid of eg.players) {
+    const oppId = eg.players.find(x => x !== pid);
+    const yourCard = eg.picks.get(pid);
+    const oppCard = eg.picks.get(oppId);
+    const result = pid === p1 ? r1 : r2;
+
+    const pConn = room.players.get(pid);
+    if (pConn) {
+      send(pConn.ws, {
+        type: 'eg-reveal',
+        yourCard,
+        oppCard,
+        result,
+        points: result === 'win' ? (eg.sides.get(pid) === 'slave' ? 3 : 1) : 0,
+        scores: { you: eg.scores.get(pid), opp: eg.scores.get(oppId) },
+        round: isGameOver ? eg.round : nextRound,
+        turn: isGameOver ? eg.turn : nextTurn,
+      });
+    }
+  }
+
+  log('info', 'eg-reveal', {
+    roomId: room.id, turn: eg.totalTurn,
+    p1card: c1, p2card: c2, r1, r2,
+  });
+
+  eg.picks.clear();
+  eg.totalTurn = nextTotalTurn;
+  eg.turn = nextTurn;
+  eg.round = nextRound;
+
+  if (isGameOver) {
+    // End the game
+    eg.active = false;
+    room.status = 'waiting';
+    broadcastLobby();
+
+    for (const pid of eg.players) {
+      const oppId = eg.players.find(x => x !== pid);
+      const myScore = eg.scores.get(pid);
+      const oppScore = eg.scores.get(oppId);
+      const winner = myScore > oppScore ? 'you' : myScore < oppScore ? 'opp' : 'tie';
+      const pConn = room.players.get(pid);
+      if (pConn) {
+        send(pConn.ws, {
+          type: 'eg-end',
+          scores: { you: myScore, opp: oppScore },
+          winner,
+        });
+      }
+    }
+    log('info', 'eg-end', { roomId: room.id, s1: eg.scores.get(p1), s2: eg.scores.get(p2) });
+  } else if (isRoundOver) {
+    // Swap sides and deal new hands after a short delay
+    setTimeout(() => {
+      for (const pid of eg.players) {
+        eg.sides.set(pid, eg.sides.get(pid) === 'emperor' ? 'slave' : 'emperor');
+        eg.hands.set(pid, buildEGameHand(eg.sides.get(pid)));
+      }
+      for (const pid of eg.players) {
+        const pConn = room.players.get(pid);
+        if (pConn) {
+          send(pConn.ws, {
+            type: 'eg-round-swap',
+            side: eg.sides.get(pid),
+            hand: eg.hands.get(pid),
+            round: eg.round,
+            turn: eg.turn,
+          });
+        }
+      }
+      log('info', 'eg-swap', { roomId: room.id, round: eg.round });
+    }, 2000);
+  }
+}
 
 // ── Bluff Rummy helpers ─────────────────────────────────────────
 // Remove all 4-of-a-kind sets from a player's hand in-place; broadcast each removal
@@ -1538,6 +1748,17 @@ function sendBrTurn(room) {
 function advanceBrTurn(room) {
   const br = room.br;
   br.turnIdx = (br.turnIdx + 1) % br.turnOrder.length;
+  // Skip players with 0 cards (awaiting challenge window to close)
+  let safety = br.turnOrder.length;
+  while (safety-- > 0) {
+    const pid = br.turnOrder[br.turnIdx];
+    const hand = br.hands.get(pid);
+    if (hand && hand.length === 0 && pid !== br.lastPlayerId) {
+      br.turnIdx = (br.turnIdx + 1) % br.turnOrder.length;
+    } else {
+      break;
+    }
+  }
 }
 
 function brCheckEliminations(room) {

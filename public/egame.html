@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E-Game — Game Arena</title>
+  <link rel="stylesheet" href="egame.css">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap"
+    rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">1</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
+        <h1 class="logo logo-sm">E-GAME</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-mobile-toggle" id="btnToggleChat" title="Chat">💬</button>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+
+      <div class="controls">
+        <button class="btn btn-primary" id="btnNewGame">New Game</button>
+      </div>
+
+      <div class="status" id="status">Connecting…</div>
+
+      <!-- Game info bar -->
+      <div class="game-info" id="gameInfo" style="display:none">
+        <div class="info-item">
+          <span class="info-label">Round</span>
+          <span class="info-value" id="infoRound">1/4</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Turn</span>
+          <span class="info-value" id="infoTurn">1/3</span>
+        </div>
+        <div class="info-item side-badge" id="infoSideBadge">
+          <span class="info-label">Your Side</span>
+          <span class="info-value" id="infoSide">—</span>
+        </div>
+      </div>
+
+      <!-- Opponent area -->
+      <div class="opponent-area" id="opponentArea" style="display:none">
+        <div class="opponent-label" id="opponentLabel">Opponent</div>
+        <div class="opponent-hand" id="opponentHand"></div>
+      </div>
+
+      <!-- Reveal / clash area -->
+      <div class="clash-area" id="clashArea" style="display:none">
+        <div class="clash-card" id="clashYour">
+          <div class="clash-card-inner"></div>
+          <div class="clash-label">You</div>
+        </div>
+        <div class="clash-vs">VS</div>
+        <div class="clash-card" id="clashOpp">
+          <div class="clash-card-inner"></div>
+          <div class="clash-label">Opponent</div>
+        </div>
+      </div>
+
+      <div class="turn-result" id="turnResult" style="display:none"></div>
+
+      <!-- Player hand -->
+      <div class="player-area" id="playerArea" style="display:none">
+        <div class="player-hand-label">Your Hand</div>
+        <div class="player-hand" id="playerHand"></div>
+      </div>
+
+      <!-- Scoreboard -->
+      <div class="scoreboard" id="scoreboard" style="display:none">
+        <div class="score-item your-score">
+          <span class="score-name" id="scoreYourName">You</span>
+          <span class="score-val" id="scoreYou">0</span>
+        </div>
+        <div class="score-item opp-score">
+          <span class="score-name" id="scoreOppName">Opponent</span>
+          <span class="score-val" id="scoreOpp">0</span>
+        </div>
+      </div>
+    </main>
+
+    <aside class="chat-panel">
+      <div class="chat-header">Chat</div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" type="text" placeholder="Message…" maxlength="200" autocomplete="off">
+        <button class="btn chat-send-btn" id="chatSend">&uarr;</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- OVERLAYS -->
+  <div class="overlay" id="resultOverlay">
+    <h2 class="result-title" id="resultTitle">YOU WIN!</h2>
+    <div class="result-scores" id="resultScores"></div>
+    <button class="btn btn-primary btn-lg" id="btnRematch">Rematch</button>
+  </div>
+
+  <!-- Rules panel -->
+  <div class="rules-panel" id="rulesPanel" style="display:none">
+    <div class="rules-card">
+      <button class="rules-close" id="rulesClose">✕</button>
+      <h2>E-Game Rules</h2>
+      <ul>
+        <li><strong>Players:</strong> 2 players, each with 5 cards per round.</li>
+        <li><strong>Cards:</strong> Emperor side gets <span class="card-emperor">1 Emperor</span> + 4 Citizens. Slave side gets <span class="card-slave">1 Slave</span> + 4 Citizens.</li>
+        <li><strong>Hierarchy:</strong>
+          <ul>
+            <li><span class="card-emperor">Emperor</span> beats <span class="card-citizen">Citizen</span></li>
+            <li><span class="card-citizen">Citizen</span> beats <span class="card-slave">Slave</span></li>
+            <li><span class="card-slave">Slave</span> beats <span class="card-emperor">Emperor</span></li>
+            <li><span class="card-citizen">Citizen</span> vs <span class="card-citizen">Citizen</span> = Draw</li>
+          </ul>
+        </li>
+        <li><strong>Gameplay:</strong> Both players pick a card simultaneously. Cards are revealed once both have chosen.</li>
+        <li><strong>Rounds:</strong> After every 3 turns, sides swap. 4 rounds × 3 turns = 12 turns total.</li>
+        <li><strong>Scoring:</strong> Win as Emperor = 1 point. Win as Slave = 3 points.</li>
+        <li><strong>Winner:</strong> Highest score after 12 turns wins.</li>
+      </ul>
+    </div>
+  </div>
+
+  <canvas class="confetti-canvas" id="confetti"></canvas>
+
+  <script src="egame.js"></script>
+</body>
+
+</html>

@@ -30,6 +30,7 @@
     <h1 class="topbar-logo">BLUFF RUMMY</h1>
     <span class="topbar-room" id="roomBadge"></span>
     <span class="topbar-status" id="status">Connecting&hellip;</span>
+    <button class="topbar-btn" id="btnRules" title="Rules">📜</button>
     <button class="topbar-btn" id="btnToggleChat" title="Chat">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
     </button>
@@ -131,6 +132,28 @@
   </div>
 
   <canvas id="confetti"></canvas>
+
+  <!-- Rules panel -->
+  <div class="rules-panel" id="rulesPanel" style="display:none">
+    <div class="rules-card">
+      <button class="rules-close" id="rulesClose">✕</button>
+      <h2>Bluff Rummy Rules</h2>
+      <ul>
+        <li><strong>Setup:</strong> 52 cards dealt evenly among 2–4 players. Any 4-of-a-kind in your initial hand is auto-discarded.</li>
+        <li><strong>Gameplay:</strong> On your turn, play 1–3 cards face-down to the meld pile and announce a number (e.g. "Kings").</li>
+        <li><strong>Bluffing:</strong> You can lie about what you played! The cards don't have to match your announcement.</li>
+        <li><strong>Challenge:</strong> After any play, the next player can challenge. Cards are revealed:
+          <ul>
+            <li>If it was a bluff — the bluffer takes the entire meld pile.</li>
+            <li>If it was honest — the challenger takes the pile.</li>
+          </ul>
+        </li>
+        <li><strong>4-of-a-kind:</strong> If you collect all 4 cards of the same number, they are auto-discarded.</li>
+        <li><strong>Last card:</strong> Playing your last card doesn't win immediately — the next player can still challenge!</li>
+        <li><strong>Winning:</strong> First player to get rid of all their cards wins!</li>
+      </ul>
+    </div>
+  </div>
 
   <!-- ── Disconnect vote overlay ── -->
   <div class="overlay" id="disconnectVoteOverlay">

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════
-   INFINITE TIC TAC TOE — Arena Room Client  |  tictactoe.js
+   E-GAME — Arena Room Client  |  egame.js
    ═══════════════════════════════════════════════════════════════════ */
 (() => {
   'use strict';
@@ -17,33 +17,56 @@
   const roomBadge = $('roomBadge'), btnBack = $('btnBack');
   const btnNewGame = $('btnNewGame'), btnRematch = $('btnRematch');
   const resultOverlay = $('resultOverlay'), resultTitle = $('resultTitle');
+  const resultScores = $('resultScores');
   const confettiCvs = $('confetti'), cctx = confettiCvs.getContext('2d');
   const chatMessages = $('chatMessages'), chatInput = $('chatInput'), chatSend = $('chatSend');
-  const scoreXEl = $('scoreX'), scoreOEl = $('scoreO'), scoreDrawEl = $('scoreDraw');
-  const boardEl = $('board');
-  const cells = [...boardEl.querySelectorAll('.cell')];
-  const winLineEl = $('winLine');
+  const gameInfo = $('gameInfo');
+  const infoRound = $('infoRound'), infoTurn = $('infoTurn'), infoSide = $('infoSide');
+  const infoSideBadge = $('infoSideBadge');
+  const opponentArea = $('opponentArea'), opponentHand = $('opponentHand'), opponentLabel = $('opponentLabel');
+  const playerArea = $('playerArea'), playerHand = $('playerHand');
+  const clashArea = $('clashArea');
+  const clashYour = $('clashYour').querySelector('.clash-card-inner');
+  const clashOpp = $('clashOpp').querySelector('.clash-card-inner');
+  const turnResult = $('turnResult');
+  const scoreYouEl = $('scoreYou'), scoreOppEl = $('scoreOpp');
+  const scoreYourName = $('scoreYourName'), scoreOppName = $('scoreOppName');
+  const scoreboard = $('scoreboard');
+  const btnRules = $('btnRules'), rulesPanel = $('rulesPanel'), rulesClose = $('rulesClose');
+  const btnToggleSidebar = $('btnToggleSidebar'), btnToggleChat = $('btnToggleChat');
 
   roomBadge.textContent = 'Room ' + roomId;
 
-  // ── Constants ────────────────────────────────────────────────────
-  const WIN_COMBOS = [
-    [0,1,2],[3,4,5],[6,7,8], // rows
-    [0,3,6],[1,4,7],[2,5,8], // cols
-    [0,4,8],[2,4,6],         // diagonals
-  ];
-  const MAX_PIECES = 3; // each player keeps max 3 pieces
+  // ── Card display helpers ─────────────────────────────────────────
+  const CARD_ICONS = { emperor: '👑', citizen: '🛡️', slave: '⛓️' };
+  const CARD_LABELS = { emperor: 'Emperor', citizen: 'Citizen', slave: 'Slave' };
+
+  function makeCardEl(type, clickable) {
+    const el = document.createElement('div');
+    el.className = 'e-card ' + type;
+    el.innerHTML = `<div class="card-icon">${CARD_ICONS[type]}</div><div class="card-label">${CARD_LABELS[type]}</div>`;
+    el.dataset.type = type;
+    if (clickable) el.addEventListener('click', () => onCardClick(el));
+    return el;
+  }
+
+  function makeFaceDownCard() {
+    const el = document.createElement('div');
+    el.className = 'e-card face-down';
+    return el;
+  }
 
   // ── State ────────────────────────────────────────────────────────
   let ws = null, myId = null;
   const others = new Map();
-  let mySymbol = null;   // 'X' or 'O', assigned on ttt-start
-  let board = Array(9).fill(null);  // null | 'X' | 'O'
-  let xHistory = [];     // indices of X moves in order
-  let oHistory = [];     // indices of O moves in order
-  let currentTurn = 'X';
+  let mySide = null;        // 'emperor' or 'slave'
+  let myHand = [];           // array of card types: ['emperor','citizen','citizen','citizen','citizen']
+  let oppCardCount = 5;
+  let picked = false;
+  let round = 1, turn = 1;
+  let myScore = 0, oppScore = 0;
   let gameActive = false;
-  let scores = { X: 0, O: 0, draw: 0 };
+  let oppName = 'Opponent';
 
   function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -59,9 +82,10 @@
       sessionStorage.removeItem('arena-room-password');
       wsSend({ type: 'join-room', roomId, name: myName, password, token: sessionStorage.getItem('arena-token') || '' });
     };
-    ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch { } };
+    ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch {} };
     ws.onclose = () => { statusEl.textContent = 'Disconnected. Returning to lobby…'; setTimeout(() => location.href = '/', 3000); };
   }
+
   function wsSend(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
 
   function handleMsg(msg) {
@@ -88,16 +112,24 @@
         }
         break;
 
-      case 'ttt-start':
-        startGame(msg.xPlayer, msg.oPlayer);
+      case 'eg-start':
+        onGameStart(msg);
         break;
 
-      case 'ttt-move':
-        applyMove(msg.cell, msg.symbol);
+      case 'eg-waiting':
+        statusEl.textContent = 'Waiting for opponent to pick…';
         break;
 
-      case 'ttt-win':
-        handleWin(msg.winner, msg.combo);
+      case 'eg-reveal':
+        onReveal(msg);
+        break;
+
+      case 'eg-round-swap':
+        onRoundSwap(msg);
+        break;
+
+      case 'eg-end':
+        onGameEnd(msg);
         break;
 
       case 'chat':
@@ -114,131 +146,195 @@
   //  GAME LOGIC
   // ══════════════════════════════════════════════════════════════════
 
-  function resetBoard() {
-    board = Array(9).fill(null);
-    xHistory = [];
-    oHistory = [];
-    currentTurn = 'X';
-    gameActive = false;
-    winLineEl.classList.remove('show');
-    cells.forEach(c => {
-      c.classList.remove('taken', 'win-cell');
-      c.innerHTML = '';
-    });
-  }
-
-  function startGame(xPlayerId, oPlayerId) {
-    resetBoard();
+  function onGameStart(msg) {
     gameActive = true;
+    picked = false;
     resultOverlay.classList.remove('show');
+    clashArea.style.display = 'none';
+    turnResult.style.display = 'none';
 
-    // Determine my symbol
-    if (xPlayerId === 'self' || xPlayerId === myId) {
-      mySymbol = 'X';
-    } else if (oPlayerId === 'self' || oPlayerId === myId) {
-      mySymbol = 'O';
+    mySide = msg.side;
+    myHand = msg.hand.slice();
+    oppCardCount = 5;
+    round = msg.round;
+    turn = msg.turn;
+    myScore = msg.scores.you;
+    oppScore = msg.scores.opp;
+    oppName = msg.oppName || 'Opponent';
+
+    // Update display
+    gameInfo.style.display = 'flex';
+    opponentArea.style.display = 'flex';
+    playerArea.style.display = 'flex';
+    scoreboard.style.display = 'flex';
+
+    opponentLabel.textContent = oppName;
+    scoreYourName.textContent = 'You';
+    scoreOppName.textContent = oppName;
+
+    updateInfoBar();
+    updateScores();
+    renderMyHand();
+    renderOppHand();
+    updateSideBadges();
+    statusEl.textContent = 'Pick a card to play!';
+  }
+
+  function onCardClick(el) {
+    if (!gameActive || picked) return;
+    if (el.classList.contains('used')) return;
+
+    const cardType = el.dataset.type;
+    picked = true;
+    el.classList.add('picked');
+    statusEl.textContent = 'Waiting for opponent…';
+
+    wsSend({ type: 'eg-pick', card: cardType });
+  }
+
+  function onReveal(msg) {
+    const yourCard = msg.yourCard;
+    const oppCard = msg.oppCard;
+    const result = msg.result;     // 'win', 'lose', 'draw'
+    const points = msg.points;
+
+    // Update scores
+    myScore = msg.scores.you;
+    oppScore = msg.scores.opp;
+    updateScores();
+
+    // Remove the played card from hand
+    const idx = myHand.indexOf(yourCard);
+    if (idx !== -1) myHand.splice(idx, 1);
+    oppCardCount--;
+
+    // Show clash animation
+    clashArea.style.display = 'flex';
+    clashArea.classList.remove('animate');
+    void clashArea.offsetWidth; // force reflow
+    clashArea.classList.add('animate');
+
+    setClashCard(clashYour, yourCard);
+    setClashCard(clashOpp, oppCard);
+
+    // Show result text
+    turnResult.style.display = 'block';
+    turnResult.className = 'turn-result ' + result;
+    if (result === 'win') {
+      const pts = mySide === 'slave' ? 3 : 1;
+      turnResult.textContent = 'YOU WIN! +' + pts + (pts > 1 ? ' pts' : ' pt');
+    } else if (result === 'lose') {
+      turnResult.textContent = 'YOU LOSE';
     } else {
-      mySymbol = null; // spectator
+      turnResult.textContent = 'DRAW';
     }
 
-    // Update player card symbols
-    updateSymbolBadges(xPlayerId, oPlayerId);
-    updateTurnStatus();
+    // Re-render hands (with used cards removed)
+    renderMyHand();
+    renderOppHand();
+
+    // Advance turn display
+    turn = msg.turn;
+    round = msg.round;
+    updateInfoBar();
+
+    statusEl.textContent = result === 'win' ? 'You won this turn!' : result === 'lose' ? 'You lost this turn.' : 'Draw — no points.';
+    picked = false;
   }
 
-  function updateSymbolBadges(xId, oId) {
-    // Remove old symbol badges
-    document.querySelectorAll('.pc-symbol').forEach(el => el.remove());
+  function onRoundSwap(msg) {
+    mySide = msg.side;
+    myHand = msg.hand.slice();
+    oppCardCount = 5;
+    round = msg.round;
+    turn = msg.turn;
 
-    function addBadge(id, sym) {
-      const sel = id === 'self' ? '.player-card[data-id="self"]' : `.player-card[data-id="${id}"]`;
-      const card = document.querySelector(sel);
-      if (!card) return;
-      const badge = document.createElement('span');
-      badge.className = 'pc-symbol ' + (sym === 'X' ? 'x-sym' : 'o-sym');
-      badge.textContent = sym === 'X' ? '✕' : '○';
-      card.appendChild(badge);
-    }
-    addBadge(xId, 'X');
-    addBadge(oId, 'O');
+    updateInfoBar();
+    renderMyHand();
+    renderOppHand();
+    updateSideBadges();
+
+    clashArea.style.display = 'none';
+    turnResult.style.display = 'none';
+    picked = false;
+    statusEl.textContent = 'Sides swapped! You are now ' + mySide.toUpperCase() + '. Pick a card!';
   }
 
-  function updateTurnStatus() {
-    if (!gameActive) return;
-    const isMyTurn = mySymbol === currentTurn;
-    if (mySymbol) {
-      statusEl.textContent = isMyTurn ? `Your turn (${mySymbol === 'X' ? '✕' : '○'})` : `Opponent's turn…`;
-    } else {
-      statusEl.textContent = `${currentTurn}'s turn`;
-    }
-  }
-
-  function onCellClick(idx) {
-    if (!gameActive || !mySymbol || currentTurn !== mySymbol) return;
-    if (board[idx] !== null) return;
-    // Send move to server — server validates and broadcasts
-    wsSend({ type: 'ttt-move', cell: idx });
-  }
-
-  function applyMove(idx, symbol) {
-    const history = symbol === 'X' ? xHistory : oHistory;
-
-    // If at max pieces, remove the oldest
-    if (history.length >= MAX_PIECES) {
-      const oldIdx = history.shift();
-      board[oldIdx] = null;
-      const oldCell = cells[oldIdx];
-      const oldPiece = oldCell.querySelector('.piece');
-      if (oldPiece) oldPiece.remove();
-      oldCell.classList.remove('taken');
-    }
-
-    // Mark the next-to-be-removed piece as fading
-    cells.forEach(c => {
-      const p = c.querySelector('.piece.fading');
-      if (p) p.classList.remove('fading');
-    });
-    if (history.length >= MAX_PIECES - 1 && history.length > 0) {
-      const fadingIdx = history[0];
-      const fadingPiece = cells[fadingIdx].querySelector('.piece');
-      if (fadingPiece) fadingPiece.classList.add('fading');
-    }
-
-    // Place the new piece
-    board[idx] = symbol;
-    history.push(idx);
-    const cell = cells[idx];
-    cell.classList.add('taken');
-    const piece = document.createElement('div');
-    piece.className = 'piece ' + (symbol === 'X' ? 'x-piece' : 'o-piece');
-    cell.appendChild(piece);
-
-    // Switch turn
-    currentTurn = symbol === 'X' ? 'O' : 'X';
-    updateTurnStatus();
-  }
-
-  function handleWin(winner, combo) {
+  function onGameEnd(msg) {
     gameActive = false;
-    if (winner === 'draw') {
-      scores.draw++;
-      resultTitle.textContent = 'DRAW!';
-    } else {
-      scores[winner]++;
-      resultTitle.textContent = (winner === 'X' ? '✕' : '○') + ' WINS!';
-      if (combo) {
-        for (const i of combo) cells[i].classList.add('win-cell');
-      }
-      if (mySymbol === winner) {
-        launchConfetti();
-        if (typeof reportScore === 'function') reportScore('tictactoe', 1);
-      }
+    myScore = msg.scores.you;
+    oppScore = msg.scores.opp;
+    updateScores();
+
+    const won = msg.winner === 'you';
+    const tied = msg.winner === 'tie';
+
+    resultTitle.textContent = tied ? 'TIE GAME!' : (won ? 'YOU WIN!' : 'YOU LOSE');
+    resultScores.innerHTML =
+      `<span class="rs-you">You: ${myScore}</span>` +
+      `<span class="rs-opp">${escapeHtml(oppName)}: ${oppScore}</span>`;
+
+    setTimeout(() => resultOverlay.classList.add('show'), 1000);
+
+    if (won) {
+      launchConfetti();
+      if (typeof reportScore === 'function') reportScore('egame', 1);
     }
-    scoreXEl.textContent = scores.X;
-    scoreOEl.textContent = scores.O;
-    scoreDrawEl.textContent = scores.draw;
-    statusEl.textContent = winner === 'draw' ? 'Draw!' : (winner === 'X' ? '✕' : '○') + ' wins!';
-    setTimeout(() => resultOverlay.classList.add('show'), 800);
+  }
+
+  // ── Rendering ────────────────────────────────────────────────────
+
+  function setClashCard(el, type) {
+    el.className = 'clash-card-inner ' + type;
+    el.innerHTML = `<div class="card-icon">${CARD_ICONS[type]}</div><div class="card-label">${CARD_LABELS[type]}</div>`;
+  }
+
+  function renderMyHand() {
+    playerHand.innerHTML = '';
+    for (const type of myHand) {
+      playerHand.appendChild(makeCardEl(type, true));
+    }
+  }
+
+  function renderOppHand() {
+    opponentHand.innerHTML = '';
+    for (let i = 0; i < oppCardCount; i++) {
+      opponentHand.appendChild(makeFaceDownCard());
+    }
+  }
+
+  function updateInfoBar() {
+    infoRound.textContent = round + '/4';
+    infoTurn.textContent = turn + '/3';
+    const sideEl = infoSide;
+    sideEl.textContent = mySide ? mySide.toUpperCase() : '—';
+    sideEl.className = 'info-value ' + (mySide || '');
+  }
+
+  function updateScores() {
+    scoreYouEl.textContent = myScore;
+    scoreOppEl.textContent = oppScore;
+  }
+
+  function updateSideBadges() {
+    // Update player cards with side badges
+    document.querySelectorAll('.pc-side').forEach(el => el.remove());
+
+    const myCard = document.querySelector('.player-card[data-id="self"]');
+    if (myCard && mySide) {
+      const badge = document.createElement('span');
+      badge.className = 'pc-side ' + mySide;
+      badge.textContent = mySide === 'emperor' ? '👑' : '⛓️';
+      myCard.appendChild(badge);
+    }
+
+    const oppSide = mySide === 'emperor' ? 'slave' : 'emperor';
+    for (const [, info] of others) {
+      const badge = document.createElement('span');
+      badge.className = 'pc-side ' + oppSide;
+      badge.textContent = oppSide === 'emperor' ? '👑' : '⛓️';
+      info.el.appendChild(badge);
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -309,7 +405,7 @@
     confettiCvs.width = window.innerWidth;
     confettiCvs.height = window.innerHeight;
     const particles = [];
-    const colors = ['#f472b6', '#38bdf8', '#fbbf24', '#34d399', '#a78bfa', '#fb923c'];
+    const colors = ['#fbbf24', '#f472b6', '#38bdf8', '#34d399', '#a78bfa', '#fb923c'];
     for (let i = 0; i < 150; i++) {
       particles.push({
         x: Math.random() * confettiCvs.width, y: Math.random() * confettiCvs.height - confettiCvs.height,
@@ -335,19 +431,33 @@
   }
 
   // ══════════════════════════════════════════════════════════════════
+  //  RULES PANEL
+  // ══════════════════════════════════════════════════════════════════
+
+  btnRules.addEventListener('click', () => { rulesPanel.style.display = 'flex'; });
+  rulesClose.addEventListener('click', () => { rulesPanel.style.display = 'none'; });
+  rulesPanel.addEventListener('click', e => { if (e.target === rulesPanel) rulesPanel.style.display = 'none'; });
+
+  // ══════════════════════════════════════════════════════════════════
+  //  MOBILE TOGGLES
+  // ══════════════════════════════════════════════════════════════════
+
+  btnToggleSidebar.addEventListener('click', () => {
+    document.querySelector('.sidebar').classList.toggle('open');
+    document.querySelector('.chat-panel').classList.remove('open');
+  });
+  btnToggleChat.addEventListener('click', () => {
+    document.querySelector('.chat-panel').classList.toggle('open');
+    document.querySelector('.sidebar').classList.remove('open');
+  });
+
+  // ══════════════════════════════════════════════════════════════════
   //  EVENT LISTENERS
   // ══════════════════════════════════════════════════════════════════
 
-  cells.forEach((cell, i) => cell.addEventListener('click', () => onCellClick(i)));
-  btnNewGame.addEventListener('click', () => wsSend({ type: 'ttt-new' }));
-  btnRematch.addEventListener('click', () => { resultOverlay.classList.remove('show'); wsSend({ type: 'ttt-new' }); });
+  btnNewGame.addEventListener('click', () => wsSend({ type: 'eg-new' }));
+  btnRematch.addEventListener('click', () => { resultOverlay.classList.remove('show'); wsSend({ type: 'eg-new' }); });
   btnBack.addEventListener('click', () => { wsSend({ type: 'leave-room' }); location.href = '/'; });
-
-  // Rules panel
-  const rulesPanel = document.getElementById('rulesPanel');
-  document.getElementById('btnRules').addEventListener('click', () => { rulesPanel.style.display = 'flex'; });
-  document.getElementById('rulesClose').addEventListener('click', () => { rulesPanel.style.display = 'none'; });
-  rulesPanel.addEventListener('click', e => { if (e.target === rulesPanel) rulesPanel.style.display = 'none'; });
 
   // ══════════════════════════════════════════════════════════════════
   //  INIT

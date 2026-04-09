@@ -137,7 +137,7 @@
   // ── Globals ──────────────────────────────────────────────────────
   let ws = null, myId = null;
   const others = new Map();
-  let inBattle = false;
+  let inBattle = false, wasInBattle = false;
   const game = new TetrisEngine();
   let cellSize = 28, lastTime = 0, stateThrottle = null;
   const AI_ID = '__ai__';
@@ -853,7 +853,7 @@
         countdownOvl.classList.remove('show'); gameOverOvl.classList.remove('show');
         startGame(); statusEl.textContent = 'BATTLE! Clear lines to send garbage!'; break;
       case 'battle-end':
-        inBattle = false;
+        inBattle = false; wasInBattle = true;
         if (msg.winner) { goTitle.textContent = msg.winner.id === myId ? 'YOU WIN!' : msg.winner.name + ' WINS!'; if (msg.winner.id === myId) { launchConfetti(); if (typeof reportScore === 'function') reportScore('tetris', game.score); } }
         else goTitle.textContent = 'DRAW!';
         goScore.textContent = game.score; goLines.textContent = game.lines; goLevel.textContent = game.level;
@@ -1235,6 +1235,7 @@
   }
   function startGame() {
     currentMode = modeSelect.value;
+    wasInBattle = false;
     modeTimer = currentMode === 'ultra' ? 120000 : 0;
     modeActive = true;
     survivalAccum = 0; survivalGapMs = 9000; survivalWave = 0;
@@ -1305,8 +1306,20 @@
   btnStart.addEventListener('click', startGame);
   btnBattle.addEventListener('click', () => wsSend({ type: 'start-battle' }));
   btnVsAI.addEventListener('click', toggleAI);
-  btnRestart.addEventListener('click', () => { gameOverOvl.classList.remove('show'); cctx.clearRect(0, 0, confettiCvs.width, confettiCvs.height); startGame(); });
+  btnRestart.addEventListener('click', () => {
+    gameOverOvl.classList.remove('show');
+    cctx.clearRect(0, 0, confettiCvs.width, confettiCvs.height);
+    if (wasInBattle) { wasInBattle = false; wsSend({ type: 'start-battle' }); }
+    else startGame();
+  });
   btnBack.addEventListener('click', () => { wsSend({ type: 'leave-room' }); location.href = '/'; });
+
+  // Rules panel
+  const rulesPanel = document.getElementById('rulesPanel');
+  document.getElementById('btnRules').addEventListener('click', () => { rulesPanel.style.display = 'flex'; });
+  document.getElementById('rulesClose').addEventListener('click', () => { rulesPanel.style.display = 'none'; });
+  rulesPanel.addEventListener('click', e => { if (e.target === rulesPanel) rulesPanel.style.display = 'none'; });
+
   window.addEventListener('resize', sizeCanvases);
 
   // ══════════════════════════════════════════════════════════════════

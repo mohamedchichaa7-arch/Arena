@@ -40,6 +40,7 @@
         <h1 class="logo logo-sm">MAZE RUNNER</h1>
         <span class="room-badge" id="roomBadge"></span>
         <button class="btn btn-mobile-toggle" id="btnToggleChat" title="Chat">💬</button>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
       </header>
       <div class="controls">
         <label>Size <select id="sizeSelect">
@@ -119,6 +120,23 @@
       id="btnRaceClose">Continue</button>
   </div>
   <canvas id="confetti"></canvas>
+
+  <!-- Rules panel -->
+  <div class="rules-panel" id="rulesPanel" style="display:none">
+    <div class="rules-card">
+      <button class="rules-close" id="rulesClose">✕</button>
+      <h2>Maze Runner Rules</h2>
+      <ul>
+        <li><strong>Goal:</strong> Navigate from the green start to the yellow star goal as fast as possible.</li>
+        <li><strong>Controls:</strong> Arrow keys (←↑→↓) or swipe on mobile to move.</li>
+        <li><strong>Race mode:</strong> Compete against other players to finish first. "Same Map" shares the layout; "Own Maps" generates unique mazes.</li>
+        <li><strong>VS AI:</strong> Race against an AI opponent with adjustable difficulty.</li>
+        <li><strong>Algorithms:</strong> Try different maze generation algorithms for varied difficulty and style.</li>
+        <li><strong>Scoring:</strong> Your best time is saved to the leaderboard (lower is better).</li>
+      </ul>
+    </div>
+  </div>
+
   <div class="panel-backdrop" id="panelBackdrop"></div>
   <script>
     (function () {

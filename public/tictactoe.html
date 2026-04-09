@@ -41,6 +41,7 @@
         <h1 class="logo logo-sm">INFINITE TIC TAC TOE</h1>
         <span class="room-badge" id="roomBadge"></span>
         <button class="btn btn-mobile-toggle" id="btnToggleChat" title="Chat">💬</button>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
       </header>
 
       <div class="controls">
@@ -100,6 +101,22 @@
     <button class="btn btn-primary btn-lg" id="btnRematch">Rematch</button>
   </div>
   <canvas id="confetti"></canvas>
+
+  <!-- Rules panel -->
+  <div class="rules-panel" id="rulesPanel" style="display:none">
+    <div class="rules-card">
+      <button class="rules-close" id="rulesClose">✕</button>
+      <h2>Infinite Tic Tac Toe Rules</h2>
+      <ul>
+        <li><strong>Players:</strong> 2 players — one plays ✕, the other ○.</li>
+        <li><strong>Turns:</strong> Players take turns placing their mark on the 3×3 grid.</li>
+        <li><strong>Vanishing rule:</strong> Each player can have at most 3 pieces on the board. When you place a 4th, your oldest piece vanishes.</li>
+        <li><strong>Winning:</strong> Get 3 of your marks in a row (horizontal, vertical, or diagonal).</li>
+        <li><strong>Strategy:</strong> The vanishing mechanic means you can't just block — positions change every turn!</li>
+      </ul>
+    </div>
+  </div>
+
   <div class="panel-backdrop" id="panelBackdrop"></div>
   <script>
     (function () {

@@ -10,6 +10,7 @@
 
 <div class="topbar">
   <a class="topbar-logo" href="/">⚓ Arena</a>
+  <button class="topbar-btn-rules" id="btnRules">📜 Rules</button>
   <span class="topbar-right" id="topbarUser"></span>
 </div>
 
@@ -96,6 +97,21 @@
 
 <!-- Canvas for explosion particles -->
 <canvas id="fxCanvas" class="fx-canvas"></canvas>
+
+<!-- Rules panel -->
+<div class="rules-panel" id="rulesPanel" style="display:none">
+  <div class="rules-card">
+    <button class="rules-close" id="rulesClose">✕</button>
+    <h2>Sea Battle Rules</h2>
+    <ul>
+      <li><strong>Setup:</strong> Place your 5 ships on the grid. Ships cannot overlap.</li>
+      <li><strong>Ships:</strong> Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2).</li>
+      <li><strong>Gameplay:</strong> Take turns firing at your opponent's grid. Hit = you go again. Miss = opponent's turn.</li>
+      <li><strong>Sinking:</strong> A ship is sunk when all its cells are hit.</li>
+      <li><strong>Winning:</strong> First player to sink all 5 enemy ships wins.</li>
+    </ul>
+  </div>
+</div>
 
 <script src="/firebase-init.js"></script>
 <script src="/battleship.js"></script>

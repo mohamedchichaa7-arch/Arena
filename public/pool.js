@@ -2128,6 +2128,12 @@
     });
     $('btnBackLobby').addEventListener('click', () => { location.href = '/'; });
 
+    // Rules panel
+    const rulesPanel = $('rulesPanel');
+    $('btnRules').addEventListener('click', () => { rulesPanel.style.display = 'flex'; });
+    $('rulesClose').addEventListener('click', () => { rulesPanel.style.display = 'none'; });
+    rulesPanel.addEventListener('click', e => { if (e.target === rulesPanel) rulesPanel.style.display = 'none'; });
+
     requestAnimationFrame(loop);
   }
 

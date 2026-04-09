@@ -1128,6 +1128,12 @@
   btnRaceClose.addEventListener('click', () => { raceResultsOverlay.classList.remove('show'); });
   btnBack.addEventListener('click', () => { wsSend({ type: 'leave-room' }); location.href = '/'; });
 
+  // Rules panel
+  const rulesPanel = document.getElementById('rulesPanel');
+  document.getElementById('btnRules').addEventListener('click', () => { rulesPanel.style.display = 'flex'; });
+  document.getElementById('rulesClose').addEventListener('click', () => { rulesPanel.style.display = 'none'; });
+  rulesPanel.addEventListener('click', e => { if (e.target === rulesPanel) rulesPanel.style.display = 'none'; });
+
   document.addEventListener('keydown', e => {
     switch (e.key) {
       case 'ArrowUp': e.preventDefault(); movePlayer(-1, 0); break;

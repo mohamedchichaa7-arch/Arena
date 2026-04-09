@@ -581,6 +581,20 @@ body {
   display: block
 }
 
+/* Rules panel */
+.btn-rules { background: var(--card); color: var(--dim); border: 1px solid var(--border); }
+.btn-rules:hover { color: var(--gold, #fbbf24); border-color: var(--gold, #fbbf24); }
+.rules-panel { position: fixed; inset: 0; background: rgba(10,10,26,.8); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.rules-card { background: var(--surface); border: 1px solid var(--border); border-radius: .8rem; padding: 1.5rem 2rem; max-width: 500px; width: 90%; position: relative; max-height: 80vh; overflow-y: auto; }
+.rules-card h2 { font-family: 'Orbitron', sans-serif; font-size: 1rem; margin-bottom: .8rem; color: var(--primary); }
+.rules-card ul { list-style: none; padding: 0; }
+.rules-card li { font-size: .8rem; line-height: 1.6; padding: .3rem 0; border-bottom: 1px solid rgba(42,42,90,.4); }
+.rules-card li:last-child { border-bottom: none; }
+.rules-card li ul { margin-top: .3rem; margin-left: .8rem; }
+.rules-card li ul li { font-size: .75rem; border-bottom: none; padding: .15rem 0; }
+.rules-close { position: absolute; top: .6rem; right: .8rem; background: none; border: none; color: var(--dim); font-size: 1.2rem; cursor: pointer; }
+.rules-close:hover { color: var(--text); }
+
 /* ═══════════════ MOBILE ═══════════════ */
 @media (max-width: 768px) {
   html, body {

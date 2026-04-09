@@ -63,6 +63,7 @@
           <button class="btn btn-ai" id="btnVsAI">VS AI</button>
         </div>
         <button class="btn btn-skin" id="btnSkin">🎨 Skin</button>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
       </div>
 
       <div class="status" id="status">Connecting…</div>
@@ -130,6 +131,24 @@
     <button class="btn btn-primary btn-lg" id="btnRestart">Play Again</button>
   </div>
   <canvas id="confetti"></canvas>
+
+  <!-- Rules panel -->
+  <div class="rules-panel" id="rulesPanel" style="display:none">
+    <div class="rules-card">
+      <button class="rules-close" id="rulesClose">✕</button>
+      <h2>Tetris Rules</h2>
+      <ul>
+        <li><strong>Goal:</strong> Clear lines by completing full rows of blocks.</li>
+        <li><strong>Controls:</strong> ←→ Move • ↑ Rotate • ↓ Soft Drop • Space Hard Drop • C Hold</li>
+        <li><strong>Scoring:</strong> 1 line = 100 • 2 lines = 300 • 3 lines = 500 • 4 lines (Tetris) = 800, multiplied by level.</li>
+        <li><strong>Level up:</strong> Every 10 lines cleared increases the level and speed.</li>
+        <li><strong>Battle:</strong> Clear 2+ lines to send garbage rows to your opponent. 2 lines = 1 garbage, 3 = 2, Tetris = 4. Combos add bonus garbage.</li>
+        <li><strong>Garbage cancel:</strong> Your outgoing garbage cancels any pending incoming garbage first.</li>
+        <li><strong>Modes:</strong> Marathon (endless), Sprint (40 lines), Ultra (2 min), Survival (rising speed), Dig (clear garbage).</li>
+      </ul>
+    </div>
+  </div>
+
   <div class="panel-backdrop" id="panelBackdrop"></div>
   <script>
     (function () {

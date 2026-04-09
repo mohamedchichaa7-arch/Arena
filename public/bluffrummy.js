@@ -866,6 +866,12 @@
     location.href = '/';
   });
 
+  // Rules panel
+  const rulesPanel = document.getElementById('rulesPanel');
+  document.getElementById('btnRules').addEventListener('click', () => { rulesPanel.style.display = 'flex'; });
+  document.getElementById('rulesClose').addEventListener('click', () => { rulesPanel.style.display = 'none'; });
+  rulesPanel.addEventListener('click', e => { if (e.target === rulesPanel) rulesPanel.style.display = 'none'; });
+
   // ── Confetti ──────────────────────────────────────────────
   function fireConfetti() {
     const canvas = $('confetti');

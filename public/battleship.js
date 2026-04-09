@@ -950,6 +950,12 @@
     };
     $('btnToLobby').onclick = () => { location.href = '/'; };
 
+    // Rules panel
+    const rulesPanel = $('rulesPanel');
+    $('btnRules').onclick = () => { rulesPanel.style.display = 'flex'; };
+    $('rulesClose').onclick = () => { rulesPanel.style.display = 'none'; };
+    rulesPanel.onclick = e => { if (e.target === rulesPanel) rulesPanel.style.display = 'none'; };
+
     connectWS();
   }
 
