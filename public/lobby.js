@@ -239,7 +239,7 @@
     for (const r of rooms) {
       const card = document.createElement('div');
       card.className = 'room-card';
-      const icon = r.type === 'tetris' ? '\u{1F3AE}' : r.type === 'tictactoe' ? '\u2B55' : r.type === 'bluffrummy' ? '\u{1F0CF}' : r.type === 'rami' ? '\u{1F3B4}' : r.type === 'pool' ? '\u{1F3B1}' : r.type === 'battleship' ? '\u2693' : r.type === 'egame' ? '\u{1F451}' : '\u{1F3C1}';
+      const icon = r.type === 'tetris' ? '\u{1F3AE}' : r.type === 'tictactoe' ? '\u2B55' : r.type === 'bluffrummy' ? '\u{1F0CF}' : r.type === 'rami' ? '\u{1F3B4}' : r.type === 'pool' ? '\u{1F3B1}' : r.type === 'battleship' ? '\u2693' : r.type === 'egame' ? '\u{1F451}' : r.type === 'snakesladders' ? '\u{1F40D}' : '\u{1F3C1}';
       const statusCls = r.status === 'playing' ? 'playing' : 'waiting';
       const full = r.players >= r.maxPlayers;
       const lockBadge = r.locked ? '<span class="room-lock">\uD83D\uDD12</span>' : '';
@@ -270,6 +270,7 @@
     pool: 'Total wins',
     battleship: 'Total wins',
     egame: 'Total wins',
+    snakesladders: 'Total wins',
   };
 
   function openLeaderboard(game) {

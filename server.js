@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -473,6 +473,19 @@ function removeFromRoom(conn) {
     room.eg.active = false;
     room.eg = null;
   }
+  if (room.sl && room.sl.active) {
+    const wasTurn = room.sl.playerOrder[room.sl.turnIdx] === conn.id;
+    room.sl.playerOrder = room.sl.playerOrder.filter(pid => pid !== conn.id);
+    delete room.sl.positions[conn.id];
+    if (room.sl.playerOrder.length < 2) {
+      room.sl.active = false;
+      room.status = 'waiting';
+      broadcastRoom(room.id, { type: 'sl-aborted', reason: 'Not enough players' });
+    } else {
+      if (room.sl.turnIdx >= room.sl.playerOrder.length) room.sl.turnIdx = 0;
+      broadcastRoom(room.id, { type: 'sl-player-left', id: conn.id, nextTurnId: room.sl.playerOrder[room.sl.turnIdx] });
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -574,9 +587,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -645,6 +658,10 @@ wss.on('connection', (ws, req) => {
         let isBrReconnect = false;
         if (room.br?.active && room.br.disconnects?.has(conn.name)) isBrReconnect = true;
 
+        // Lock snakesladders rooms while game is running
+        if (room.status === 'playing' && room.type === 'snakesladders') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
         // Lock game-in-progress rooms to new players (allow BR reconnects)
         if (room.status === 'playing' && room.type === 'bluffrummy' && !isBrReconnect) {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
@@ -1422,6 +1439,58 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
+      // ── Snakes & Ladders ──────────────────────────────────
+      case 'sl-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'snakesladders') return;
+        if (room.sl?.active) { send(ws, { type: 'error', msg: 'A game is already in progress' }); return; }
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need at least 2 players' }); return; }
+        startSnakesLadders(room);
+        break;
+      }
+      case 'sl-roll': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.sl || !room.sl.active) return;
+        const sl = room.sl;
+        if (sl.playerOrder[sl.turnIdx] !== id) return;
+        const dice = Math.floor(Math.random() * 6) + 1;
+        const from = sl.positions[id] || 0;
+        const rawTo = from + dice;
+        let finalPos = from; // default: no move (overshoot)
+        let event = null;
+        if (rawTo <= 100) {
+          finalPos = rawTo;
+          if (SL_LADDERS[finalPos] !== undefined) {
+            event = 'ladder'; finalPos = SL_LADDERS[finalPos];
+          } else if (SL_SNAKES[finalPos] !== undefined) {
+            event = 'snake';  finalPos = SL_SNAKES[finalPos];
+          }
+        }
+        sl.positions[id] = finalPos;
+        const overshoot = rawTo > 100;
+        const winner = finalPos === 100 ? { id, name: conn.name } : null;
+        if (winner) {
+          sl.active = false;
+          room.status = 'waiting';
+          broadcastLobby();
+        } else {
+          sl.turnIdx = (sl.turnIdx + 1) % sl.playerOrder.length;
+        }
+        broadcastRoom(room.id, {
+          type: 'sl-rolled',
+          playerId: id, playerName: conn.name,
+          dice, from,
+          landedOn: overshoot ? from : rawTo,
+          finalPos, event, overshoot,
+          nextTurnId: winner ? null : sl.playerOrder[sl.turnIdx],
+          winner,
+          positions: { ...sl.positions },
+        });
+        log('info', 'sl-roll', { roomId: room.id, player: conn.name, dice, from, finalPos, event: event || 'none', overshoot });
+        if (winner) log('info', 'sl-win', { roomId: room.id, winner: conn.name });
+        break;
+      }
+
       case 'game-over': {
         const room = rooms.get(conn.roomId);
         if (!room) break;
@@ -1445,6 +1514,24 @@ wss.on('connection', (ws, req) => {
     broadcastLobby();
   });
 });
+
+// ── Snakes & Ladders helpers ─────────────────────────────────────
+const SL_SNAKES  = { 17:7, 54:34, 62:19, 64:60, 87:24, 93:73, 95:75, 99:78 };
+const SL_LADDERS = { 4:14, 9:31, 20:38, 28:84, 40:59, 51:67, 63:81, 71:91 };
+
+function startSnakesLadders(room) {
+  const playerOrder = [...room.players.keys()];
+  const positions = {};
+  for (const pid of playerOrder) positions[pid] = 0;
+  room.sl = { active: true, positions, playerOrder, turnIdx: 0 };
+  room.status = 'playing';
+  broadcastLobby();
+  const playersInfo = playerOrder.map((pid, i) => ({ id: pid, name: room.players.get(pid).name, colorIdx: i }));
+  for (const [pid, p] of room.players) {
+    send(p.ws, { type: 'sl-start', yourId: pid, players: playersInfo, positions: { ...positions }, turnId: playerOrder[0] });
+  }
+  log('info', 'sl-start', { roomId: room.id, players: playerOrder.length });
+}
 
 // ── E-Game helpers ──────────────────────────────────────────────
 function buildEGameHand(side) {
