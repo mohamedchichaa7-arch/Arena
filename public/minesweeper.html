@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Minesweeper — Game Arena</title>
+  <link rel="stylesheet" href="minesweeper.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+  <div class="layout">
+    <!-- Leaderboard Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Scoreboard</h3>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+      <div class="game-settings" id="gameSettings">
+        <label class="setting-label">Board Size
+          <select id="selBoardSize">
+            <option value="12">Small 12×12</option>
+            <option value="20" selected>Medium 20×20</option>
+            <option value="30">Large 30×30</option>
+          </select>
+        </label>
+        <label class="setting-label">Mines
+          <select id="selDensity">
+            <option value="12">Easy 12%</option>
+            <option value="18" selected>Normal 18%</option>
+            <option value="25">Brutal 25%</option>
+          </select>
+        </label>
+        <label class="setting-label">Time
+          <select id="selTime">
+            <option value="3">3 min</option>
+            <option value="5" selected>5 min</option>
+            <option value="10">10 min</option>
+          </select>
+        </label>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Scores">📊</button>
+        <h1 class="logo logo-sm">MINESWEEPER</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <div class="timer-display" id="timerDisplay">5:00</div>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+
+      <div class="controls">
+        <button class="btn btn-primary" id="btnStart">Start Game</button>
+      </div>
+
+      <div class="status" id="status">Connecting…</div>
+
+      <!-- Stun overlay -->
+      <div class="stun-overlay" id="stunOverlay" style="display:none">
+        <div class="stun-text">💥 STUNNED</div>
+        <div class="stun-timer" id="stunTimer">4.0s</div>
+      </div>
+
+      <!-- Frenzy indicator -->
+      <div class="frenzy-glow" id="frenzyGlow" style="display:none"></div>
+
+      <div class="board-wrap" id="boardWrap">
+        <div class="board" id="board"></div>
+      </div>
+
+      <!-- Power-up bar -->
+      <div class="powerup-bar" id="powerupBar" style="display:none">
+        <span class="pu-charges">Charges: <b id="chargeCount">0</b></span>
+        <button class="pu-btn" data-pu="reveal" title="Reveal 3×3 area safely">🔍</button>
+        <button class="pu-btn" data-pu="magnet" title="Place decoy trap">🧲</button>
+        <button class="pu-btn" data-pu="shield" title="Block next mine hit">🛡️</button>
+        <button class="pu-btn" data-pu="scanner" title="Show 3 mine locations">👁️</button>
+        <button class="pu-btn" data-pu="frenzy" title="6s of click frenzy + immunity">⚡</button>
+        <button class="pu-btn" data-pu="trap" title="Trap a revealed cell">💣</button>
+        <button class="pu-btn pu-cancel" id="btnCancelTarget" style="display:none" title="Cancel targeting">✕</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- Overlays -->
+  <div class="overlay" id="resultOverlay" style="display:none">
+    <h2 class="result-title" id="resultTitle">Game Over!</h2>
+    <div class="final-scores" id="finalScores"></div>
+    <button class="btn btn-primary" id="btnBackToLobby">Back to Lobby</button>
+  </div>
+
+  <div class="overlay rules-overlay" id="rulesOverlay" style="display:none">
+    <div class="rules-card">
+      <h2>📜 Competitive Minesweeper</h2>
+      <ul>
+        <li><strong>Left Click</strong>: Reveal a cell (+1 point per safe cell)</li>
+        <li><strong>Right Click</strong>: Place flag (+3 if correct, -2 if wrong)</li>
+        <li>Hit a mine: <strong>-5 points + 4s stun</strong></li>
+        <li>You have <strong>10 flags</strong> — use wisely!</li>
+        <li>Earn a power-up charge every 10 points</li>
+        <li>🔍 Safe reveal · 🧲 Decoy · 🛡️ Shield</li>
+        <li>👁️ Scanner · ⚡ Frenzy · 💣 Trap</li>
+        <li>Most points when board is cleared wins!</li>
+      </ul>
+      <button class="btn btn-primary" id="btnCloseRules">Close</button>
+    </div>
+  </div>
+
+  <script src="minesweeper.js"></script>
+  <script>
+    document.getElementById('btnToggleSidebar').addEventListener('click', () => {
+      document.querySelector('.sidebar').classList.toggle('open');
+    });
+  </script>
+</body>
+</html>

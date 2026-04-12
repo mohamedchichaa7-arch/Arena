@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Bomberman — Game Arena</title>
+  <link rel="stylesheet" href="bomberman.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">0</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+      <div class="round-info" id="roundInfo">
+        <div class="round-label">Round <span id="roundNum">1</span></div>
+        <div class="round-wins" id="roundWins"></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
+        <h1 class="logo logo-sm">BOMBERMAN</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <div class="timer-display" id="timerDisplay">2:00</div>
+        <button class="btn btn-mobile-toggle" id="btnToggleChat" title="Chat">💬</button>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+
+      <div class="controls">
+        <button class="btn btn-primary" id="btnStart">Start Match</button>
+      </div>
+
+      <div class="status" id="status">Connecting…</div>
+
+      <div class="arena-wrap">
+        <canvas id="arena"></canvas>
+      </div>
+
+      <!-- Mobile controls -->
+      <div class="mobile-controls" id="mobileControls" style="display:none">
+        <div class="dpad">
+          <button class="dpad-btn dpad-up" data-dir="up">▲</button>
+          <button class="dpad-btn dpad-left" data-dir="left">◄</button>
+          <button class="dpad-btn dpad-right" data-dir="right">►</button>
+          <button class="dpad-btn dpad-down" data-dir="down">▼</button>
+        </div>
+        <div class="action-btns">
+          <button class="action-btn bomb-btn" id="btnBomb">💣</button>
+          <button class="action-btn ability-btn" id="btnAbility">⚡</button>
+        </div>
+      </div>
+    </main>
+
+    <aside class="chat-panel">
+      <div class="chat-header">Chat</div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" type="text" placeholder="Message…" maxlength="200" autocomplete="off">
+        <button class="btn chat-send-btn" id="chatSend">&uarr;</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Overlays -->
+  <div class="overlay" id="roundOverlay" style="display:none">
+    <h2 class="result-title" id="roundTitle">Round Over</h2>
+    <div class="round-scores" id="roundScores"></div>
+  </div>
+
+  <div class="overlay" id="matchOverlay" style="display:none">
+    <h2 class="result-title" id="matchTitle">Match Over!</h2>
+    <div class="round-scores" id="matchScores"></div>
+    <button class="btn btn-primary" id="btnBackToLobby">Back to Lobby</button>
+  </div>
+
+  <div class="overlay rules-overlay" id="rulesOverlay" style="display:none">
+    <div class="rules-card">
+      <h2>📜 How to Play</h2>
+      <ul>
+        <li><strong>Move</strong>: WASD or Arrow Keys</li>
+        <li><strong>Bomb</strong>: Space</li>
+        <li><strong>Ability</strong>: E or F</li>
+        <li>Place bombs to destroy soft walls and eliminate opponents</li>
+        <li>Walk over power-ups to collect them</li>
+        <li>💣 Extra Bomb · 🔥 Blast Up · 👟 Speed Up</li>
+        <li>🦺 Vest (absorbs one hit) · 🔪 Punch bombs</li>
+        <li>🪃 Remote detonation · ☠️ Skull (curse!)</li>
+        <li>First to win <strong>3 rounds</strong> wins the match</li>
+        <li>After 2 minutes, the arena shrinks!</li>
+      </ul>
+      <button class="btn btn-primary" id="btnCloseRules">Close</button>
+    </div>
+  </div>
+
+  <div class="overlay countdown-overlay" id="countdownOverlay" style="display:none">
+    <div class="countdown-number" id="countdownNumber">3</div>
+  </div>
+
+  <script src="bomberman.js"></script>
+  <script>
+    // Mobile panel toggles
+    document.getElementById('btnToggleSidebar').addEventListener('click', () => {
+      document.querySelector('.sidebar').classList.toggle('open');
+      document.querySelector('.chat-panel').classList.remove('open');
+    });
+    document.getElementById('btnToggleChat').addEventListener('click', () => {
+      document.querySelector('.chat-panel').classList.toggle('open');
+      document.querySelector('.sidebar').classList.remove('open');
+    });
+  </script>
+</body>
+</html>

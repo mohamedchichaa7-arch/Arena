@@ -1,0 +1,688 @@
+/* ===== TANK BATTLE CSS — ARENA ===== */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box
+}
+
+:root {
+  --bg: #0a0a1a;
+  --surface: #12122a;
+  --card: #1a1a3e;
+  --border: #2a2a5a;
+  --text: #e0e0ff;
+  --dim: #7a7aaa;
+  --primary: #8b5cf6;
+  --primary-g: #6d28d9;
+  --accent: #06b6d4;
+  --accent-g: #0891b2;
+  --gold: #fbbf24;
+  --green: #22c55e;
+  --red: #ef4444;
+  --glow: 0 0 20px rgba(139, 92, 246, .3);
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  overflow: hidden
+}
+
+.layout {
+  display: flex;
+  height: 100vh
+}
+
+/* ── Sidebar ──────────────────────────── */
+.sidebar {
+  width: 260px;
+  min-width: 200px;
+  max-width: 320px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  gap: .5rem;
+  overflow-y: auto
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .5rem
+}
+
+.sidebar-header h3 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .85rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim)
+}
+
+.player-count {
+  background: var(--primary);
+  color: #fff;
+  font-size: .7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 700
+}
+
+.player-grid {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem
+}
+
+.player-card {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem .6rem;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  font-size: .85rem;
+  position: relative
+}
+
+.player-card.me {
+  border-color: var(--green)
+}
+
+.player-card.dead {
+  opacity: .4;
+  text-decoration: line-through
+}
+
+.pc-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0
+}
+
+.pc-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap
+}
+
+.pc-hp {
+  font-size: .7rem;
+  font-weight: 700;
+  min-width: 40px;
+  text-align: right
+}
+
+.pc-hp-bar {
+  width: 50px;
+  height: 6px;
+  background: #333;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-left: auto
+}
+
+.pc-hp-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 3px;
+  transition: width .3s
+}
+
+.pc-hp-fill.low {
+  background: var(--gold)
+}
+
+.pc-hp-fill.critical {
+  background: var(--red)
+}
+
+/* ── Main content ─────────────────────── */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  position: relative
+}
+
+.game-header {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .5rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0
+}
+
+.logo {
+  font-family: 'Orbitron', sans-serif;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text
+}
+
+.logo-sm {
+  font-size: 1rem;
+  letter-spacing: 2px
+}
+
+.room-badge {
+  margin-left: auto;
+  font-size: .75rem;
+  color: var(--dim);
+  font-family: 'Orbitron', sans-serif
+}
+
+.controls {
+  display: flex;
+  gap: .5rem;
+  padding: .5rem 1rem;
+  justify-content: center
+}
+
+.status {
+  text-align: center;
+  padding: .3rem 1rem;
+  font-size: .85rem;
+  color: var(--dim);
+  flex-shrink: 0
+}
+
+/* ── Wind bar ─────────────────────────── */
+.wind-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  padding: .3rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: .85rem
+}
+
+.wind-label {
+  color: var(--dim);
+  font-weight: 600
+}
+
+.wind-arrow {
+  font-size: 1.2rem;
+  transition: transform .3s
+}
+
+.wind-value {
+  font-weight: 700;
+  font-family: 'Orbitron', sans-serif
+}
+
+/* ── Turn timer ───────────────────────── */
+.turn-timer {
+  position: absolute;
+  top: 90px;
+  right: 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .3rem .6rem;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1rem;
+  z-index: 10;
+  transition: color .3s
+}
+
+.turn-timer.urgent {
+  color: var(--red);
+  border-color: var(--red);
+  animation: pulse-timer .5s ease-in-out infinite alternate
+}
+
+@keyframes pulse-timer {
+  from { opacity: 1 }
+  to { opacity: .5 }
+}
+
+/* ── Canvas ───────────────────────────── */
+.canvas-area {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  overflow: hidden
+}
+
+#gameCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(180deg, #1a1a4e 0%, #2a1a3e 40%, #0a0a2a 100%)
+}
+
+/* ── HUD ──────────────────────────────── */
+.hud {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .4rem .8rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+  justify-content: center;
+  flex-shrink: 0
+}
+
+.hud-section {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .8rem
+}
+
+.hud-aim label,
+.hud-power label {
+  color: var(--dim);
+  white-space: nowrap
+}
+
+.hud-aim input[type="range"],
+.hud-power input[type="range"] {
+  width: 100px;
+  accent-color: var(--primary)
+}
+
+.hud-move {
+  gap: .3rem
+}
+
+.move-budget {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .7rem;
+  color: var(--accent);
+  min-width: 28px;
+  text-align: center
+}
+
+.hud-weapons {
+  display: flex;
+  gap: .25rem
+}
+
+.weapon-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: .25rem .4rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: .75rem;
+  display: flex;
+  align-items: center;
+  gap: .2rem;
+  transition: border-color .2s, background .2s
+}
+
+.weapon-btn:hover {
+  border-color: var(--primary)
+}
+
+.weapon-btn.selected {
+  border-color: var(--accent);
+  background: rgba(6, 182, 212, .15)
+}
+
+.weapon-btn.empty {
+  opacity: .3;
+  pointer-events: none
+}
+
+.weapon-ammo {
+  font-size: .6rem;
+  color: var(--dim)
+}
+
+.btn-fire {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #fff;
+  border: none;
+  padding: .4rem 1.2rem;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: .85rem;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: transform .1s, box-shadow .2s
+}
+
+.btn-fire:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 15px rgba(239, 68, 68, .5)
+}
+
+.btn-fire:active {
+  transform: scale(.97)
+}
+
+.btn-shield {
+  background: linear-gradient(135deg, var(--accent), var(--accent-g));
+  color: #fff;
+  border: none;
+  padding: .4rem .8rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: .8rem;
+  cursor: pointer
+}
+
+/* ── Airstrike overlay ────────────────── */
+.airstrike-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, .35);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 1rem;
+  gap: .75rem;
+  z-index: 20;
+  color: var(--gold);
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: crosshair
+}
+
+/* ── Chat panel ───────────────────────── */
+.chat-panel {
+  width: 260px;
+  min-width: 200px;
+  max-width: 320px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column
+}
+
+.chat-header {
+  padding: .6rem 1rem;
+  font-family: 'Orbitron', sans-serif;
+  font-size: .8rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+  border-bottom: 1px solid var(--border)
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: .5rem .75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem
+}
+
+.chat-msg {
+  font-size: .8rem;
+  padding: .2rem .4rem;
+  border-radius: 4px;
+  word-break: break-word
+}
+
+.chat-msg.me { color: var(--green) }
+.chat-msg.other { color: var(--accent) }
+.chat-msg.system { color: var(--dim); font-style: italic }
+
+.cm-name {
+  font-weight: 600;
+  margin-right: .3rem
+}
+
+.chat-input-row {
+  display: flex;
+  border-top: 1px solid var(--border);
+  padding: .4rem
+}
+
+.chat-input {
+  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: .4rem .6rem;
+  border-radius: 6px;
+  font-size: .8rem;
+  outline: none
+}
+
+.chat-input:focus {
+  border-color: var(--primary)
+}
+
+.chat-send-btn {
+  margin-left: .3rem;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  width: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem
+}
+
+/* ── Buttons ──────────────────────────── */
+.btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: .45rem .9rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: .8rem;
+  transition: background .2s, border-color .2s
+}
+
+.btn:hover {
+  border-color: var(--primary);
+  background: var(--surface)
+}
+
+.btn-sm {
+  padding: .3rem .6rem;
+  font-size: .75rem
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary), var(--primary-g));
+  border: none;
+  color: #fff;
+  font-weight: 600
+}
+
+.btn-primary:hover {
+  filter: brightness(1.15)
+}
+
+.btn-lg {
+  padding: .6rem 2rem;
+  font-size: 1rem
+}
+
+.btn-back {
+  color: var(--dim)
+}
+
+.btn-rules {
+  color: var(--dim)
+}
+
+/* ── Overlay ──────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .75);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 50
+}
+
+.overlay.show {
+  display: flex
+}
+
+.result-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem 3rem;
+  text-align: center;
+  max-width: 500px;
+  width: 90%
+}
+
+.result-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.6rem;
+  margin-bottom: 1rem;
+  background: linear-gradient(135deg, var(--gold), #f59e0b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text
+}
+
+.result-summary {
+  font-size: .85rem;
+  margin-bottom: 1.5rem;
+  color: var(--dim);
+  line-height: 1.6
+}
+
+.result-summary .dmg-row {
+  display: flex;
+  justify-content: space-between;
+  padding: .2rem 0
+}
+
+/* ── Rules panel ──────────────────────── */
+.rules-panel {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60
+}
+
+.rules-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  max-width: 520px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  position: relative
+}
+
+.rules-card h2 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.1rem;
+  margin-bottom: 1rem
+}
+
+.rules-card ul {
+  padding-left: 1.2rem;
+  font-size: .85rem;
+  line-height: 1.8
+}
+
+.rules-card ul ul {
+  margin-top: .2rem
+}
+
+.rules-close {
+  position: absolute;
+  top: .8rem;
+  right: 1rem;
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 1.4rem;
+  cursor: pointer
+}
+
+.panel-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .4);
+  z-index: 30
+}
+
+.panel-backdrop.show {
+  display: block
+}
+
+/* ── Mobile ───────────────────────────── */
+.btn-mobile-toggle {
+  display: none
+}
+
+@media (max-width: 900px) {
+  .sidebar, .chat-panel {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform .25s
+  }
+
+  .sidebar {
+    left: 0
+  }
+
+  .sidebar.open {
+    transform: translateX(0)
+  }
+
+  .chat-panel {
+    right: 0;
+    left: auto;
+    transform: translateX(100%)
+  }
+
+  .chat-panel.open {
+    transform: translateX(0)
+  }
+
+  .btn-mobile-toggle {
+    display: inline-flex
+  }
+
+  .hud {
+    font-size: .7rem;
+    padding: .3rem .4rem;
+    gap: .3rem
+  }
+
+  .hud-aim input[type="range"],
+  .hud-power input[type="range"] {
+    width: 70px
+  }
+}

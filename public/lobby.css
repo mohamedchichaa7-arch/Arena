@@ -249,8 +249,68 @@ input[type=password]:focus {
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  padding: 1.2rem 2rem;
+  padding: .8rem 2rem 1.2rem;
   border-bottom: 1px solid rgba(124, 58, 237, .06)
+}
+
+/* ═══ GAME PICKER GRID ═══ */
+.game-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: .6rem;
+  padding: 1rem 2rem .4rem;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%
+}
+
+.game-pick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .35rem;
+  padding: .7rem .4rem;
+  border-radius: 14px;
+  border: 2px solid rgba(124, 58, 237, .1);
+  background: rgba(18, 18, 42, .6);
+  cursor: pointer;
+  transition: all .25s ease;
+  user-select: none
+}
+
+.game-pick-card:hover {
+  border-color: rgba(124, 58, 237, .35);
+  background: rgba(124, 58, 237, .08);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 18px rgba(124, 58, 237, .12)
+}
+
+.game-pick-card.selected {
+  border-color: var(--accent2);
+  background: rgba(6, 182, 212, .12);
+  box-shadow: 0 0 20px rgba(6, 182, 212, .2)
+}
+
+.game-pick-card.selected .gpc-label {
+  color: var(--accent2)
+}
+
+.gpc-icon {
+  font-size: 1.8rem;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,.3))
+}
+
+.gpc-label {
+  font-family: 'Orbitron', sans-serif;
+  font-size: .55rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: center;
+  transition: color .2s
 }
 
 .lobby-body {

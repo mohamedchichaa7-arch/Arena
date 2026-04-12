@@ -63,19 +63,58 @@
       </div>
     </header>
 
+    <!-- Hidden select for backwards compat -->
+    <select id="gameTypeSelect" style="display:none">
+      <option value="maze">Maze</option><option value="tetris">Tetris</option>
+      <option value="tictactoe">Tic Tac Toe</option><option value="bluffrummy">Bluff Rummy</option>
+      <option value="pool">Pool</option><option value="battleship">Sea Battle</option>
+      <option value="egame">E-Game</option><option value="snakesladders">Snakes &amp; Ladders</option>
+      <option value="uno">UNO</option><option value="tanks">Tank Battle</option>
+      <option value="bomberman">Bomberman</option><option value="minesweeper">Minesweeper</option>
+    </select>
+
+    <!-- Game Picker Grid -->
+    <div class="game-picker" id="gamePicker">
+      <div class="game-pick-card selected" data-game="maze">
+        <span class="gpc-icon">&#x1F3C1;</span><span class="gpc-label">Maze</span>
+      </div>
+      <div class="game-pick-card" data-game="tetris">
+        <span class="gpc-icon">&#x1F3AE;</span><span class="gpc-label">Tetris</span>
+      </div>
+      <div class="game-pick-card" data-game="tictactoe">
+        <span class="gpc-icon">&#x2B55;</span><span class="gpc-label">Tic Tac Toe</span>
+      </div>
+      <div class="game-pick-card" data-game="bluffrummy">
+        <span class="gpc-icon">&#x1F0CF;</span><span class="gpc-label">Bluff Rummy</span>
+      </div>
+      <div class="game-pick-card" data-game="pool">
+        <span class="gpc-icon">&#x1F3B1;</span><span class="gpc-label">Pool</span>
+      </div>
+      <div class="game-pick-card" data-game="battleship">
+        <span class="gpc-icon">&#x2693;</span><span class="gpc-label">Sea Battle</span>
+      </div>
+      <div class="game-pick-card" data-game="egame">
+        <span class="gpc-icon">&#x1F451;</span><span class="gpc-label">E-Game</span>
+      </div>
+      <div class="game-pick-card" data-game="snakesladders">
+        <span class="gpc-icon">&#x1F40D;</span><span class="gpc-label">Snakes &amp; Ladders</span>
+      </div>
+      <div class="game-pick-card" data-game="uno">
+        <span class="gpc-icon">&#x1F3B4;</span><span class="gpc-label">UNO</span>
+      </div>
+      <div class="game-pick-card" data-game="tanks">
+        <span class="gpc-icon">&#x1F3EE;</span><span class="gpc-label">Tank Battle</span>
+      </div>
+      <div class="game-pick-card" data-game="bomberman">
+        <span class="gpc-icon">&#x1F4A3;</span><span class="gpc-label">Bomberman</span>
+      </div>
+      <div class="game-pick-card" data-game="minesweeper">
+        <span class="gpc-icon">&#x1F4A5;</span><span class="gpc-label">Minesweeper</span>
+      </div>
+    </div>
+
     <div class="create-bar">
       <input type="text" id="roomNameInput" placeholder="Room name" maxlength="30">
-      <select id="gameTypeSelect">
-        <option value="maze">&#x1F3C1; Maze</option>
-        <option value="tetris">&#x1F3AE; Tetris</option>
-        <option value="tictactoe">&#x2B55; Tic Tac Toe</option>
-        <option value="bluffrummy">&#x1F0CF; Bluff Rummy</option>
-        <option value="pool">&#x1F3B1; Pool</option>
-        <option value="battleship">&#x2693; Sea Battle</option>
-        <option value="egame">&#x1F451; E-Game</option>
-        <option value="snakesladders">&#x1F40D; Snakes &amp; Ladders</option>
-        <option value="uno">&#x1F3B4; UNO</option>
-      </select>
       <select id="maxPlayersSelect">
         <option value="2">2 Players</option>
         <option value="4" selected>4 Players</option>
@@ -134,6 +173,9 @@
         <button class="lb-tab" data-game="egame">&#x1F451; E-Game</button>
         <button class="lb-tab" data-game="snakesladders">&#x1F40D; Snakes &amp; Ladders</button>
         <button class="lb-tab" data-game="uno">&#x1F3B4; UNO</button>
+        <button class="lb-tab" data-game="tanks">&#x1F3EE; Tank Battle</button>
+        <button class="lb-tab" data-game="bomberman">&#x1F4A3; Bomberman</button>
+        <button class="lb-tab" data-game="minesweeper">&#x1F4A5; Minesweeper</button>
       </div>
       <div class="lb-subtitle" id="lbSubtitle">Fastest race finish time</div>
       <div class="lb-list" id="lbList"><div class="lb-loading">Loading...</div></div>

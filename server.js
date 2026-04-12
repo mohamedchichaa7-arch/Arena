@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -511,6 +511,44 @@ function removeFromRoom(conn) {
       broadcastUnoPlayerUpdate(room);
     }
   }
+  if (room.tanks && room.tanks.active) {
+    // Remove tank
+    delete room.tanks.tankState[conn.id];
+    room.tanks.turnOrder = room.tanks.turnOrder.filter(pid => pid !== conn.id);
+    if (room.tanks.turnTimer) { clearTimeout(room.tanks.turnTimer); room.tanks.turnTimer = null; }
+    if (room.players.size === 0) {
+      room.tanks = null;
+    } else if (room.tanks.turnOrder.length < 2) {
+      // Only one left — they win
+      tanksCheckGameOver(room);
+    } else {
+      // If it was this player's turn, skip to next
+      if (room.tanks.turnIdx >= room.tanks.turnOrder.length) room.tanks.turnIdx = 0;
+      broadcastRoom(room.id, { type: 'player-left', id: conn.id });
+      tanksStartTurn(room);
+    }
+  }
+  if (room.bomberman && room.bomberman.active) {
+    const bm = room.bomberman;
+    const ps = bm.players[conn.id];
+    if (ps) { ps.alive = false; ps.disconnected = true; }
+    if (room.players.size === 0) {
+      if (bm.tickInterval) clearInterval(bm.tickInterval);
+      room.bomberman = null;
+    } else {
+      bmCheckRoundEnd(room);
+    }
+  }
+  if (room.minesweeper && room.minesweeper.active) {
+    const ms = room.minesweeper;
+    delete ms.players[conn.id];
+    if (room.players.size === 0) {
+      if (ms.timer) clearTimeout(ms.timer);
+      room.minesweeper = null;
+    } else {
+      broadcastRoom(room.id, { type: 'ms-player-left', id: conn.id });
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -518,7 +556,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -614,9 +652,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -703,6 +741,18 @@ wss.on('connection', (ws, req) => {
           if (!isUnoReconnect) {
             send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
           }
+        }
+        // Lock tanks rooms while game is running
+        if (room.status === 'playing' && room.type === 'tanks') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
+        // Lock bomberman rooms while game is running
+        if (room.status === 'playing' && room.type === 'bomberman') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
+        // Lock minesweeper rooms while game is running
+        if (room.status === 'playing' && room.type === 'minesweeper') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
 
         removeFromRoom(conn); // leave any existing room
@@ -1859,6 +1909,217 @@ wss.on('connection', (ws, req) => {
         if (!playerHand || playerHand.length > 2) break; // can only call when at 2 or 1 cards
         uno.unoFlags.add(id);
         broadcastRoom(room.id, { type: 'uno-flag', playerId: id, flag: true });
+        break;
+      }
+
+      // ── Tank Battle ──────────────────────────────────────
+      case 'tanks-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'tanks') break;
+        if (room.tanks?.active) { send(ws, { type: 'error', msg: 'A game is already in progress' }); break; }
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2-4 players' }); break; }
+        if (room.players.keys().next().value !== id) { send(ws, { type: 'error', msg: 'Only the leader can start' }); break; }
+        startTanks(room);
+        break;
+      }
+
+      case 'tanks-move': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.tanks?.active) break;
+        const tk = room.tanks;
+        if (tk.turnOrder[tk.turnIdx] !== id) break;
+        if (tk.hasFired) break;
+        const dir = msg.direction === -1 ? -1 : 1;
+        const tank = tk.tankState[id];
+        if (!tank || !tank.alive) break;
+        const moveAmount = Math.min(5, tank.moveBudget);
+        if (moveAmount <= 0) break;
+        tank.moveBudget -= moveAmount;
+        const newX = Math.max(15, Math.min(tk.terrainW - 15, tank.x + dir * moveAmount));
+        tank.x = newX;
+        // Settle on terrain
+        tank.y = tanksGetGroundY(tk.terrain, tk.terrainW, tk.terrainH, tank.x);
+        // Check if fell into void
+        if (tank.y >= tk.terrainH - 15) { tank.hp = 0; tank.alive = false; }
+        // Check crate pickup
+        let pickedCrate = null;
+        for (let ci = tk.crates.length - 1; ci >= 0; ci--) {
+          const crate = tk.crates[ci];
+          if (Math.abs(tank.x - crate.x) < 28) {
+            pickedCrate = crate;
+            tk.crates.splice(ci, 1);
+            if (crate.type === 'health') {
+              tank.hp = Math.min(TANKS_MAX_HP, tank.hp + crate.payload.hp);
+            } else {
+              const w = crate.payload.weapon, cnt = crate.payload.count || 1;
+              tank.inventory[w] = (tank.inventory[w] || 0) + cnt;
+            }
+            break;
+          }
+        }
+        broadcastRoom(room.id, { type: 'tanks-move', playerId: id, x: tank.x, y: tank.y, moveBudget: tank.moveBudget,
+          pickedCrate: pickedCrate ? { id: pickedCrate.id, type: pickedCrate.type, icon: pickedCrate.icon, label: pickedCrate.label } : null,
+          tankHp: tank.hp });
+        break;
+      }
+
+      case 'tanks-fire': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.tanks?.active) break;
+        const tk = room.tanks;
+        if (tk.turnOrder[tk.turnIdx] !== id) break;
+        if (tk.hasFired) break;
+        tk.hasFired = true;
+        if (tk.turnTimer) { clearTimeout(tk.turnTimer); tk.turnTimer = null; }
+        const weapon = String(msg.weapon || 'standard');
+        const angle = Math.max(0, Math.min(180, parseInt(msg.angle) || 90));
+        const power = Math.max(5, Math.min(100, parseInt(msg.power) || 50));
+        const tank = tk.tankState[id];
+        if (!tank || !tank.alive) break;
+        // Validate weapon ammo
+        if (weapon !== 'standard') {
+          if (!tank.inventory[weapon] || tank.inventory[weapon] <= 0) break;
+          tank.inventory[weapon]--;
+        }
+        // Store angle
+        tank.angle = angle;
+        const result = tanksResolveShot(tk, id, weapon, angle, power, msg.airstrikeX);
+        broadcastRoom(room.id, result);
+        // Check game over
+        if (!tanksCheckGameOver(room)) {
+          // Advance turn
+          tanksAdvanceTurn(room);
+        }
+        log('info', 'tanks-fire', { roomId: room.id, player: conn.name, weapon, angle, power });
+        break;
+      }
+
+      case 'tanks-shield': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.tanks?.active) break;
+        const tk = room.tanks;
+        if (tk.turnOrder[tk.turnIdx] !== id) break;
+        if (tk.hasFired) break;
+        tk.hasFired = true;
+        if (tk.turnTimer) { clearTimeout(tk.turnTimer); tk.turnTimer = null; }
+        const tank = tk.tankState[id];
+        if (!tank || !tank.alive) break;
+        if (!tank.inventory.shield || tank.inventory.shield <= 0) break;
+        tank.inventory.shield--;
+        tank.shielded = true;
+        broadcastRoom(room.id, { type: 'tanks-shield', playerId: id });
+        tanksAdvanceTurn(room);
+        break;
+      }
+
+      // ── Bomberman ──────────────────────────────────────────
+      case 'bm-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'bomberman') break;
+        if (room.bomberman?.active) break;
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need at least 2 players' }); break; }
+        bmStartMatch(room);
+        break;
+      }
+      case 'bm-input': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.bomberman?.active) break;
+        const bm = room.bomberman;
+        const ps = bm.players[id];
+        if (!ps || !ps.alive) break;
+        // msg.action: 'move-start','move-stop','bomb','ability'
+        // msg.dir: 'up','down','left','right'
+        if (msg.action === 'move-start' && ['up','down','left','right'].includes(msg.dir)) {
+          ps.moveDir = msg.dir;
+          ps.moving = true;
+        } else if (msg.action === 'move-stop') {
+          ps.moving = false;
+          ps.moveDir = null;
+        } else if (msg.action === 'bomb') {
+          bmPlaceBomb(room, id);
+        } else if (msg.action === 'ability') {
+          bmUseAbility(room, id);
+        }
+        break;
+      }
+
+      // ── Minesweeper ────────────────────────────────────────
+      case 'ms-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'minesweeper') break;
+        if (room.minesweeper?.active) break;
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need at least 2 players' }); break; }
+        const boardSize = [12,20,30].includes(parseInt(msg.boardSize)) ? parseInt(msg.boardSize) : 20;
+        const density = [12,18,25].includes(parseInt(msg.density)) ? parseInt(msg.density) : 18;
+        const timeLimit = [3,5,10].includes(parseInt(msg.timeLimit)) ? parseInt(msg.timeLimit) : 5;
+        msStartGame(room, boardSize, density, timeLimit);
+        break;
+      }
+      case 'ms-reveal': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.minesweeper?.active) break;
+        const ms = room.minesweeper;
+        const msp = ms.players[id];
+        if (!msp || msp.stunUntil > Date.now()) break;
+        const r = parseInt(msg.row), c = parseInt(msg.col);
+        if (r < 0 || r >= ms.size || c < 0 || c >= ms.size) break;
+        // If targeting mode (powerup)
+        if (msp.targeting) {
+          msUsePowerupTarget(room, id, r, c);
+          break;
+        }
+        msRevealCell(room, id, r, c);
+        break;
+      }
+      case 'ms-flag': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.minesweeper?.active) break;
+        const ms = room.minesweeper;
+        const msp = ms.players[id];
+        if (!msp || msp.stunUntil > Date.now()) break;
+        if (msp.flags <= 0) break;
+        const r = parseInt(msg.row), c = parseInt(msg.col);
+        if (r < 0 || r >= ms.size || c < 0 || c >= ms.size) break;
+        const cell = ms.board[r][c];
+        if (cell.revealed) break;
+        if (cell.flaggedBy) {
+          // Unflag if same player
+          if (cell.flaggedBy === id) {
+            cell.flaggedBy = null;
+            msp.flags++;
+            broadcastRoom(room.id, { type: 'ms-unflagged', row: r, col: c, playerId: id, flagsLeft: msp.flags });
+          }
+          break;
+        }
+        cell.flaggedBy = id;
+        msp.flags--;
+        broadcastRoom(room.id, { type: 'ms-flagged', row: r, col: c, playerId: id, flagsLeft: msp.flags });
+        break;
+      }
+      case 'ms-powerup': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.minesweeper?.active) break;
+        const ms = room.minesweeper;
+        const msp = ms.players[id];
+        if (!msp || msp.stunUntil > Date.now()) break;
+        if (msp.charges <= 0) break;
+        const ptype = String(msg.powerup);
+        const validPowerups = ['reveal','magnet','shield','scanner','frenzy','trap'];
+        if (!validPowerups.includes(ptype)) break;
+        if (['reveal','magnet','trap'].includes(ptype)) {
+          // Need targeting
+          msp.targeting = ptype;
+          send(ws, { type: 'ms-targeting', powerup: ptype });
+        } else {
+          msApplyInstantPowerup(room, id, ptype);
+        }
+        break;
+      }
+      case 'ms-cancel-target': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.minesweeper?.active) break;
+        const msp = room.minesweeper.players[id];
+        if (msp) msp.targeting = null;
         break;
       }
 
@@ -3098,6 +3359,1268 @@ function unoEndRound(room, winnerId) {
     if (r.players.size < 2) return;
     startUno(r);
   }, 10000);
+}
+
+// ── Tank Battle helpers ──────────────────────────────────────────
+const TANKS_WORLD_W = 1200, TANKS_WORLD_H = 600;
+const TANKS_MOVE_BUDGET = 50;
+const TANKS_TURN_TIME = 30000; // 30 seconds
+const TANKS_MAX_HP = 200;
+
+const TANKS_CRATE_TYPES = [
+  { type: 'health',         weight: 30, icon: '\u2764\uFE0F',  label: 'Health Pack',      payload: { hp: 80 } },
+  { type: 'ammo',           weight: 20, icon: '\uD83D\uDCE6',  label: 'Ammo Crate',       payload: { weapon: 'heavy', count: 3 } },
+  { type: 'napalm',         weight: 15, icon: '\uD83D\uDD25',  label: 'Napalm Bomb',      payload: { weapon: 'napalm', count: 1 } },
+  { type: 'bouncer',        weight: 15, icon: '\uD83E\uDEA3',  label: 'Bouncer Shell',    payload: { weapon: 'bouncer', count: 2 } },
+  { type: 'chainlightning', weight: 12, icon: '\u26A1',         label: 'Chain Lightning',  payload: { weapon: 'chainlightning', count: 1 } },
+  { type: 'meganuke',       weight:  8, icon: '\u2622\uFE0F',  label: 'Mega Nuke',        payload: { weapon: 'meganuke', count: 1 } },
+];
+
+function tanksRandomCrateType() {
+  const total = TANKS_CRATE_TYPES.reduce((s, t) => s + t.weight, 0);
+  let r = Math.floor(Math.random() * total);
+  for (const ct of TANKS_CRATE_TYPES) { r -= ct.weight; if (r < 0) return ct; }
+  return TANKS_CRATE_TYPES[0];
+}
+
+function tanksGenerateTerrain(w, h) {
+  // Terrain as Uint8Array: 1 = solid, 0 = air
+  const terrain = new Uint8Array(w * h);
+  // Generate rolling hills using sine combinations
+  const seed = Math.random;
+  const freqs = [];
+  for (let i = 0; i < 5; i++) freqs.push({ amp: 20 + seed() * 40, freq: 0.002 + seed() * 0.006, phase: seed() * Math.PI * 2 });
+
+  for (let x = 0; x < w; x++) {
+    let surfaceY = h * 0.5; // base height
+    for (const f of freqs) surfaceY += f.amp * Math.sin(x * f.freq + f.phase);
+    // Add a few platforms / valleys
+    surfaceY += Math.sin(x * 0.015) * 30;
+    surfaceY = Math.max(h * 0.25, Math.min(h * 0.85, surfaceY));
+    const sy = Math.floor(surfaceY);
+    for (let y = sy; y < h - 15; y++) { // Leave bottom 15px as water/void
+      terrain[y * w + x] = 1;
+    }
+  }
+  return terrain;
+}
+
+function tanksGetGroundY(terrain, w, h, x) {
+  const ix = Math.max(0, Math.min(w - 1, Math.round(x)));
+  for (let y = 0; y < h; y++) {
+    if (terrain[y * w + ix]) return y;
+  }
+  return h; // fell into void
+}
+
+function tanksEncodeTerrain(terrain) {
+  // Pack bits: 8 terrain pixels per byte, base64 encode
+  const byteLen = Math.ceil(terrain.length / 8);
+  const bytes = new Uint8Array(byteLen);
+  for (let i = 0; i < terrain.length; i++) {
+    if (terrain[i]) bytes[Math.floor(i / 8)] |= (1 << (7 - (i % 8)));
+  }
+  // Convert to base64
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return Buffer.from(binary, 'binary').toString('base64');
+}
+
+function startTanks(room) {
+  const terrain = tanksGenerateTerrain(TANKS_WORLD_W, TANKS_WORLD_H);
+  const playerIds = [...room.players.keys()];
+  const tankState = {};
+  const spacing = TANKS_WORLD_W / (playerIds.length + 1);
+
+  for (let i = 0; i < playerIds.length; i++) {
+    const pid = playerIds[i];
+    const x = Math.floor(spacing * (i + 1));
+    const y = tanksGetGroundY(terrain, TANKS_WORLD_W, TANKS_WORLD_H, x);
+    tankState[pid] = {
+      x, y, hp: TANKS_MAX_HP, alive: true, angle: 90, shielded: false,
+      colorIdx: i,
+      name: room.players.get(pid)?.name || 'Player',
+      moveBudget: TANKS_MOVE_BUDGET,
+      inventory: { heavy: 5, cluster: 3, sniper: 4, airstrike: 2, shield: 2, napalm: 0, bouncer: 0, chainlightning: 0, meganuke: 0 },
+      damageDealt: 0,
+    };
+  }
+
+  const wind = tanksRandomWind();
+  const startIdx = Math.floor(Math.random() * playerIds.length);
+
+  room.tanks = {
+    terrain,
+    terrainW: TANKS_WORLD_W,
+    terrainH: TANKS_WORLD_H,
+    tankState,
+    turnOrder: playerIds,
+    turnIdx: startIdx,
+    wind,
+    active: true,
+    hasFired: false,
+    turnTimer: null,
+    crates: [],
+    crateSeq: 0,
+  };
+  room.status = 'playing';
+  broadcastLobby();
+
+  const encodedTerrain = tanksEncodeTerrain(terrain);
+  const tanksArr = playerIds.map(pid => {
+    const t = tankState[pid];
+    return { id: pid, x: t.x, y: t.y, hp: t.hp, name: t.name, colorIdx: t.colorIdx };
+  });
+
+  broadcastRoom(room.id, { type: 'tanks-start', terrain: encodedTerrain, tanks: tanksArr });
+  log('info', 'tanks-start', { roomId: room.id, players: playerIds.length });
+
+  // Start first turn after a brief delay
+  setTimeout(() => tanksStartTurn(room), 1000);
+}
+
+function tanksRandomWind() {
+  return (Math.random() - 0.5) * 20; // -10 to +10
+}
+
+function tanksStartTurn(room) {
+  const tk = room.tanks;
+  if (!tk || !tk.active) return;
+
+  // Skip dead players
+  let safety = tk.turnOrder.length;
+  while (safety-- > 0) {
+    const pid = tk.turnOrder[tk.turnIdx];
+    if (tk.tankState[pid]?.alive) break;
+    tk.turnIdx = (tk.turnIdx + 1) % tk.turnOrder.length;
+  }
+
+  const pid = tk.turnOrder[tk.turnIdx];
+  const tank = tk.tankState[pid];
+  if (!tank || !tank.alive) return;
+
+  tk.wind = tanksRandomWind();
+  tk.hasFired = false;
+  tank.moveBudget = TANKS_MOVE_BUDGET;
+
+  // Possibly drop a supply crate
+  if (Math.random() < 0.45 && tk.crates.length < 4) {
+    const crateX = Math.floor(Math.random() * (tk.terrainW - 120)) + 60;
+    const landY = tanksGetGroundY(tk.terrain, tk.terrainW, tk.terrainH, crateX);
+    if (landY < tk.terrainH - 15) {
+      const crateId = `cr_${++tk.crateSeq}`;
+      const ct = tanksRandomCrateType();
+      tk.crates.push({ id: crateId, x: crateX, y: landY, type: ct.type, payload: ct.payload, icon: ct.icon, label: ct.label });
+      broadcastRoom(room.id, { type: 'tanks-crate-spawn', id: crateId, x: crateX, landY, crateType: ct.type, icon: ct.icon, label: ct.label });
+    }
+  }
+
+  broadcastRoom(room.id, {
+    type: 'tanks-turn',
+    playerId: pid,
+    wind: tk.wind,
+    moveBudget: TANKS_MOVE_BUDGET,
+    timeLeft: 30,
+  });
+
+  // Turn timer
+  if (tk.turnTimer) clearTimeout(tk.turnTimer);
+  const roomId = room.id;
+  tk.turnTimer = setTimeout(() => {
+    const r = rooms.get(roomId);
+    if (!r?.tanks?.active) return;
+    broadcastRoom(roomId, { type: 'tanks-timeout', playerId: pid });
+    tanksAdvanceTurn(r);
+  }, TANKS_TURN_TIME);
+}
+
+function tanksAdvanceTurn(room) {
+  const tk = room.tanks;
+  if (!tk || !tk.active) return;
+  tk.turnIdx = (tk.turnIdx + 1) % tk.turnOrder.length;
+  // Brief delay before next turn
+  setTimeout(() => tanksStartTurn(room), 1500);
+}
+
+function tanksCheckGameOver(room) {
+  const tk = room.tanks;
+  if (!tk || !tk.active) return false;
+  const alive = tk.turnOrder.filter(pid => tk.tankState[pid]?.alive);
+  if (alive.length <= 1) {
+    tk.active = false;
+    if (tk.turnTimer) { clearTimeout(tk.turnTimer); tk.turnTimer = null; }
+    room.status = 'waiting';
+    const winner = alive.length === 1 ? { id: alive[0], name: tk.tankState[alive[0]]?.name || 'Player' } : null;
+    const summary = tk.turnOrder.map(pid => ({
+      id: pid,
+      name: tk.tankState[pid]?.name || 'Player',
+      damageDealt: tk.tankState[pid]?.damageDealt || 0,
+    }));
+    broadcastRoom(room.id, { type: 'tanks-gameover', winner, summary });
+    broadcastLobby();
+    log('info', 'tanks-gameover', { roomId: room.id, winner: winner?.name });
+    return true;
+  }
+  return false;
+}
+
+function tanksResolveShot(tk, shooterId, weapon, angle, power, airstrikeX) {
+  const tank = tk.tankState[shooterId];
+  const angleRad = angle * Math.PI / 180;
+  const speed = power * 0.12;
+  const vx = Math.cos(Math.PI - angleRad) * speed;
+  const vy = -Math.sin(angleRad) * speed;
+  const startX = tank.x;
+  const startY = tank.y - 18; // barrel tip
+
+  const result = {
+    type: 'tanks-fire-result',
+    playerId: shooterId,
+    weapon,
+    projectiles: [],
+    impacts: [],
+    terrainPatches: [],
+    damages: [],
+    tankUpdates: [],
+    kills: [],
+  };
+
+  if (weapon === 'airstrike') {
+    // 3 shells raining down at the chosen X with slight spread
+    const baseX = typeof airstrikeX === 'number' ? Math.max(0, Math.min(tk.terrainW, airstrikeX)) : tk.terrainW / 2;
+    for (let i = 0; i < 3; i++) {
+      const dropX = baseX + (i - 1) * 30;
+      const impactY = tanksGetGroundY(tk.terrain, tk.terrainW, tk.terrainH, dropX);
+      const impX = Math.max(0, Math.min(tk.terrainW - 1, Math.round(dropX)));
+      result.projectiles.push({
+        startX: impX, startY: 0, vx: 0, vy: 5,
+        impactX: impX, impactY: Math.min(impactY, tk.terrainH),
+        weapon: 'airstrike', delay: i * 300,
+      });
+      if (impactY < tk.terrainH - 15) {
+        tanksApplyExplosion(tk, result, impX, impactY, 20, 35, shooterId);
+      }
+    }
+  } else if (weapon === 'sniper') {
+    // Straight line, ignores wind, hits first tank or goes off-screen
+    const dirX = Math.cos(Math.PI - angleRad);
+    const dirY = -Math.sin(angleRad);
+    let hitTank = null, hitDist = Infinity;
+    for (const pid in tk.tankState) {
+      if (pid === shooterId) continue;
+      const other = tk.tankState[pid];
+      if (!other.alive) continue;
+      // Ray-box intersection
+      const dx = other.x - startX, dy = (other.y - 12) - startY;
+      const t_val = (dx * dirX + dy * dirY) / (dirX * dirX + dirY * dirY);
+      if (t_val <= 0) continue;
+      const closestX = startX + dirX * t_val, closestY = startY + dirY * t_val;
+      const dist = Math.sqrt((closestX - other.x) ** 2 + (closestY - (other.y - 12)) ** 2);
+      if (dist < 20 && t_val < hitDist) {
+        hitTank = pid;
+        hitDist = t_val;
+      }
+    }
+    const impactX = hitTank ? tk.tankState[hitTank].x : startX + dirX * 1500;
+    const impactY = hitTank ? tk.tankState[hitTank].y - 12 : startY + dirY * 1500;
+    result.projectiles.push({
+      startX, startY, vx: dirX * 15, vy: dirY * 15,
+      impactX, impactY, isSniper: true, weapon: 'sniper',
+    });
+    if (hitTank) {
+      tanksApplyDamage(tk, result, hitTank, 55, impactX, impactY, shooterId);
+    }
+  } else if (weapon === 'chainlightning') {
+    // Instant zap — damages every other living tank; a fake projectile animates to each
+    let delay = 0;
+    for (const pid in tk.tankState) {
+      if (pid === shooterId) continue;
+      const other = tk.tankState[pid];
+      if (!other.alive) continue;
+      result.projectiles.push({
+        startX: tank.x, startY: tank.y - 18,
+        vx: 0, vy: 0,
+        impactX: other.x, impactY: other.y - 12,
+        isSniper: true, weapon: 'chainlightning', delay,
+      });
+      tanksApplyDamage(tk, result, pid, 40, other.x, other.y - 9, shooterId);
+      result.impacts.push({ x: other.x, y: other.y - 9, radius: 14 });
+      delay += 250;
+    }
+  } else {
+    // Standard, heavy, cluster — parabolic arc
+    const windEffect = tk.wind;
+    let projX = startX, projY = startY;
+    let projVx = vx, projVy = vy;
+    const gravity = 0.15;
+    let impactX = startX, impactY = startY;
+    let maxSteps = 2000;
+
+  while (maxSteps-- > 0) {
+    projX += projVx;
+    projY += projVy;
+    projVy += gravity;
+    projVx += windEffect * 0.002;
+
+    // Out of bounds
+    if (projX < -50 || projX > tk.terrainW + 50 || projY > tk.terrainH + 50) {
+      impactX = projX; impactY = projY;
+      break;
+    }
+    // Check terrain collision
+    const ix = Math.round(projX), iy = Math.round(projY);
+    if (ix >= 0 && ix < tk.terrainW && iy >= 0 && iy < tk.terrainH && tk.terrain[iy * tk.terrainW + ix]) {
+      impactX = projX; impactY = projY;
+      break;
+    }
+    // Check tank collision
+    let hitTank = false;
+    for (const pid in tk.tankState) {
+      if (pid === shooterId) continue;
+      const other = tk.tankState[pid];
+      if (!other.alive) continue;
+      const dx = projX - other.x, dy = projY - (other.y - 9);
+      if (Math.sqrt(dx * dx + dy * dy) < 18) {
+        impactX = projX; impactY = projY;
+        hitTank = true;
+        break;
+      }
+    }
+    if (hitTank) break;
+  }
+
+  result.projectiles.push({
+    startX, startY, vx, vy,
+    impactX, impactY, weapon,
+  });
+
+  if (weapon === 'cluster') {
+    // Explodes mid-flight or at impact, then scatters 5 bomblets
+    tanksApplyExplosion(tk, result, impactX, impactY, 10, 10, shooterId);
+    for (let i = 0; i < 5; i++) {
+      const bAngle = (Math.PI * 2 / 5) * i + (Math.random() - 0.5) * 0.3;
+      const bSpeed = 2 + Math.random() * 2;
+      let bx = impactX, by = impactY;
+      let bvx = Math.cos(bAngle) * bSpeed;
+      let bvy = -Math.abs(Math.sin(bAngle)) * bSpeed - 1;
+      let steps = 300;
+      while (steps-- > 0) {
+        bx += bvx; by += bvy; bvy += gravity;
+        if (bx < 0 || bx >= tk.terrainW || by > tk.terrainH) break;
+        const bix = Math.round(bx), biy = Math.round(by);
+        if (bix >= 0 && bix < tk.terrainW && biy >= 0 && biy < tk.terrainH && tk.terrain[biy * tk.terrainW + bix]) break;
+      }
+      result.projectiles.push({ startX: impactX, startY: impactY, vx: bvx, vy: bvy, impactX: bx, impactY: by, weapon: 'cluster-sub', delay: 200 + i * 100 });
+      if (by < tk.terrainH - 15) tanksApplyExplosion(tk, result, bx, by, 12, 20, shooterId);
+    }
+  } else if (weapon === 'heavy') {
+    tanksApplyExplosion(tk, result, impactX, impactY, 38, 70, shooterId);
+  } else if (weapon === 'napalm') {
+    // Wide central blast + horizontal fire spread
+    tanksApplyExplosion(tk, result, impactX, impactY, 48, 60, shooterId);
+    for (const ox of [-50, -28, 28, 50]) {
+      const sx = impactX + ox, sy = tanksGetGroundY(tk.terrain, tk.terrainW, tk.terrainH, sx);
+      if (sy < tk.terrainH - 15) tanksApplyExplosion(tk, result, sx, sy, 22, 30, shooterId);
+    }
+  } else if (weapon === 'bouncer') {
+    // Simulate bouncing trajectory — up to 3 bounces before final explosion
+    let bpx = startX, bpy = startY, bvx2 = vx, bvy2 = vy;
+    let bounces = 0;
+    let bSteps = 3000;
+    while (bSteps-- > 0) {
+      bpx += bvx2; bpy += bvy2; bvy2 += gravity; bvx2 += windEffect * 0.002;
+      if (bpx < 0 || bpx > tk.terrainW || bpy > tk.terrainH + 50) break;
+      const bix = Math.round(bpx), biy = Math.round(bpy);
+      if (biy >= 0 && bix >= 0 && bix < tk.terrainW && biy < tk.terrainH && tk.terrain[biy * tk.terrainW + bix]) {
+        if (bounces >= 3) break;
+        bvy2 = -Math.abs(bvy2) * 0.55; bvx2 *= 0.8; bpy -= 3; bounces++;
+      }
+    }
+    // Update impactX/Y to final bounce landing
+    impactX = bpx; impactY = bpy;
+    result.projectiles[result.projectiles.length - 1].impactX = impactX;
+    result.projectiles[result.projectiles.length - 1].impactY = impactY;
+    tanksApplyExplosion(tk, result, impactX, impactY, 25, 40, shooterId);
+  } else if (weapon === 'meganuke') {
+    tanksApplyExplosion(tk, result, impactX, impactY, 70, 95, shooterId);
+  } else {
+    // standard
+    tanksApplyExplosion(tk, result, impactX, impactY, 22, 38, shooterId);
+  }
+  } // end else (parabolic weapons)
+
+  // Always settle all tanks after any weapon resolves
+  for (const pid in tk.tankState) {
+    const t = tk.tankState[pid];
+    if (t.alive) {
+      // Apply gravity — settle onto terrain or fall into void
+      const newY = tanksGetGroundY(tk.terrain, tk.terrainW, tk.terrainH, t.x);
+      if (newY >= tk.terrainH - 15) {
+        t.hp = 0; t.alive = false;
+        t.y = tk.terrainH;
+        result.kills.push({ id: pid, name: t.name, x: t.x, y: t.y });
+      } else {
+        t.y = newY;
+      }
+    }
+    // Push every tank (alive or dead) so the client always gets the authoritative HP
+    result.tankUpdates.push({ id: pid, x: t.x, y: t.y, hp: t.hp, alive: t.alive, shielded: t.shielded });
+  }
+
+  return result;
+}
+
+function tanksApplyExplosion(tk, result, cx, cy, radius, damage, shooterId) {
+  // Carve terrain
+  const r = Math.round(radius);
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy <= r * r) {
+        const px = Math.round(cx) + dx, py = Math.round(cy) + dy;
+        if (px >= 0 && px < tk.terrainW && py >= 0 && py < tk.terrainH) {
+          tk.terrain[py * tk.terrainW + px] = 0;
+        }
+      }
+    }
+  }
+  result.impacts.push({ x: Math.round(cx), y: Math.round(cy), radius: r });
+  result.terrainPatches.push({ x: Math.round(cx), y: Math.round(cy), radius: r });
+
+  // Damage tanks in blast radius
+  for (const pid in tk.tankState) {
+    const t = tk.tankState[pid];
+    if (!t.alive) continue;
+    const dx = t.x - cx, dy = (t.y - 9) - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < radius + 15) {
+      const falloff = Math.max(0, 1 - dist / (radius + 15));
+      const dmg = Math.round(damage * falloff);
+      if (dmg > 0) {
+        tanksApplyDamage(tk, result, pid, dmg, t.x, t.y - 9, shooterId);
+        // Knockback
+        if (dist > 0) {
+          const kb = falloff * 8;
+          t.x += (dx / dist) * kb;
+          t.x = Math.max(5, Math.min(tk.terrainW - 5, t.x));
+        }
+      }
+    }
+  }
+}
+
+function tanksApplyDamage(tk, result, targetId, damage, hitX, hitY, shooterId) {
+  const t = tk.tankState[targetId];
+  if (!t || !t.alive) return;
+
+  if (t.shielded) {
+    t.shielded = false;
+    result.damages.push({ id: targetId, damage: 0, x: hitX, y: hitY, shieldBlocked: true });
+    return;
+  }
+
+  t.hp -= damage;
+  if (shooterId && tk.tankState[shooterId]) {
+    tk.tankState[shooterId].damageDealt += damage;
+  }
+  result.damages.push({ id: targetId, damage, x: hitX, y: hitY });
+
+  if (t.hp <= 0) {
+    t.hp = 0;
+    t.alive = false;
+    result.kills.push({ id: targetId, name: t.name, x: t.x, y: t.y });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  BOMBERMAN HELPERS
+// ═══════════════════════════════════════════════════════════════════
+
+const BM_COLS = 15, BM_ROWS = 13;
+const BM_TICK_MS = 50; // 20 ticks/sec
+const BM_BOMB_FUSE = 3000;
+const BM_EXPLOSION_DURATION = 500;
+const BM_ROUND_TIME = 120000; // 2 minutes
+const BM_SHRINK_INTERVAL = 3000;
+const BM_COUNTDOWN = 3000;
+const BM_BETWEEN_ROUNDS = 5000;
+const BM_WINS_NEEDED = 3;
+const BM_CELL_SIZE = 48;
+const BM_POWERUP_TYPES = ['extra-bomb','blast-up','speed-up','vest','punch','remote','skull'];
+const BM_POWERUP_CHANCE = 0.40;
+const BM_CURSE_DURATION = 10000;
+const BM_CURSE_TYPES = ['reverse','speed','auto-bomb','slow'];
+const BM_SPAWN_CORNERS = [[0,0],[BM_COLS-1,0],[0,BM_ROWS-1],[BM_COLS-1,BM_ROWS-1]];
+const BM_SPEED_BASE = 8; // cells/sec at base
+const BM_SPEED_INCREMENT = 2;
+
+function bmGenerateArena() {
+  // 0=floor, 1=hard, 2=soft
+  const grid = [];
+  for (let y = 0; y < BM_ROWS; y++) {
+    const row = [];
+    for (let x = 0; x < BM_COLS; x++) {
+      if (x % 2 === 1 && y % 2 === 1) row.push(1); // hard wall checkerboard
+      else row.push(0);
+    }
+    grid.push(row);
+  }
+  // Clear spawn corners (2-cell corridors)
+  for (const [cx, cy] of BM_SPAWN_CORNERS) {
+    grid[cy][cx] = 0;
+    if (cx + 1 < BM_COLS) grid[cy][cx + 1] = 0;
+    if (cx - 1 >= 0) grid[cy][cx - 1] = 0;
+    if (cy + 1 < BM_ROWS) grid[cy + 1][cx] = 0;
+    if (cy - 1 >= 0) grid[cy - 1][cx] = 0;
+  }
+  // Place soft walls (~65% of remaining floor cells)
+  const softPowerups = {};
+  for (let y = 0; y < BM_ROWS; y++) {
+    for (let x = 0; x < BM_COLS; x++) {
+      if (grid[y][x] !== 0) continue;
+      // Don't place on spawn corners
+      let isSpawn = false;
+      for (const [sx, sy] of BM_SPAWN_CORNERS) {
+        if (Math.abs(x - sx) + Math.abs(y - sy) <= 2) { isSpawn = true; break; }
+      }
+      if (isSpawn) continue;
+      if (Math.random() < 0.65) {
+        grid[y][x] = 2;
+        // assign powerup underneath
+        if (Math.random() < BM_POWERUP_CHANCE) {
+          const ptype = BM_POWERUP_TYPES[Math.floor(Math.random() * BM_POWERUP_TYPES.length)];
+          softPowerups[y + ',' + x] = ptype;
+        }
+      }
+    }
+  }
+  return { grid, softPowerups };
+}
+
+function bmStartMatch(room) {
+  const playerIds = [...room.players.keys()];
+  const { grid, softPowerups } = bmGenerateArena();
+  const players = {};
+  playerIds.forEach((pid, i) => {
+    const [sx, sy] = BM_SPAWN_CORNERS[i % 4];
+    players[pid] = {
+      x: sx, y: sy, alive: true, disconnected: false,
+      bombMax: 1, bombRadius: 2, speedLevel: 0,
+      vest: false, ability: null, // 'punch' or 'remote'
+      curse: null, curseUntil: 0,
+      name: room.players.get(pid).name, colorIdx: i,
+      moving: false, moveDir: null,
+      moveProgress: 0, // 0-1 fractional progress
+      facingDir: 'down',
+    };
+  });
+
+  room.bomberman = {
+    active: true, grid: grid.map(r => [...r]),
+    softPowerups, powerupsOnFloor: {},
+    players, bombs: [], explosions: [],
+    roundWins: {},
+    currentRound: 1, shrinking: false, shrinkRing: 0,
+    roundStartedAt: 0, roundActive: false,
+    tickInterval: null,
+    nextBombId: 1,
+  };
+  for (const pid of playerIds) room.bomberman.roundWins[pid] = 0;
+  room.status = 'playing';
+  broadcastLobby();
+
+  // Send start countdown
+  const playersInfo = playerIds.map(pid => ({ id: pid, name: players[pid].name, colorIdx: players[pid].colorIdx }));
+  broadcastRoom(room.id, { type: 'bm-match-start', grid, playersInfo, roundWins: room.bomberman.roundWins });
+
+  // Start round after countdown
+  setTimeout(() => {
+    if (!room.bomberman?.active) return;
+    bmStartRound(room);
+  }, BM_COUNTDOWN);
+}
+
+function bmStartRound(room) {
+  const bm = room.bomberman;
+  if (!bm.active) return;
+  // Regenerate arena for new rounds (round 1 already generated)
+  if (bm.currentRound > 1) {
+    const { grid, softPowerups } = bmGenerateArena();
+    bm.grid = grid;
+    bm.softPowerups = softPowerups;
+  }
+  bm.powerupsOnFloor = {};
+  bm.bombs = [];
+  bm.explosions = [];
+  bm.shrinking = false;
+  bm.shrinkRing = 0;
+  bm.roundStartedAt = Date.now();
+  bm.roundActive = true;
+
+  const playerIds = Object.keys(bm.players);
+  playerIds.forEach((pid, i) => {
+    const [sx, sy] = BM_SPAWN_CORNERS[i % 4];
+    const ps = bm.players[pid];
+    ps.x = sx; ps.y = sy; ps.alive = true;
+    ps.bombMax = 1; ps.bombRadius = 2; ps.speedLevel = 0;
+    ps.vest = false; ps.ability = null;
+    ps.curse = null; ps.curseUntil = 0;
+    ps.moving = false; ps.moveDir = null; ps.moveProgress = 0;
+    ps.facingDir = 'down';
+  });
+
+  broadcastRoom(room.id, {
+    type: 'bm-round-start', round: bm.currentRound,
+    grid: bm.grid, players: bmSerializePlayers(bm),
+  });
+
+  // Start tick loop
+  if (bm.tickInterval) clearInterval(bm.tickInterval);
+  bm.tickInterval = setInterval(() => bmTick(room), BM_TICK_MS);
+}
+
+function bmSerializePlayers(bm) {
+  const out = {};
+  for (const [pid, ps] of Object.entries(bm.players)) {
+    out[pid] = {
+      x: ps.x, y: ps.y, alive: ps.alive,
+      bombMax: ps.bombMax, bombRadius: ps.bombRadius,
+      speedLevel: ps.speedLevel, vest: ps.vest,
+      ability: ps.ability, curse: ps.curse,
+      name: ps.name, colorIdx: ps.colorIdx,
+      moving: ps.moving, moveDir: ps.moveDir,
+      moveProgress: ps.moveProgress,
+      facingDir: ps.facingDir,
+    };
+  }
+  return out;
+}
+
+function bmTick(room) {
+  const bm = room.bomberman;
+  if (!bm || !bm.active || !bm.roundActive) return;
+  const now = Date.now();
+  const dt = BM_TICK_MS / 1000; // seconds
+  const events = [];
+
+  // ── Move players ──
+  for (const [pid, ps] of Object.entries(bm.players)) {
+    if (!ps.alive || !ps.moving || !ps.moveDir) continue;
+    const speed = BM_SPEED_BASE + ps.speedLevel * BM_SPEED_INCREMENT;
+    let dir = ps.moveDir;
+    // Curse: reverse controls
+    if (ps.curse === 'reverse' && ps.curseUntil > now) {
+      dir = dir === 'up' ? 'down' : dir === 'down' ? 'up' : dir === 'left' ? 'right' : 'left';
+    }
+    // Curse: slow
+    let effectiveSpeed = speed;
+    if (ps.curse === 'slow' && ps.curseUntil > now) effectiveSpeed = speed * 0.4;
+    if (ps.curse === 'speed' && ps.curseUntil > now) effectiveSpeed = speed * 2.5;
+
+    ps.facingDir = dir;
+    const progress = dt * effectiveSpeed;
+    ps.moveProgress += progress;
+
+    while (ps.moveProgress >= 1) {
+      ps.moveProgress -= 1;
+      let nx = ps.x, ny = ps.y;
+      if (dir === 'up') ny--;
+      else if (dir === 'down') ny++;
+      else if (dir === 'left') nx--;
+      else if (dir === 'right') nx++;
+
+      if (nx < 0 || nx >= BM_COLS || ny < 0 || ny >= BM_ROWS || bm.grid[ny][nx] !== 0) {
+        ps.moveProgress = 0;
+        break;
+      }
+      // Check for bomb blocking (can't walk through bombs unless just placed)
+      let bombBlock = false;
+      for (const b of bm.bombs) {
+        if (b.x === nx && b.y === ny && !(b.x === ps.x && b.y === ps.y)) { bombBlock = true; break; }
+      }
+      if (bombBlock) { ps.moveProgress = 0; break; }
+      ps.x = nx; ps.y = ny;
+
+      // Pickup powerup
+      const key = ny + ',' + nx;
+      if (bm.powerupsOnFloor[key]) {
+        const ptype = bm.powerupsOnFloor[key];
+        delete bm.powerupsOnFloor[key];
+        bmApplyPowerup(ps, ptype, now);
+        events.push({ type: 'bm-powerup-collected', playerId: pid, ptype, x: nx, y: ny });
+      }
+    }
+
+    // Curse: auto-bomb
+    if (ps.curse === 'auto-bomb' && ps.curseUntil > now) {
+      bmPlaceBomb(room, pid);
+    }
+    // Clear expired curses
+    if (ps.curse && ps.curseUntil <= now) {
+      ps.curse = null;
+      ps.curseUntil = 0;
+    }
+  }
+
+  // ── Update bombs ──
+  const toDetonate = [];
+  for (const b of bm.bombs) {
+    if (!b.remote && now >= b.detonateAt) toDetonate.push(b);
+  }
+  for (const b of toDetonate) bmDetonateBomb(room, b, events, now);
+
+  // ── Expire explosions ──
+  bm.explosions = bm.explosions.filter(e => now < e.expiresAt);
+
+  // ── Check shrink timer (2 min) ──
+  const elapsed = now - bm.roundStartedAt;
+  if (elapsed >= BM_ROUND_TIME && !bm.shrinking) {
+    bm.shrinking = true;
+    bm.shrinkRing = 0;
+    bm.lastShrinkAt = now;
+    events.push({ type: 'bm-shrink-warning' });
+  }
+  if (bm.shrinking && now - (bm.lastShrinkAt || now) >= BM_SHRINK_INTERVAL) {
+    bm.lastShrinkAt = now;
+    bmShrinkRing(room, events, now);
+  }
+
+  // ── Broadcast state ──
+  const state = {
+    type: 'bm-state',
+    players: bmSerializePlayers(bm),
+    bombs: bm.bombs.map(b => ({ id: b.id, x: b.x, y: b.y, remote: b.remote, ownerId: b.ownerId, detonateAt: b.detonateAt })),
+    explosions: bm.explosions.map(e => ({ cells: e.cells, expiresAt: e.expiresAt })),
+    powerups: bm.powerupsOnFloor,
+    elapsed: elapsed,
+    shrinking: bm.shrinking,
+    shrinkRing: bm.shrinkRing,
+    events,
+  };
+  broadcastRoom(room.id, state);
+
+  // ── Check round over ──
+  bmCheckRoundEnd(room);
+}
+
+function bmPlaceBomb(room, pid) {
+  const bm = room.bomberman;
+  const ps = bm.players[pid];
+  if (!ps || !ps.alive) return;
+  // Count active bombs for this player
+  const activeBombs = bm.bombs.filter(b => b.ownerId === pid).length;
+  if (activeBombs >= ps.bombMax) return;
+  // Check no bomb already at this cell
+  if (bm.bombs.some(b => b.x === ps.x && b.y === ps.y)) return;
+  const bomb = {
+    id: bm.nextBombId++, x: ps.x, y: ps.y, ownerId: pid,
+    radius: ps.bombRadius,
+    remote: ps.ability === 'remote',
+    detonateAt: ps.ability === 'remote' ? Infinity : Date.now() + BM_BOMB_FUSE,
+  };
+  bm.bombs.push(bomb);
+}
+
+function bmUseAbility(room, pid) {
+  const bm = room.bomberman;
+  const ps = bm.players[pid];
+  if (!ps || !ps.alive) return;
+  if (ps.ability === 'remote') {
+    // Detonate all remote bombs
+    const events = [];
+    const myBombs = bm.bombs.filter(b => b.ownerId === pid && b.remote);
+    for (const b of myBombs) bmDetonateBomb(room, b, events, Date.now());
+    if (events.length > 0) broadcastRoom(room.id, { type: 'bm-remote-detonate', events });
+  } else if (ps.ability === 'punch') {
+    // Punch bomb in facing direction
+    const dx = ps.facingDir === 'left' ? -1 : ps.facingDir === 'right' ? 1 : 0;
+    const dy = ps.facingDir === 'up' ? -1 : ps.facingDir === 'down' ? 1 : 0;
+    // Find bomb at current cell or adjacent in facing direction
+    const nx = ps.x + dx, ny = ps.y + dy;
+    let punchBomb = bm.bombs.find(b => b.x === ps.x && b.y === ps.y);
+    if (!punchBomb) punchBomb = bm.bombs.find(b => b.x === nx && b.y === ny);
+    if (punchBomb) {
+      // Slide the bomb
+      let bx = punchBomb.x, by = punchBomb.y;
+      while (true) {
+        const tx = bx + dx, ty = by + dy;
+        if (tx < 0 || tx >= BM_COLS || ty < 0 || ty >= BM_ROWS || bm.grid[ty][tx] !== 0) break;
+        if (bm.bombs.some(b => b !== punchBomb && b.x === tx && b.y === ty)) break;
+        bx = tx; by = ty;
+      }
+      punchBomb.x = bx; punchBomb.y = by;
+    }
+  }
+}
+
+function bmDetonateBomb(room, bomb, events, now) {
+  const bm = room.bomberman;
+  const idx = bm.bombs.indexOf(bomb);
+  if (idx === -1) return;
+  bm.bombs.splice(idx, 1);
+
+  const cells = [{ x: bomb.x, y: bomb.y }]; // center
+  const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+  for (const [dx, dy] of dirs) {
+    for (let i = 1; i <= bomb.radius; i++) {
+      const nx = bomb.x + dx * i, ny = bomb.y + dy * i;
+      if (nx < 0 || nx >= BM_COLS || ny < 0 || ny >= BM_ROWS) break;
+      if (bm.grid[ny][nx] === 1) break; // hard wall
+      cells.push({ x: nx, y: ny });
+      if (bm.grid[ny][nx] === 2) {
+        // Destroy soft wall
+        bm.grid[ny][nx] = 0;
+        events.push({ type: 'bm-wall-destroyed', x: nx, y: ny });
+        // Reveal powerup
+        const key = ny + ',' + nx;
+        if (bm.softPowerups[key]) {
+          bm.powerupsOnFloor[key] = bm.softPowerups[key];
+          delete bm.softPowerups[key];
+          events.push({ type: 'bm-powerup-revealed', x: nx, y: ny, ptype: bm.powerupsOnFloor[key] });
+        }
+        break; // Stop blast at first soft wall
+      }
+    }
+  }
+
+  bm.explosions.push({ cells, expiresAt: now + BM_EXPLOSION_DURATION });
+
+  // Check chain reaction — detonate any bombs in blast
+  const chainBombs = bm.bombs.filter(b => cells.some(c => c.x === b.x && c.y === b.y));
+  for (const cb of chainBombs) bmDetonateBomb(room, cb, events, now);
+
+  // Check player damage
+  for (const [pid, ps] of Object.entries(bm.players)) {
+    if (!ps.alive) continue;
+    if (cells.some(c => c.x === ps.x && c.y === ps.y)) {
+      if (ps.vest) {
+        ps.vest = false;
+        events.push({ type: 'bm-vest-break', playerId: pid });
+      } else {
+        ps.alive = false;
+        events.push({ type: 'bm-player-eliminated', playerId: pid, name: ps.name });
+      }
+    }
+  }
+}
+
+function bmApplyPowerup(ps, ptype, now) {
+  switch (ptype) {
+    case 'extra-bomb': ps.bombMax++; break;
+    case 'blast-up': ps.bombRadius = Math.min(8, ps.bombRadius + 1); break;
+    case 'speed-up': ps.speedLevel = Math.min(3, ps.speedLevel + 1); break;
+    case 'vest': ps.vest = true; break;
+    case 'punch': ps.ability = 'punch'; break;
+    case 'remote': ps.ability = 'remote'; break;
+    case 'skull':
+      ps.curse = BM_CURSE_TYPES[Math.floor(Math.random() * BM_CURSE_TYPES.length)];
+      ps.curseUntil = now + BM_CURSE_DURATION;
+      break;
+  }
+}
+
+function bmShrinkRing(room, events, now) {
+  const bm = room.bomberman;
+  bm.shrinkRing++;
+  const ring = bm.shrinkRing - 1;
+  // Fill in edges ring by ring
+  for (let x = ring; x < BM_COLS - ring; x++) {
+    for (const y of [ring, BM_ROWS - 1 - ring]) {
+      if (y >= 0 && y < BM_ROWS && x >= 0 && x < BM_COLS && bm.grid[y][x] !== 1) {
+        bm.grid[y][x] = 1; // becomes hard wall
+        // Kill any player standing here
+        for (const [pid, ps] of Object.entries(bm.players)) {
+          if (ps.alive && ps.x === x && ps.y === y) {
+            ps.alive = false;
+            events.push({ type: 'bm-player-eliminated', playerId: pid, name: ps.name });
+          }
+        }
+      }
+    }
+  }
+  for (let y = ring; y < BM_ROWS - ring; y++) {
+    for (const x of [ring, BM_COLS - 1 - ring]) {
+      if (y >= 0 && y < BM_ROWS && x >= 0 && x < BM_COLS && bm.grid[y][x] !== 1) {
+        bm.grid[y][x] = 1;
+        for (const [pid, ps] of Object.entries(bm.players)) {
+          if (ps.alive && ps.x === x && ps.y === y) {
+            ps.alive = false;
+            events.push({ type: 'bm-player-eliminated', playerId: pid, name: ps.name });
+          }
+        }
+      }
+    }
+  }
+  events.push({ type: 'bm-shrink', ring: bm.shrinkRing, grid: bm.grid });
+}
+
+function bmCheckRoundEnd(room) {
+  const bm = room.bomberman;
+  if (!bm || !bm.active || !bm.roundActive) return;
+  const alive = Object.entries(bm.players).filter(([, ps]) => ps.alive && !ps.disconnected);
+  if (alive.length > 1) return;
+
+  bm.roundActive = false;
+  if (bm.tickInterval) { clearInterval(bm.tickInterval); bm.tickInterval = null; }
+
+  const winnerId = alive.length === 1 ? alive[0][0] : null;
+  if (winnerId) bm.roundWins[winnerId] = (bm.roundWins[winnerId] || 0) + 1;
+
+  broadcastRoom(room.id, {
+    type: 'bm-round-over',
+    winnerId, winnerName: winnerId ? bm.players[winnerId].name : null,
+    roundWins: bm.roundWins, round: bm.currentRound,
+  });
+
+  // Check match over
+  if (winnerId && bm.roundWins[winnerId] >= BM_WINS_NEEDED) {
+    setTimeout(() => {
+      if (!room.bomberman?.active) return;
+      room.bomberman.active = false;
+      room.status = 'waiting';
+      broadcastRoom(room.id, {
+        type: 'bm-match-over',
+        winnerId, winnerName: bm.players[winnerId].name,
+        roundWins: bm.roundWins,
+      });
+      broadcastLobby();
+    }, BM_BETWEEN_ROUNDS);
+  } else {
+    // Next round
+    bm.currentRound++;
+    setTimeout(() => {
+      if (!room.bomberman?.active) return;
+      bmStartRound(room);
+    }, BM_BETWEEN_ROUNDS);
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  MINESWEEPER HELPERS
+// ═══════════════════════════════════════════════════════════════════
+
+function msStartGame(room, size, density, timeLimit) {
+  const totalCells = size * size;
+  const mineCount = Math.floor(totalCells * density / 100);
+  const board = [];
+  for (let r = 0; r < size; r++) {
+    const row = [];
+    for (let c = 0; c < size; c++) {
+      row.push({ mine: false, adjacent: 0, revealed: false, revealedBy: null, flaggedBy: null, trap: null, decoy: null });
+    }
+    board.push(row);
+  }
+  // Mines placed after first click
+  const players = {};
+  let colorIdx = 0;
+  for (const [pid, p] of room.players) {
+    players[pid] = {
+      name: p.name, colorIdx: colorIdx++,
+      score: 0, flags: 10, charges: 0,
+      stunUntil: 0, shield: false, frenzy: false, frenzyUntil: 0,
+      targeting: null, pointsAccum: 0,
+    };
+  }
+
+  room.minesweeper = {
+    active: true, board, size, mineCount, density,
+    minesPlaced: false, players,
+    totalSafe: totalCells - mineCount,
+    revealedCount: 0,
+    timeLimit: timeLimit * 60 * 1000,
+    startedAt: Date.now(),
+    timer: null,
+  };
+  room.status = 'playing';
+  broadcastLobby();
+
+  const playersInfo = {};
+  for (const [pid, ps] of Object.entries(players)) {
+    playersInfo[pid] = { name: ps.name, colorIdx: ps.colorIdx, score: 0, flags: 10, charges: 0 };
+  }
+  broadcastRoom(room.id, {
+    type: 'ms-start', size, mineCount, density,
+    players: playersInfo, timeLimit: room.minesweeper.timeLimit,
+  });
+
+  // Set time limit
+  room.minesweeper.timer = setTimeout(() => msEndGame(room), room.minesweeper.timeLimit);
+  log('info', 'ms-start', { roomId: room.id, size, density, timeLimit, players: Object.keys(players).length });
+}
+
+function msPlaceMines(ms, safeR, safeC) {
+  const positions = [];
+  for (let r = 0; r < ms.size; r++) {
+    for (let c = 0; c < ms.size; c++) {
+      if (Math.abs(r - safeR) <= 1 && Math.abs(c - safeC) <= 1) continue;
+      positions.push([r, c]);
+    }
+  }
+  // Shuffle and pick
+  for (let i = positions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [positions[i], positions[j]] = [positions[j], positions[i]];
+  }
+  const count = Math.min(ms.mineCount, positions.length);
+  for (let i = 0; i < count; i++) {
+    const [r, c] = positions[i];
+    ms.board[r][c].mine = true;
+  }
+  // Calculate adjacency
+  for (let r = 0; r < ms.size; r++) {
+    for (let c = 0; c < ms.size; c++) {
+      if (ms.board[r][c].mine) continue;
+      let adj = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = r + dr, nc = c + dc;
+          if (nr >= 0 && nr < ms.size && nc >= 0 && nc < ms.size && ms.board[nr][nc].mine) adj++;
+        }
+      }
+      ms.board[r][c].adjacent = adj;
+    }
+  }
+  ms.minesPlaced = true;
+}
+
+function msRevealCell(room, pid, r, c) {
+  const ms = room.minesweeper;
+  const msp = ms.players[pid];
+  if (!msp) return;
+  const now = Date.now();
+  if (msp.stunUntil > now) return;
+  const cell = ms.board[r][c];
+  if (cell.revealed) return;
+  if (cell.flaggedBy) return;
+
+  if (!ms.minesPlaced) msPlaceMines(ms, r, c);
+
+  // Check for decoy trap
+  if (cell.decoy && cell.decoy !== pid) {
+    cell.decoy = null;
+    msp.stunUntil = now + 4000;
+    broadcastRoom(room.id, { type: 'ms-trap-triggered', playerId: pid, row: r, col: c, stunUntil: msp.stunUntil });
+    return;
+  }
+
+  // Check for planted trap on revealed cell
+  if (cell.trap && cell.trap !== pid && cell.revealed) {
+    cell.trap = null;
+    msp.stunUntil = now + 4000;
+    broadcastRoom(room.id, { type: 'ms-trap-triggered', playerId: pid, row: r, col: c, stunUntil: msp.stunUntil });
+    return;
+  }
+
+  if (cell.mine) {
+    // Hit mine
+    msp.score -= 5;
+    msp.stunUntil = now + (msp.frenzy && msp.frenzyUntil > now ? 0 : (msp.shield ? 0 : 4000));
+    if (msp.shield) {
+      msp.shield = false;
+      msp.stunUntil = 0;
+    }
+    cell.revealed = true;
+    cell.revealedBy = pid;
+    broadcastRoom(room.id, {
+      type: 'ms-mine-hit', playerId: pid, row: r, col: c,
+      score: msp.score, stunUntil: msp.stunUntil,
+    });
+    msCheckEnd(room);
+    return;
+  }
+
+  // Safe cell — flood fill if 0
+  const revealed = [];
+  const stack = [[r, c]];
+  while (stack.length > 0) {
+    const [cr, cc] = stack.pop();
+    if (cr < 0 || cr >= ms.size || cc < 0 || cc >= ms.size) continue;
+    const cl = ms.board[cr][cc];
+    if (cl.revealed || cl.mine || cl.flaggedBy) continue;
+    cl.revealed = true;
+    cl.revealedBy = pid;
+    ms.revealedCount++;
+    msp.score++;
+    msp.pointsAccum++;
+    revealed.push({ row: cr, col: cc, adjacent: cl.adjacent });
+    if (cl.adjacent === 0) {
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          stack.push([cr + dr, cc + dc]);
+        }
+      }
+    }
+  }
+
+  // Award charges: 1 per 10 points accumulated
+  while (msp.pointsAccum >= 10) {
+    msp.pointsAccum -= 10;
+    if (msp.charges < 3) msp.charges++;
+  }
+
+  broadcastRoom(room.id, {
+    type: 'ms-revealed', playerId: pid, cells: revealed,
+    score: msp.score, charges: msp.charges,
+  });
+
+  msCheckEnd(room);
+}
+
+function msApplyInstantPowerup(room, pid, ptype) {
+  const ms = room.minesweeper;
+  const msp = ms.players[pid];
+  if (msp.charges <= 0) return;
+  msp.charges--;
+
+  if (ptype === 'shield') {
+    msp.shield = true;
+    const p = room.players.get(pid);
+    if (p) send(p.ws, { type: 'ms-powerup-applied', powerup: 'shield', charges: msp.charges });
+  } else if (ptype === 'scanner') {
+    // Reveal 3 random mine locations to this player only
+    const mines = [];
+    for (let r = 0; r < ms.size; r++) {
+      for (let c = 0; c < ms.size; c++) {
+        if (ms.board[r][c].mine && !ms.board[r][c].revealed) mines.push({ row: r, col: c });
+      }
+    }
+    // Shuffle and take 3
+    for (let i = mines.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [mines[i], mines[j]] = [mines[j], mines[i]];
+    }
+    const revealed = mines.slice(0, 3);
+    const p = room.players.get(pid);
+    if (p) send(p.ws, { type: 'ms-scanner', mines: revealed, duration: 5000, charges: msp.charges });
+  } else if (ptype === 'frenzy') {
+    msp.frenzy = true;
+    msp.frenzyUntil = Date.now() + 6000;
+    msp.shield = true; // frenzy includes stun immunity
+    const p = room.players.get(pid);
+    if (p) send(p.ws, { type: 'ms-frenzy', until: msp.frenzyUntil, charges: msp.charges });
+    broadcastRoom(room.id, { type: 'ms-player-frenzy', playerId: pid, until: msp.frenzyUntil });
+  }
+
+  broadcastRoom(room.id, { type: 'ms-score-update', playerId: pid, score: msp.score, charges: msp.charges, shield: msp.shield });
+}
+
+function msUsePowerupTarget(room, pid, r, c) {
+  const ms = room.minesweeper;
+  const msp = ms.players[pid];
+  if (!msp || msp.charges <= 0) { msp.targeting = null; return; }
+  const ptype = msp.targeting;
+  msp.targeting = null;
+  msp.charges--;
+
+  if (ptype === 'reveal') {
+    // Safely reveal 3x3 area, mines stay hidden but flash for player
+    const revealed = [];
+    const minesInArea = [];
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const nr = r + dr, nc = c + dc;
+        if (nr < 0 || nr >= ms.size || nc < 0 || nc >= ms.size) continue;
+        const cl = ms.board[nr][nc];
+        if (cl.revealed) continue;
+        if (cl.mine) {
+          minesInArea.push({ row: nr, col: nc });
+          continue;
+        }
+        cl.revealed = true;
+        cl.revealedBy = pid;
+        ms.revealedCount++;
+        msp.score++;
+        msp.pointsAccum++;
+        revealed.push({ row: nr, col: nc, adjacent: cl.adjacent });
+      }
+    }
+    while (msp.pointsAccum >= 10) { msp.pointsAccum -= 10; if (msp.charges < 3) msp.charges++; }
+    broadcastRoom(room.id, { type: 'ms-revealed', playerId: pid, cells: revealed, score: msp.score, charges: msp.charges });
+    const p = room.players.get(pid);
+    if (p && minesInArea.length > 0) send(p.ws, { type: 'ms-reveal-mines-flash', mines: minesInArea, duration: 3000 });
+  } else if (ptype === 'magnet') {
+    // Place decoy trap
+    const cl = ms.board[r][c];
+    if (!cl.revealed) {
+      cl.decoy = pid;
+      const p = room.players.get(pid);
+      if (p) send(p.ws, { type: 'ms-decoy-placed', row: r, col: c, charges: msp.charges });
+    }
+  } else if (ptype === 'trap') {
+    // Plant trap on revealed safe cell
+    const cl = ms.board[r][c];
+    if (cl.revealed && !cl.mine) {
+      cl.trap = pid;
+      const p = room.players.get(pid);
+      if (p) send(p.ws, { type: 'ms-trap-placed', row: r, col: c, charges: msp.charges });
+    }
+  }
+
+  broadcastRoom(room.id, { type: 'ms-score-update', playerId: pid, score: msp.score, charges: msp.charges, shield: msp.shield });
+  msCheckEnd(room);
+}
+
+function msCheckEnd(room) {
+  const ms = room.minesweeper;
+  if (!ms || !ms.active) return;
+  if (ms.revealedCount >= ms.totalSafe) {
+    msEndGame(room);
+  }
+}
+
+function msEndGame(room) {
+  const ms = room.minesweeper;
+  if (!ms || !ms.active) return;
+  ms.active = false;
+  if (ms.timer) { clearTimeout(ms.timer); ms.timer = null; }
+  room.status = 'waiting';
+
+  // Calculate final scores — correct flags bonus, incorrect flag penalty
+  const flagResults = {};
+  for (let r = 0; r < ms.size; r++) {
+    for (let c = 0; c < ms.size; c++) {
+      const cl = ms.board[r][c];
+      if (cl.flaggedBy) {
+        const pid = cl.flaggedBy;
+        if (!flagResults[pid]) flagResults[pid] = { correct: 0, incorrect: 0 };
+        if (cl.mine) {
+          flagResults[pid].correct++;
+          if (ms.players[pid]) ms.players[pid].score += 3;
+        } else {
+          flagResults[pid].incorrect++;
+          if (ms.players[pid]) ms.players[pid].score -= 2;
+        }
+      }
+    }
+  }
+
+  // Find winner
+  let winnerId = null, bestScore = -Infinity;
+  for (const [pid, ps] of Object.entries(ms.players)) {
+    if (ps.score > bestScore) { bestScore = ps.score; winnerId = pid; }
+  }
+
+  // Reveal all mines
+  const mines = [];
+  for (let r = 0; r < ms.size; r++) {
+    for (let c = 0; c < ms.size; c++) {
+      if (ms.board[r][c].mine) mines.push({ row: r, col: c });
+    }
+  }
+
+  const finalScores = {};
+  for (const [pid, ps] of Object.entries(ms.players)) {
+    finalScores[pid] = { name: ps.name, score: ps.score, colorIdx: ps.colorIdx, flagResults: flagResults[pid] || { correct: 0, incorrect: 0 } };
+  }
+
+  broadcastRoom(room.id, {
+    type: 'ms-game-over',
+    winnerId, winnerName: winnerId ? ms.players[winnerId].name : null,
+    finalScores, mines, flagResults,
+  });
+  broadcastLobby();
 }
 
 // ── Start ───────────────────────────────────────────────────────

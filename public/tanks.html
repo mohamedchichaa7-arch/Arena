@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tank Battle — Game Arena</title>
+  <link rel="stylesheet" href="tanks.css">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap"
+    rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">1</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">&larr; Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">&#x1F465;</button>
+        <h1 class="logo logo-sm">TANK BATTLE</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-mobile-toggle" id="btnToggleChat" title="Chat">&#x1F4AC;</button>
+        <button class="btn btn-sm btn-rules" id="btnRules">&#x1F4DC; Rules</button>
+      </header>
+
+      <div class="controls" id="preGameControls">
+        <button class="btn btn-primary" id="btnStartGame">Start Battle</button>
+      </div>
+
+      <div class="status" id="status">Connecting&hellip;</div>
+
+      <!-- Wind indicator -->
+      <div class="wind-bar" id="windBar" style="display:none">
+        <span class="wind-label">Wind:</span>
+        <span class="wind-arrow" id="windArrow">&rarr;</span>
+        <span class="wind-value" id="windValue">0</span>
+      </div>
+
+      <!-- Turn timer -->
+      <div class="turn-timer" id="turnTimer" style="display:none">
+        <span id="timerValue">30</span>s
+      </div>
+
+      <div class="canvas-area" id="canvasArea">
+        <canvas id="gameCanvas"></canvas>
+      </div>
+
+      <!-- HUD: weapon selector, angle/power, movement -->
+      <div class="hud" id="hud" style="display:none">
+        <div class="hud-section hud-move">
+          <button class="btn btn-sm" id="btnMoveLeft">&larr; Move</button>
+          <span class="move-budget" id="moveBudget">50</span>
+          <button class="btn btn-sm" id="btnMoveRight">Move &rarr;</button>
+        </div>
+        <div class="hud-section hud-aim">
+          <label>Angle: <span id="angleValue">90</span>&deg;</label>
+          <input type="range" id="angleSlider" min="0" max="180" value="90">
+        </div>
+        <div class="hud-section hud-power">
+          <label>Power: <span id="powerValue">50</span>%</label>
+          <input type="range" id="powerSlider" min="5" max="100" value="50">
+        </div>
+        <div class="hud-section hud-weapons" id="weaponSelector">
+          <!-- populated by JS -->
+        </div>
+        <div class="hud-section hud-fire">
+          <button class="btn btn-fire" id="btnFire">&#x1F525; FIRE</button>
+          <button class="btn btn-shield" id="btnShield" style="display:none">&#x1F6E1;&#xFE0F; Shield</button>
+        </div>
+      </div>
+
+      <!-- Airstrike target overlay -->
+      <div class="airstrike-overlay" id="airstrikeOverlay" style="display:none">
+        <p>Click on the map to choose airstrike target</p>
+        <button class="btn btn-sm" id="btnCancelAirstrike">Cancel</button>
+      </div>
+
+    </main>
+
+    <aside class="chat-panel">
+      <div class="chat-header">Chat</div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" type="text" placeholder="Message&hellip;" maxlength="200" autocomplete="off">
+        <button class="btn chat-send-btn" id="chatSend">&uarr;</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Result overlay -->
+  <div class="overlay" id="resultOverlay">
+    <div class="result-card">
+      <h2 class="result-title" id="resultTitle">Victory!</h2>
+      <div class="result-summary" id="resultSummary"></div>
+      <button class="btn btn-primary btn-lg" id="btnRematch">Back to Lobby</button>
+    </div>
+  </div>
+
+  <!-- Rules panel -->
+  <div class="rules-panel" id="rulesPanel" style="display:none">
+    <div class="rules-card">
+      <button class="rules-close" id="rulesClose">&times;</button>
+      <h2>Tank Battle Rules</h2>
+      <ul>
+        <li><strong>Players:</strong> 2-4 players, each with a tank (100 HP).</li>
+        <li><strong>Turns:</strong> 30 seconds per turn. Move, aim, set power, choose weapon, then fire!</li>
+        <li><strong>Terrain:</strong> Destructible! Explosions carve craters. Fall off = death.</li>
+        <li><strong>Wind:</strong> Changes each turn. Affects projectile trajectory.</li>
+        <li><strong>Weapons:</strong>
+          <ul>
+            <li>&#x1F535; Standard Shell &mdash; unlimited, moderate damage</li>
+            <li>&#x1F4A5; Heavy Shell &mdash; 3 shots, big boom</li>
+            <li>&#x1F300; Cluster Bomb &mdash; 2 shots, splits into 5 bomblets</li>
+            <li>&#x1F3AF; Sniper Round &mdash; 3 shots, straight line, ignores wind</li>
+            <li>&#x2601;&#xFE0F; Air Strike &mdash; 1 shot, pick X position, 3 shells rain down</li>
+            <li>&#x1F6E1;&#xFE0F; Shield &mdash; 1 use, absorbs next hit</li>
+          </ul>
+        </li>
+        <li><strong>Win:</strong> Last tank standing wins!</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="panel-backdrop" id="panelBackdrop"></div>
+  <script>
+    (function () {
+      var sidebar = document.querySelector('.sidebar');
+      var chat = document.querySelector('.chat-panel');
+      var backdrop = document.getElementById('panelBackdrop');
+      var btnSidebar = document.getElementById('btnToggleSidebar');
+      var btnChat = document.getElementById('btnToggleChat');
+      function closeAll() { sidebar.classList.remove('open'); chat.classList.remove('open'); backdrop.classList.remove('show'); }
+      btnSidebar.addEventListener('click', function () { var o = sidebar.classList.contains('open'); closeAll(); if (!o) { sidebar.classList.add('open'); backdrop.classList.add('show'); } });
+      btnChat.addEventListener('click', function () { var o = chat.classList.contains('open'); closeAll(); if (!o) { chat.classList.add('open'); backdrop.classList.add('show'); } });
+      backdrop.addEventListener('click', closeAll);
+    })();
+  </script>
+  <script src="tanks.js"></script>
+</body>
+
+</html>
