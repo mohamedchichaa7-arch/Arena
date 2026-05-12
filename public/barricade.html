@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Barricade (Malefiz) — Game Arena</title>
+  <link rel="stylesheet" href="barricade.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+
+<body>
+  <div class="layout">
+
+    <!-- Left sidebar: player list -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">1</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+      <div class="event-log" id="eventLog" style="display:none">
+        <div class="event-log-header">Events</div>
+        <div class="event-log-list" id="eventLogList"></div>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
+        <h1 class="logo logo-sm">BARRICADE</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-mobile-toggle" id="btnToggleChat" title="Chat">💬</button>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+
+      <!-- Pre-game controls -->
+      <div class="controls" id="controls">
+        <button class="btn btn-primary" id="btnStartGame">▶ Start Game</button>
+      </div>
+
+      <div class="status" id="status">Connecting…</div>
+
+      <!-- Dice area -->
+      <div class="dice-area" id="diceArea" style="display:none">
+        <div class="dice-scene-wrap">
+          <div class="dice-scene">
+            <div class="dice-cube" id="diceCube">
+              <div class="dice-face face-1"></div>
+              <div class="dice-face face-2"></div>
+              <div class="dice-face face-3"></div>
+              <div class="dice-face face-4"></div>
+              <div class="dice-face face-5"></div>
+              <div class="dice-face face-6"></div>
+            </div>
+          </div>
+        </div>
+        <div class="dice-info">
+          <button class="btn btn-primary btn-roll" id="btnRoll" disabled>🎲 Roll</button>
+          <div class="turn-tag" id="turnTag">Waiting…</div>
+        </div>
+      </div>
+
+      <!-- Board area -->
+      <div class="board-outer" id="boardOuter" style="display:none">
+        <div class="board-wrapper" id="boardWrapper">
+          <div class="board-grid" id="boardGrid"></div>
+          <div class="piece-layer" id="pieceLayer"></div>
+        </div>
+      </div>
+
+      <!-- Barricade placement bar -->
+      <div id="barricadePlaceBar" style="display:none">
+        <span class="bp-icon">🧱</span>
+        <span class="bp-text">Click a highlighted square to place the barricade!</span>
+        <span class="bp-countdown" id="barricadeCountdown">15</span>
+      </div>
+    </main>
+
+    <!-- Right sidebar: chat -->
+    <aside class="chat-panel" id="chatPanel">
+      <div class="chat-header">Chat</div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" type="text" placeholder="Message…" maxlength="200" autocomplete="off">
+        <button class="btn chat-send-btn" id="chatSend">↑</button>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Overlays -->
+  <div class="overlay" id="resultOverlay" style="display:none">
+    <div class="result-card">
+      <div class="result-emoji" id="resultEmoji">🏆</div>
+      <h2 class="result-title" id="resultTitle">Winner!</h2>
+      <p class="result-sub" id="resultSub"></p>
+      <button class="btn btn-primary btn-lg" id="btnPlayAgain">Play Again</button>
+    </div>
+  </div>
+
+  <canvas id="confetti"></canvas>
+
+  <!-- Rules panel -->
+  <div class="rules-panel" id="rulesPanel" style="display:none">
+    <div class="rules-card">
+      <button class="rules-close" id="rulesClose">✕</button>
+      <h2>Barricade (Malefiz) Rules</h2>
+      <ul>
+        <li><strong>Players:</strong> 2–4 players, each with 5 pawns.</li>
+        <li><strong>Goal:</strong> Be the first to land a pawn on the goal square at the top.</li>
+        <li><strong>Rolling:</strong> Roll the die, then select a pawn and move it exactly that many steps.</li>
+        <li><strong>Movement:</strong> Pawns can move in any direction along the path but cannot reverse direction mid-move.</li>
+        <li><strong>Barricades:</strong> White blockers that cannot be passed. Land exactly on one to capture it, then place it on any valid empty square.</li>
+        <li><strong>Capturing:</strong> Land on an opponent's pawn to send it back to their house.</li>
+        <li><strong>No friendly fire:</strong> You cannot land on your own pawns.</li>
+        <li><strong>Exact landing:</strong> You must land exactly on the goal — no overshooting.</li>
+        <li><strong>House exit:</strong> House spaces don't count against the die roll.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="panel-backdrop" id="panelBackdrop"></div>
+
+  <script src="barricade.js"></script>
+</body>
+</html>

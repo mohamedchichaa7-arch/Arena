@@ -40,6 +40,20 @@
   let animFrame = null;
   let shakeAmount = 0;
 
+  // ── State interpolation ────────────────────────────────────────────
+  // On each server tick we record:
+  //   iFrom[pid]  — rendered position the moment the tick arrived
+  //   iTo[pid]    — server's confirmed sub-cell float position
+  //   iAt[pid]    — performance.now() when the tick arrived
+  // Each frame we lerp iFrom→iTo over TICK_MS ms, then coast at iTo.
+  // Nothing ever moves backward; wall-stops converge smoothly.
+  const TICK_MS   = 55;   // slightly over server 50ms to avoid pop at boundary
+  const iFrom     = {};
+  const iTo       = {};
+  const iAt       = {};
+  const iFacing   = {};
+  let localFacingDir = 'down';
+
   function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
   // ── Network ──────────────────────────────────────────────────
@@ -179,6 +193,15 @@
     elapsed = 0;
     roundOverlay.style.display = 'none';
     statusEl.textContent = '';
+    localFacingDir = 'down';
+    // Seed interpolation state at spawn positions
+    const t0 = performance.now();
+    for (const [pid, ps] of Object.entries(players)) {
+      iFrom[pid] = { x: ps.x, y: ps.y };
+      iTo[pid]   = { x: ps.x, y: ps.y };
+      iAt[pid]   = t0;
+      iFacing[pid] = 'down';
+    }
     updatePlayerCards();
   }
 
@@ -218,6 +241,24 @@
     const m = Math.floor(remain / 60), s = remain % 60;
     timerDisplay.textContent = m + ':' + String(s).padStart(2, '0');
     timerDisplay.classList.toggle('danger', remain <= 30);
+
+    // Update interpolation targets from server tick
+    const tickNow = performance.now();
+    for (const [pid, ps] of Object.entries(msg.players)) {
+      // Compute server's sub-cell float position
+      const dx = (ps.moving && ps.moveDir === 'left') ? -1 : (ps.moving && ps.moveDir === 'right') ? 1 : 0;
+      const dy = (ps.moving && ps.moveDir === 'up')   ? -1 : (ps.moving && ps.moveDir === 'down')  ? 1 : 0;
+      const prog = ps.moving ? (ps.moveProgress || 0) : 0;
+      const tgtX = ps.x + dx * prog;
+      const tgtY = ps.y + dy * prog;
+
+      // Current rendered position becomes the new origin for this tick's lerp
+      const cur = getRenderPos(pid);
+      iFrom[pid] = cur || { x: tgtX, y: tgtY };
+      iTo[pid]   = { x: tgtX, y: tgtY };
+      iAt[pid]   = tickNow;
+      iFacing[pid] = ps.facingDir || iFacing[pid] || 'down';
+    }
 
     updatePlayerCards();
   }
@@ -304,10 +345,10 @@
     if (keysDown.has(key)) return;
     keysDown.add(key);
 
-    if (key === 'w' || key === 'arrowup') { wsSend({ type: 'bm-input', action: 'move-start', dir: 'up' }); e.preventDefault(); }
-    else if (key === 's' || key === 'arrowdown') { wsSend({ type: 'bm-input', action: 'move-start', dir: 'down' }); e.preventDefault(); }
-    else if (key === 'a' || key === 'arrowleft') { wsSend({ type: 'bm-input', action: 'move-start', dir: 'left' }); e.preventDefault(); }
-    else if (key === 'd' || key === 'arrowright') { wsSend({ type: 'bm-input', action: 'move-start', dir: 'right' }); e.preventDefault(); }
+    if (key === 'w' || key === 'arrowup') { localFacingDir = 'up'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'up' }); e.preventDefault(); }
+    else if (key === 's' || key === 'arrowdown') { localFacingDir = 'down'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'down' }); e.preventDefault(); }
+    else if (key === 'a' || key === 'arrowleft') { localFacingDir = 'left'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'left' }); e.preventDefault(); }
+    else if (key === 'd' || key === 'arrowright') { localFacingDir = 'right'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'right' }); e.preventDefault(); }
     else if (key === ' ') { wsSend({ type: 'bm-input', action: 'bomb' }); e.preventDefault(); }
     else if (key === 'e' || key === 'f') { wsSend({ type: 'bm-input', action: 'ability' }); e.preventDefault(); }
   });
@@ -323,7 +364,12 @@
       for (const k of keysDown) {
         if (dirKeys[k]) { stillMoving = true; break; }
       }
-      if (!stillMoving) wsSend({ type: 'bm-input', action: 'move-stop' });
+      if (!stillMoving) {
+        wsSend({ type: 'bm-input', action: 'move-stop' });
+      } else {
+        const dirKeys2 = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right' };
+        for (const k of keysDown) { if (dirKeys2[k]) { localFacingDir = dirKeys2[k]; break; } }
+      }
     }
   });
 
@@ -332,6 +378,7 @@
   dpadBtns.forEach(btn => {
     btn.addEventListener('touchstart', e => {
       e.preventDefault();
+      localFacingDir = btn.dataset.dir;
       wsSend({ type: 'bm-input', action: 'move-start', dir: btn.dataset.dir });
     });
     btn.addEventListener('touchend', e => {
@@ -354,6 +401,17 @@
     canvas.style.height = Math.floor(arenaH * scale) + 'px';
   }
   window.addEventListener('resize', resizeCanvas);
+
+  // ── Interpolation sampler ─────────────────────────────────────────
+  function getRenderPos(pid) {
+    if (!iTo[pid]) return null;
+    if (!iFrom[pid]) return iTo[pid];
+    const t = Math.min((performance.now() - iAt[pid]) / TICK_MS, 1);
+    return {
+      x: iFrom[pid].x + (iTo[pid].x - iFrom[pid].x) * t,
+      y: iFrom[pid].y + (iTo[pid].y - iFrom[pid].y) * t,
+    };
+  }
 
   function renderLoop() {
     render();
@@ -480,16 +538,10 @@
       if (!ps.alive) continue;
       const info = playersInfo.find(i => i.id === pid);
       const color = PLAYER_COLORS[info ? info.colorIdx : 0];
-      // Smooth interpolation using moveProgress
-      let renderX = ps.x, renderY = ps.y;
-      if (ps.moving && ps.moveDir && ps.moveProgress > 0) {
-        const dx = ps.moveDir === 'right' ? 1 : ps.moveDir === 'left' ? -1 : 0;
-        const dy = ps.moveDir === 'down' ? 1 : ps.moveDir === 'up' ? -1 : 0;
-        renderX += dx * Math.min(ps.moveProgress, 1);
-        renderY += dy * Math.min(ps.moveProgress, 1);
-      }
-      const px = renderX * CELL + CELL / 2;
-      const py = renderY * CELL + CELL / 2;
+      const rp = getRenderPos(pid) || { x: ps.x, y: ps.y };
+      const px = rp.x * CELL + CELL / 2;
+      const py = rp.y * CELL + CELL / 2;
+      const facing = (pid === myId) ? localFacingDir : (iFacing[pid] || 'down');
 
       // Body
       ctx.beginPath();
@@ -501,8 +553,8 @@
       ctx.stroke();
 
       // Eyes (direction-based)
-      const eyeOffX = ps.facingDir === 'left' ? -4 : ps.facingDir === 'right' ? 4 : 0;
-      const eyeOffY = ps.facingDir === 'up' ? -4 : ps.facingDir === 'down' ? 4 : 0;
+      const eyeOffX = facing === 'left' ? -4 : facing === 'right' ? 4 : 0;
+      const eyeOffY = facing === 'up' ? -4 : facing === 'down' ? 4 : 0;
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.arc(px - 4 + eyeOffX * 0.5, py - 3 + eyeOffY * 0.5, 3, 0, Math.PI * 2);

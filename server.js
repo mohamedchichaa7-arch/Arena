@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -549,6 +549,61 @@ function removeFromRoom(conn) {
       broadcastRoom(room.id, { type: 'ms-player-left', id: conn.id });
     }
   }
+  if (room.barricade && room.barricade.active) {
+    const bar = room.barricade;
+    const disconnectedName = conn.name;
+    const roomId = room.id;
+    const wasTurn = bar.turnOrder[bar.turnIdx] === conn.id;
+
+    // Store state for reconnect window (keep pawns, remember position in turn order)
+    if (!bar.disconnects) bar.disconnects = new Map();
+    bar.disconnects.set(disconnectedName, {
+      id: conn.id,
+      colorIdx: bar.playerColorMap[conn.id],
+      pawnPositions: [...(bar.pawns[conn.id] || [])],
+      turnOrderIdx: bar.turnOrder.indexOf(conn.id),
+      at: Date.now(),
+    });
+
+    // Remove from active turn order but keep pawns on board
+    bar.turnOrder = bar.turnOrder.filter(pid => pid !== conn.id);
+    if (bar.barricadePlaceTimer) { clearTimeout(bar.barricadePlaceTimer); bar.barricadePlaceTimer = null; }
+    if (bar.reconnectTimer) { clearTimeout(bar.reconnectTimer); bar.reconnectTimer = null; }
+
+    if (room.players.size === 0) {
+      room.barricade = null;
+    } else if (bar.turnOrder.length < 1) {
+      bar.active = false;
+      room.status = 'waiting';
+      broadcastRoom(roomId, { type: 'bar-aborted', reason: 'Not enough players' });
+    } else {
+      bar.paused = true;
+      if (bar.turnIdx >= bar.turnOrder.length) bar.turnIdx = 0;
+      if (bar.pendingBarricadePlacement) {
+        // Auto-place barricade and continue
+        bar.pendingBarricadePlacement = false;
+        const vp = barGetValidBarricadePlacements(bar);
+        if (vp.length > 0) bar.barricadePositions.push(vp[Math.floor(Math.random() * vp.length)]);
+      }
+      broadcastRoom(roomId, {
+        type: 'bar-player-disconnect',
+        name: disconnectedName,
+        reconnectWindowMs: 30000,
+      });
+      // After 30 s with no reconnect: unpause and skip their turns
+      bar.reconnectTimer = setTimeout(() => {
+        const r = rooms.get(roomId);
+        if (!r?.barricade?.active) return;
+        r.barricade.disconnects.delete(disconnectedName);
+        delete r.barricade.pawns[conn.id];
+        r.barricade.paused = false;
+        broadcastRoom(roomId, { type: 'bar-disconnect-timeout', name: disconnectedName, pawns: r.barricade.pawns, barricades: r.barricade.barricadePositions });
+        if (wasTurn) barSendTurn(r);
+        else barBroadcastState(r);
+        log('info', 'bar-disconnect-timeout', { roomId, name: disconnectedName });
+      }, 30000);
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -556,7 +611,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -652,9 +707,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -727,6 +782,9 @@ wss.on('connection', (ws, req) => {
         let isBrReconnect = false;
         if (room.br?.active && room.br.disconnects?.has(conn.name)) isBrReconnect = true;
 
+        // Check for Barricade reconnect
+        const isBarReconnect = room.barricade?.active && room.barricade.disconnects?.has(conn.name);
+
         // Lock snakesladders rooms while game is running
         if (room.status === 'playing' && room.type === 'snakesladders') {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
@@ -752,6 +810,10 @@ wss.on('connection', (ws, req) => {
         }
         // Lock minesweeper rooms while game is running
         if (room.status === 'playing' && room.type === 'minesweeper') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
+        // Lock barricade rooms while game is running (allow reconnects)
+        if (room.status === 'playing' && room.type === 'barricade' && !isBarReconnect) {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
 
@@ -799,6 +861,36 @@ wss.on('connection', (ws, req) => {
           broadcastRoom(room.id, { type: 'player-joined', id, name: conn.name, leaderId: room.players.keys().next().value }, id);
           sendUnoFullState(room, id);
           sendUnoTurn(room);
+        }
+
+        // Restore Barricade state on reconnect
+        if (isBarReconnect) {
+          const bar = room.barricade;
+          const disc = bar.disconnects.get(conn.name);
+          bar.disconnects.delete(conn.name);
+          if (bar.reconnectTimer) { clearTimeout(bar.reconnectTimer); bar.reconnectTimer = null; }
+          bar.pawns[id] = disc.pawnPositions;
+          bar.playerColorMap[id] = disc.colorIdx;
+          const insertAt = Math.min(disc.turnOrderIdx, bar.turnOrder.length);
+          if (!bar.turnOrder.includes(id)) bar.turnOrder.splice(insertAt, 0, id);
+          bar.paused = false;
+          const playersForReconnect = bar.turnOrder.map(pid => {
+            const pc = room.players.get(pid) || { name: conn.name };
+            return { id: pid, name: pc.name, colorIdx: bar.playerColorMap[pid] ?? 0 };
+          });
+          send(ws, {
+            type: 'bar-start',
+            layout: { nodes: bar.layout.nodes },
+            players: playersForReconnect,
+            pawns: bar.pawns,
+            barricades: bar.barricadePositions,
+            turnId: bar.turnOrder[bar.turnIdx],
+            yourId: id,
+            reconnect: true,
+          });
+          broadcastRoom(room.id, { type: 'bar-reconnected', name: conn.name, pawns: bar.pawns, barricades: bar.barricadePositions }, id);
+          if (bar.turnOrder[bar.turnIdx] === id) barSendTurn(room);
+          log('info', 'bar-reconnect', { roomId: room.id, name: conn.name });
         }
 
         broadcastLobby();
@@ -2120,6 +2212,173 @@ wss.on('connection', (ws, req) => {
         if (!room || !room.minesweeper?.active) break;
         const msp = room.minesweeper.players[id];
         if (msp) msp.targeting = null;
+        break;
+      }
+
+      // ── Barricade (Malefiz) ────────────────────────────────────
+      case 'bar-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'barricade') break;
+        if (room.barricade?.active) { send(ws, { type: 'error', msg: 'Game already in progress' }); break; }
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2-4 players' }); break; }
+        startBarricade(room);
+        break;
+      }
+      case 'bar-roll': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.barricade?.active) break;
+        const bar = room.barricade;
+        if (bar.paused) break;
+        if (bar.turnOrder[bar.turnIdx] !== id) break;
+        if (bar.dieRolled) break; // already rolled
+        const die = Math.floor(Math.random() * 6) + 1;
+        bar.dieResult = die;
+        bar.dieRolled = true;
+        // Find selectable pawns
+        const selectablePawns = barGetSelectablePawns(bar, id, die);
+        if (selectablePawns.length === 0) {
+          // No moves — skip turn
+          broadcastRoom(room.id, { type: 'bar-rolled', die, turnId: id, selectablePawns: [] });
+          setTimeout(() => {
+            broadcastRoom(room.id, { type: 'bar-no-moves', turnId: id });
+            barAdvanceTurn(room);
+            barSendTurn(room);
+          }, 1200);
+        } else {
+          broadcastRoom(room.id, { type: 'bar-rolled', die, turnId: id, selectablePawns });
+        }
+        log('info', 'bar-roll', { roomId: room.id, player: conn.name, die });
+        break;
+      }
+      case 'bar-select-pawn': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.barricade?.active) break;
+        const bar = room.barricade;
+        if (bar.paused || bar.turnOrder[bar.turnIdx] !== id || !bar.dieRolled) break;
+        if (bar.pendingBarricadePlacement) break;
+        const pawnIdx = parseInt(msg.pawnIdx);
+        if (isNaN(pawnIdx) || pawnIdx < 0 || pawnIdx >= 5) break;
+        const destinations = barGetDestinations(bar, id, pawnIdx, bar.dieResult);
+        send(ws, { type: 'bar-pawn-selected', pawnIdx, destinations });
+        break;
+      }
+      case 'bar-move': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.barricade?.active) break;
+        const bar = room.barricade;
+        if (bar.paused || bar.turnOrder[bar.turnIdx] !== id || !bar.dieRolled) break;
+        if (bar.pendingBarricadePlacement) break;
+        const pawnIdx = parseInt(msg.pawnIdx);
+        const destNode = parseInt(msg.destNode);
+        if (isNaN(pawnIdx) || isNaN(destNode)) break;
+        // Validate move
+        const destinations = barGetDestinations(bar, id, pawnIdx, bar.dieResult);
+        const dest = destinations.find(d => d.nodeId === destNode);
+        if (!dest) break; // invalid move
+        // Execute move
+        const oldNode = bar.pawns[id][pawnIdx];
+        bar.pawns[id][pawnIdx] = destNode;
+        const path = dest.path || [destNode];
+        // Check for goal
+        const goalNode = bar.layout.nodes.find(n => n.type === 'goal');
+        if (goalNode && destNode === goalNode.id) {
+          broadcastRoom(room.id, {
+            type: 'bar-moved', playerId: id, pawnIdx, path, destNode,
+            pawns: bar.pawns, barricades: bar.barricadePositions,
+          });
+          broadcastRoom(room.id, { type: 'bar-game-over', winnerId: id });
+          bar.active = false;
+          room.status = 'waiting';
+          broadcastLobby();
+          log('info', 'bar-win', { roomId: room.id, winner: conn.name });
+          break;
+        }
+        // Check for barricade capture
+        if (dest.capturedBarricade) {
+          const bIdx = bar.barricadePositions.indexOf(destNode);
+          if (bIdx !== -1) bar.barricadePositions.splice(bIdx, 1);
+          broadcastRoom(room.id, {
+            type: 'bar-moved', playerId: id, pawnIdx, path, destNode,
+            pawns: bar.pawns, barricades: bar.barricadePositions,
+          });
+          // Enter barricade placement mode
+          const validPlacements = barGetValidBarricadePlacements(bar);
+          bar.pendingBarricadePlacement = true;
+          broadcastRoom(room.id, {
+            type: 'bar-barricade-captured', playerId: id, pawnIdx,
+            barricadeNode: destNode, validPlacements,
+            pawns: bar.pawns, barricades: bar.barricadePositions,
+          });
+          // Start 15s timeout
+          bar.barricadePlaceTimer = setTimeout(() => {
+            if (!bar.active || !bar.pendingBarricadePlacement) return;
+            // Auto-place randomly
+            const vp = barGetValidBarricadePlacements(bar);
+            if (vp.length > 0) {
+              const randNode = vp[Math.floor(Math.random() * vp.length)];
+              bar.barricadePositions.push(randNode);
+            }
+            bar.pendingBarricadePlacement = false;
+            broadcastRoom(room.id, {
+              type: 'bar-barricade-placed', playerId: id, nodeId: vp.length > 0 ? vp[Math.floor(Math.random() * vp.length)] : -1,
+              pawns: bar.pawns, barricades: bar.barricadePositions,
+            });
+            barAdvanceTurn(room);
+            barSendTurn(room);
+          }, 15000);
+          log('info', 'bar-barricade-captured', { roomId: room.id, player: conn.name });
+          break;
+        }
+        // Check for pawn capture
+        if (dest.capturedPawn) {
+          const cPid = dest.capturedPawn.playerId;
+          const cIdx = dest.capturedPawn.pawnIdx;
+          // Send captured pawn home
+          const homeNodes = bar.layout.nodes.filter(n => n.type === 'house' && n.houseOf === bar.playerColorMap[cPid]);
+          if (homeNodes.length > 0) {
+            bar.pawns[cPid][cIdx] = homeNodes[cIdx % homeNodes.length].id;
+          }
+          broadcastRoom(room.id, {
+            type: 'bar-moved', playerId: id, pawnIdx, path, destNode,
+            pawns: bar.pawns, barricades: bar.barricadePositions,
+          });
+          broadcastRoom(room.id, {
+            type: 'bar-captured', capturedPlayerId: cPid, capturedPawnIdx: cIdx,
+            pawns: bar.pawns, barricades: bar.barricadePositions,
+          });
+          barAdvanceTurn(room);
+          barSendTurn(room);
+          log('info', 'bar-capture', { roomId: room.id, player: conn.name, captured: cPid });
+          break;
+        }
+        // Normal move
+        broadcastRoom(room.id, {
+          type: 'bar-moved', playerId: id, pawnIdx, path, destNode,
+          pawns: bar.pawns, barricades: bar.barricadePositions,
+        });
+        barAdvanceTurn(room);
+        barSendTurn(room);
+        break;
+      }
+      case 'bar-place-barricade': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.barricade?.active) break;
+        const bar = room.barricade;
+        if (bar.paused || bar.turnOrder[bar.turnIdx] !== id || !bar.pendingBarricadePlacement) break;
+        const nodeId = parseInt(msg.nodeId);
+        if (isNaN(nodeId)) break;
+        const validPlacements = barGetValidBarricadePlacements(bar);
+        if (!validPlacements.includes(nodeId)) break;
+        if (bar.barricadePlaceTimer) { clearTimeout(bar.barricadePlaceTimer); bar.barricadePlaceTimer = null; }
+        bar.barricadePositions.push(nodeId);
+        bar.pendingBarricadePlacement = false;
+        broadcastRoom(room.id, {
+          type: 'bar-barricade-placed', playerId: id, nodeId,
+          pawns: bar.pawns, barricades: bar.barricadePositions,
+        });
+        barAdvanceTurn(room);
+        barSendTurn(room);
+        log('info', 'bar-barricade-placed', { roomId: room.id, player: conn.name, nodeId });
         break;
       }
 
@@ -4621,6 +4880,360 @@ function msEndGame(room) {
     finalScores, mines, flagResults,
   });
   broadcastLobby();
+}
+
+// ── Barricade (Malefiz) helpers ──────────────────────────────────
+
+function buildBarricadeLayout() {
+  // Classic Malefiz board as a node graph
+  // Coordinate system: x = 0-16, y = 0-19 (y=0 is top, y=19 is bottom)
+  // The board has a distinctive branching structure:
+  // - 4 houses at the bottom (rows 17-19), each with 5 spaces
+  // - Bottom row (row 16) with 17 spaces — the merge row
+  // - Rows above zigzag/converge upward to the goal at the top
+  const nodes = [];
+  let nid = 0;
+
+  function addNode(x, y, type, opts = {}) {
+    const node = { id: nid++, x, y, type, neighbors: [], ...opts };
+    nodes.push(node);
+    return node;
+  }
+
+  function connect(a, b) {
+    if (!a.neighbors.includes(b.id)) a.neighbors.push(b.id);
+    if (!b.neighbors.includes(a.id)) b.neighbors.push(a.id);
+  }
+
+  // ── Goal (top) ──
+  const goal = addNode(8, 0, 'goal');
+
+  // ── Upper path (rows 1-16) ──
+  // Row 1: single node below goal
+  const r1 = addNode(8, 1, 'path');
+  connect(goal, r1);
+
+  // Row 2: 3 nodes (branch)
+  const r2 = [addNode(6, 2, 'path'), addNode(8, 2, 'path'), addNode(10, 2, 'path')];
+  connect(r1, r2[1]);
+  connect(r2[0], r2[1]); connect(r2[1], r2[2]);
+
+  // Row 3: 5 nodes
+  const r3 = [addNode(4, 3, 'path'), addNode(6, 3, 'path'), addNode(8, 3, 'path'), addNode(10, 3, 'path'), addNode(12, 3, 'path')];
+  connect(r2[0], r3[1]); connect(r2[2], r3[3]);
+  for (let i = 0; i < 4; i++) connect(r3[i], r3[i+1]);
+
+  // Row 4: 3 nodes (converge back)
+  const r4 = [addNode(4, 4, 'path', { barricadeStart: true }), addNode(8, 4, 'path'), addNode(12, 4, 'path', { barricadeStart: true })];
+  connect(r3[0], r4[0]); connect(r3[2], r4[1]); connect(r3[4], r4[2]);
+
+  // Row 5: 5 nodes
+  const r5 = [addNode(4, 5, 'path'), addNode(6, 5, 'path'), addNode(8, 5, 'path'), addNode(10, 5, 'path'), addNode(12, 5, 'path')];
+  connect(r4[0], r5[0]); connect(r4[1], r5[2]); connect(r4[2], r5[4]);
+  for (let i = 0; i < 4; i++) connect(r5[i], r5[i+1]);
+
+  // Row 6: full width — 9 nodes
+  const r6 = [];
+  for (let i = 0; i < 9; i++) r6.push(addNode(i * 2, 6, 'path', (i === 1 || i === 7) ? { barricadeStart: true } : {}));
+  for (let i = 0; i < 8; i++) connect(r6[i], r6[i+1]);
+  connect(r5[0], r6[2]); connect(r5[2], r6[4]); connect(r5[4], r6[6]);
+
+  // Row 7: 3 nodes
+  const r7 = [addNode(2, 7, 'path'), addNode(8, 7, 'path'), addNode(14, 7, 'path')];
+  connect(r6[1], r7[0]); connect(r6[4], r7[1]); connect(r6[7], r7[2]);
+
+  // Row 8: 9 nodes
+  const r8 = [];
+  for (let i = 0; i < 9; i++) r8.push(addNode(i * 2, 8, 'path', (i === 2 || i === 6) ? { barricadeStart: true } : {}));
+  for (let i = 0; i < 8; i++) connect(r8[i], r8[i+1]);
+  connect(r7[0], r8[1]); connect(r7[1], r8[4]); connect(r7[2], r8[7]);
+
+  // Row 9: 3 nodes
+  const r9 = [addNode(0, 9, 'path'), addNode(8, 9, 'path'), addNode(16, 9, 'path')];
+  connect(r8[0], r9[0]); connect(r8[4], r9[1]); connect(r8[8], r9[2]);
+
+  // Row 10: full width — 9 nodes
+  const r10 = [];
+  for (let i = 0; i < 9; i++) r10.push(addNode(i * 2, 10, 'path', (i === 3 || i === 5) ? { barricadeStart: true } : {}));
+  for (let i = 0; i < 8; i++) connect(r10[i], r10[i+1]);
+  connect(r9[0], r10[0]); connect(r9[1], r10[4]); connect(r9[2], r10[8]);
+
+  // Row 11: 5 nodes
+  const r11 = [addNode(2, 11, 'path'), addNode(6, 11, 'path'), addNode(8, 11, 'path', { barricadeStart: true }), addNode(10, 11, 'path'), addNode(14, 11, 'path')];
+  connect(r10[1], r11[0]); connect(r10[3], r11[1]); connect(r10[4], r11[2]); connect(r10[5], r11[3]); connect(r10[7], r11[4]);
+
+  // Row 12: full width — 9 nodes
+  const r12 = [];
+  for (let i = 0; i < 9; i++) r12.push(addNode(i * 2, 12, 'path'));
+  for (let i = 0; i < 8; i++) connect(r12[i], r12[i+1]);
+  connect(r11[0], r12[1]); connect(r11[1], r12[3]); connect(r11[2], r12[4]); connect(r11[3], r12[5]); connect(r11[4], r12[7]);
+
+  // Row 13: 5 nodes
+  const r13 = [addNode(0, 13, 'path'), addNode(4, 13, 'path'), addNode(8, 13, 'path'), addNode(12, 13, 'path'), addNode(16, 13, 'path')];
+  connect(r12[0], r13[0]); connect(r12[2], r13[1]); connect(r12[4], r13[2]); connect(r12[6], r13[3]); connect(r12[8], r13[4]);
+
+  // Row 14: full width — 9 nodes
+  const r14 = [];
+  for (let i = 0; i < 9; i++) r14.push(addNode(i * 2, 14, 'path'));
+  for (let i = 0; i < 8; i++) connect(r14[i], r14[i+1]);
+  connect(r13[0], r14[0]); connect(r13[1], r14[2]); connect(r13[2], r14[4]); connect(r13[3], r14[6]); connect(r13[4], r14[8]);
+
+  // Row 15: 4 exit nodes — one per player house
+  const r15 = [addNode(2, 15, 'path'), addNode(6, 15, 'path'), addNode(10, 15, 'path'), addNode(14, 15, 'path')];
+  connect(r14[1], r15[0]); connect(r14[3], r15[1]); connect(r14[5], r15[2]); connect(r14[7], r15[3]);
+
+  // ── Houses (rows 16-18) ──
+  // Each house has 5 nodes in a cross/pyramid pattern
+  const houses = [];
+  const houseExitX = [2, 6, 10, 14];
+  for (let h = 0; h < 4; h++) {
+    const cx = houseExitX[h];
+    const house = [];
+    // Row 16: 1 node (connects to exit)
+    const h0 = addNode(cx, 16, 'house', { houseOf: h });
+    connect(r15[h], h0);
+    house.push(h0);
+    // Row 17: 2 nodes
+    const h1 = addNode(cx - 1, 17, 'house', { houseOf: h });
+    const h2 = addNode(cx + 1, 17, 'house', { houseOf: h });
+    connect(h0, h1); connect(h0, h2);
+    house.push(h1, h2);
+    // Row 18: 2 nodes
+    const h3 = addNode(cx - 1, 18, 'house', { houseOf: h });
+    const h4 = addNode(cx + 1, 18, 'house', { houseOf: h });
+    connect(h1, h3); connect(h2, h4);
+    house.push(h3, h4);
+    houses.push(house);
+  }
+
+  // Collect barricade start positions
+  const barricadeStarts = nodes.filter(n => n.barricadeStart).map(n => n.id);
+
+  // Bottom row node IDs (row 14, 15 — the lowest path rows) for barricade placement restriction
+  const bottomRowNodes = new Set();
+  for (const n of nodes) {
+    if (n.type === 'path' && n.y >= 14) bottomRowNodes.add(n.id);
+  }
+  // House nodes
+  const houseNodeIds = new Set();
+  for (const n of nodes) {
+    if (n.type === 'house') houseNodeIds.add(n.id);
+  }
+
+  return { nodes, houses, barricadeStarts, bottomRowNodes: [...bottomRowNodes], houseNodeIds: [...houseNodeIds] };
+}
+
+function startBarricade(room) {
+  const layout = buildBarricadeLayout();
+  const playerIds = [...room.players.keys()];
+  const numPlayers = Math.min(4, playerIds.length);
+  const activePlayerIds = playerIds.slice(0, numPlayers);
+
+  // Assign colors and initial pawn positions
+  const pawns = {};
+  const playerColorMap = {};
+  const playersInfo = [];
+
+  for (let i = 0; i < activePlayerIds.length; i++) {
+    const pid = activePlayerIds[i];
+    playerColorMap[pid] = i;
+    const house = layout.houses[i];
+    pawns[pid] = house.map(n => n.id);
+    playersInfo.push({ id: pid, name: room.players.get(pid).name, colorIdx: i });
+  }
+
+  // Place barricades on start positions
+  const barricadePositions = [...layout.barricadeStarts];
+
+  const startIdx = Math.floor(Math.random() * activePlayerIds.length);
+  const turnOrder = [...activePlayerIds.slice(startIdx), ...activePlayerIds.slice(0, startIdx)];
+
+  room.barricade = {
+    active: true,
+    layout,
+    pawns,
+    barricadePositions,
+    playerColorMap,
+    turnOrder,
+    turnIdx: 0,
+    dieResult: null,
+    dieRolled: false,
+    pendingBarricadePlacement: false,
+    barricadePlaceTimer: null,
+  };
+  room.status = 'playing';
+  broadcastLobby();
+
+  for (const [pid, p] of room.players) {
+    send(p.ws, {
+      type: 'bar-start',
+      layout: { nodes: layout.nodes },
+      players: playersInfo,
+      pawns,
+      barricades: barricadePositions,
+      turnId: turnOrder[0],
+      yourId: pid,
+    });
+  }
+  log('info', 'bar-start', { roomId: room.id, players: activePlayerIds.length });
+}
+
+function barAdvanceTurn(room) {
+  const bar = room.barricade;
+  bar.turnIdx = (bar.turnIdx + 1) % bar.turnOrder.length;
+  bar.dieResult = null;
+  bar.dieRolled = false;
+  bar.pendingBarricadePlacement = false;
+}
+
+function barSendTurn(room) {
+  const bar = room.barricade;
+  if (!bar || !bar.active || bar.paused) return;
+  // Skip disconnected players
+  let attempts = 0;
+  while (attempts < bar.turnOrder.length) {
+    const pid = bar.turnOrder[bar.turnIdx];
+    if (room.players.has(pid)) break;
+    bar.turnIdx = (bar.turnIdx + 1) % bar.turnOrder.length;
+    attempts++;
+  }
+  broadcastRoom(room.id, { type: 'bar-turn', turnId: bar.turnOrder[bar.turnIdx] });
+}
+
+function barBroadcastState(room) {
+  const bar = room.barricade;
+  if (!bar) return;
+  broadcastRoom(room.id, {
+    type: 'bar-state',
+    pawns: bar.pawns,
+    barricades: bar.barricadePositions,
+    turnId: bar.turnOrder[bar.turnIdx],
+    layout: { nodes: bar.layout.nodes },
+  });
+}
+
+function barGetSelectablePawns(bar, playerId, die) {
+  const selectable = [];
+  const positions = bar.pawns[playerId] || [];
+  for (let i = 0; i < positions.length; i++) {
+    const dests = barGetDestinations(bar, playerId, i, die);
+    if (dests.length > 0) selectable.push(i);
+  }
+  return selectable;
+}
+
+function barGetDestinations(bar, playerId, pawnIdx, steps) {
+  const startNode = bar.pawns[playerId][pawnIdx];
+  const node = bar.layout.nodes.find(n => n.id === startNode);
+  if (!node) return [];
+
+  // If pawn is in house, it exits for free — first step is the house exit
+  // House pawns: move to the exit node first (free), then count steps from there
+  const isInHouse = node.type === 'house';
+
+  const results = [];
+  const barricadeSet = new Set(bar.barricadePositions);
+  const goalNode = bar.layout.nodes.find(n => n.type === 'goal');
+
+  // BFS/DFS to find all paths of exactly `steps` length
+  // visited tracks the path to prevent doubling back
+  function dfs(currentId, remaining, path, exitedHouse) {
+    if (remaining === 0) {
+      const current = bar.layout.nodes.find(n => n.id === currentId);
+      // Can't land on own pawn
+      let isOwnPawn = false;
+      const myPositions = bar.pawns[playerId];
+      for (let i = 0; i < myPositions.length; i++) {
+        if (myPositions[i] === currentId && i !== pawnIdx) { isOwnPawn = true; break; }
+      }
+      if (isOwnPawn) return;
+      // Can't land on house (unless it's the start house and we're going back, which shouldn't happen normally)
+      if (current && current.type === 'house') return;
+
+      // Check what's on the destination
+      let capturedPawn = null;
+      let capturedBarricade = false;
+      // Check for barricade
+      if (barricadeSet.has(currentId)) {
+        capturedBarricade = true;
+      }
+      // Check for opponent pawn
+      for (const [pid, positions] of Object.entries(bar.pawns)) {
+        if (pid === playerId) continue;
+        for (let i = 0; i < positions.length; i++) {
+          if (positions[i] === currentId) {
+            capturedPawn = { playerId: pid, pawnIdx: i };
+            break;
+          }
+        }
+        if (capturedPawn) break;
+      }
+
+      // Can't have both a barricade and a pawn on same spot (shouldn't happen)
+      // Avoid duplicate destinations
+      if (!results.find(r => r.nodeId === currentId)) {
+        results.push({ nodeId: currentId, path: [...path], capturedPawn, capturedBarricade });
+      }
+      return;
+    }
+
+    const currentNode = bar.layout.nodes.find(n => n.id === currentId);
+    if (!currentNode) return;
+
+    for (const neighborId of currentNode.neighbors) {
+      // Can't go back the way we came (no doubling back)
+      if (path.length >= 2 && path[path.length - 2] === neighborId) continue;
+      // Can't revisit nodes in the current path
+      if (path.includes(neighborId)) continue;
+
+      const neighbor = bar.layout.nodes.find(n => n.id === neighborId);
+      if (!neighbor) continue;
+
+      // If in house, can only go toward exit (upward)
+      if (!exitedHouse && neighbor.type === 'house') {
+        // Only allow moving toward exit (lower y = up = toward exit)
+        if (neighbor.y >= currentNode.y) continue;
+      }
+
+      // Can't pass through barricades (but can land on them as last step)
+      if (barricadeSet.has(neighborId) && remaining > 1) continue;
+
+      // Can't enter other player's house
+      if (neighbor.type === 'house' && neighbor.houseOf !== bar.playerColorMap[playerId]) continue;
+
+      // House spaces don't count against die roll
+      const newExited = exitedHouse || (currentNode.type === 'house' && neighbor.type !== 'house');
+      const cost = (!exitedHouse && currentNode.type === 'house' && neighbor.type === 'house') ? 0 : 1;
+
+      dfs(neighborId, remaining - cost, [...path, neighborId], newExited);
+    }
+  }
+
+  dfs(startNode, steps, [startNode], !isInHouse);
+  return results;
+}
+
+function barGetValidBarricadePlacements(bar) {
+  const occupied = new Set();
+  // All pawn positions
+  for (const positions of Object.values(bar.pawns)) {
+    for (const nid of positions) occupied.add(nid);
+  }
+  // All barricade positions
+  for (const nid of bar.barricadePositions) occupied.add(nid);
+
+  const houseSet = new Set(bar.layout.houseNodeIds);
+  const bottomSet = new Set(bar.layout.bottomRowNodes);
+
+  const valid = [];
+  for (const n of bar.layout.nodes) {
+    if (n.type === 'goal') continue; // can't place on goal
+    if (occupied.has(n.id)) continue;
+    if (houseSet.has(n.id)) continue; // can't place in houses
+    if (bottomSet.has(n.id)) continue; // can't place in bottom rows
+    valid.push(n.id);
+  }
+  return valid;
 }
 
 // ── Start ───────────────────────────────────────────────────────
