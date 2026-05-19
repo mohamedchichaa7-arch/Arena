@@ -1,669 +1,701 @@
 /* ═══════════════════════════════════════════════════════════════════
-   BARRICADE (MALEFIZ) — Arena Room Client  |  barricade.js
+   BARRICADE — Arena Game  (Quoridor-style)
    ═══════════════════════════════════════════════════════════════════ */
 (() => {
   'use strict';
 
-  const params = new URLSearchParams(location.search);
-  const roomId = params.get('room');
-  const myName = sessionStorage.getItem('arena-name') || 'Player';
-  if (!roomId) { location.href = '/'; return; }
+  const GRID = 9;
+  const MAX_WALLS = 10;
+  const DIRS = [[0,1],[0,-1],[1,0],[-1,0]];
 
-  const $ = s => document.getElementById(s);
-  const statusEl = $('status');
-  const playerListEl = $('playerList'), playerCountEl = $('playerCount');
-  const roomBadge = $('roomBadge'), btnBack = $('btnBack');
-  const btnStartGame = $('btnStartGame'), controls = $('controls');
-  const diceArea = $('diceArea'), diceCube = $('diceCube');
-  const btnRoll = $('btnRoll'), turnTag = $('turnTag');
-  const boardOuter = $('boardOuter'), boardGrid = $('boardGrid'), pieceLayer = $('pieceLayer');
-  const barricadePlaceBar = $('barricadePlaceBar'), barricadeCountdown = $('barricadeCountdown');
-  const resultOverlay = $('resultOverlay'), resultTitle = $('resultTitle');
-  const resultSub = $('resultSub'), resultEmoji = $('resultEmoji');
-  const btnPlayAgain = $('btnPlayAgain');
-  const confettiCvs = $('confetti'), cctx = confettiCvs.getContext('2d');
-  const chatMessages = $('chatMessages'), chatInput = $('chatInput'), chatSend = $('chatSend');
-  const eventLog = $('eventLog'), eventLogList = $('eventLogList');
-  const btnRules = $('btnRules'), rulesPanel = $('rulesPanel'), rulesClose = $('rulesClose');
-  const sidebar = $('sidebar'), chatPanel = $('chatPanel'), panelBackdrop = $('panelBackdrop');
-  const btnToggleSidebar = $('btnToggleSidebar'), btnToggleChat = $('btnToggleChat');
+  // DOM
+  const $ = id => document.getElementById(id);
+  const modeOverlay = $('modeOverlay');
+  const gameContainer = $('gameContainer');
+  const boardEl = $('board');
+  const turnText = $('turnText');
+  const turnDot = $('turnDot');
+  const p1Walls = $('p1Walls');
+  const p2Walls = $('p2Walls');
+  const p1Info = $('p1Info');
+  const p2Info = $('p2Info');
+  const p1Name = $('p1Name');
+  const p2Name = $('p2Name');
+  const btnMove = $('btnMove');
+  const btnWall = $('btnWall');
+  const actionHint = $('actionHint');
+  const resultOverlay = $('resultOverlay');
+  const resultTitle = $('resultTitle');
+  const resultSub = $('resultSub');
+  const rulesOverlay = $('rulesOverlay');
+  const confettiCvs = $('confetti');
+  const cctx = confettiCvs.getContext('2d');
 
-  roomBadge.textContent = 'Room ' + roomId;
-
-  const PLAYER_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#fbbf24'];
-
-  // ── State ──
-  let ws = null, myId = null, leaderId = null;
-  const others = new Map();
-  let gameActive = false, myColorIdx = -1;
-  let currentTurnId = null, dieResult = null;
-  let selectedPawnIdx = null;
-  let placingBarricade = false, barricadePlaceTimer = null, barricadePlaceCountdownVal = 15;
-  let animating = false;
-  let nodes = [], nodeMap = new Map();
-  let pawns = {}, barricades = [], playersInfo = [];
-
-  function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  // State
+  let mode = null; // 'pvp' | 'bot'
+  let players = [];
+  let walls = [];
+  let currentPlayer = 0;
+  let action = 'move'; // 'move' | 'wall'
+  let gameOver = false;
+  let cells = [];
+  let wallSlots = [];
+  let pawnEls = [];
 
   // ══════════════════════════════════════════════════════════════════
-  //  BOARD LAYOUT
+  //  INITIALIZATION
   // ══════════════════════════════════════════════════════════════════
 
-  function buildBoardFromLayout(layout) {
-    nodes = layout.nodes;
-    nodeMap.clear();
-    for (const n of nodes) nodeMap.set(n.id, n);
-  }
+  function initGame(selectedMode) {
+    mode = selectedMode;
+    modeOverlay.style.display = 'none';
+    gameContainer.style.display = 'flex';
+    resultOverlay.style.display = 'none';
 
-  // ══════════════════════════════════════════════════════════════════
-  //  RENDERING
-  // ══════════════════════════════════════════════════════════════════
-
-  const cellEls = new Map();
-  const pieceEls = new Map();
-
-  function renderBoard() {
-    boardGrid.innerHTML = '';
-    pieceLayer.innerHTML = '';
-    cellEls.clear();
-    pieceEls.clear();
-
-    const drawn = new Set();
-    for (const n of nodes) {
-      for (const nid of (n.neighbors || [])) {
-        const key = [Math.min(n.id, nid), Math.max(n.id, nid)].join('-');
-        if (drawn.has(key)) continue;
-        drawn.add(key);
-        const nb = nodeMap.get(nid);
-        if (nb) drawLine(n, nb);
-      }
-    }
-
-    const cellSize = 4.2;
-    const aspect = 17 / 20;
-    for (const n of nodes) {
-      const el = document.createElement('div');
-      el.className = 'bcell';
-      if (n.type === 'path') el.classList.add('path');
-      else if (n.type === 'house') el.classList.add('house-' + n.houseOf);
-      else if (n.type === 'goal') el.classList.add('goal');
-      if (n.barricadeStart) el.classList.add('barricade-start');
-
-      const pos = nodePos(n);
-      el.style.left = pos.x + '%';
-      el.style.top = pos.y + '%';
-      el.style.width = cellSize + '%';
-      el.style.height = (cellSize * aspect) + '%';
-      el.style.transform = 'translate(-50%, -50%)';
-      el.dataset.nodeId = n.id;
-      boardGrid.appendChild(el);
-      cellEls.set(n.id, el);
-    }
-  }
-
-  function nodePos(n) {
-    return { x: (n.x / 16) * 100, y: (n.y / 19) * 100 };
-  }
-
-  function drawLine(a, b) {
-    const pa = nodePos(a), pb = nodePos(b);
-    const el = document.createElement('div');
-    el.className = 'board-line';
-    const dx = pb.x - pa.x, dy = pb.y - pa.y;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-    el.style.left = pa.x + '%';
-    el.style.top = pa.y + '%';
-    el.style.width = len + '%';
-    el.style.height = '2px';
-    el.style.transformOrigin = '0 50%';
-    el.style.transform = `rotate(${angle}deg)`;
-    boardGrid.appendChild(el);
-  }
-
-  function renderPieces() {
-    pieceLayer.innerHTML = '';
-    pieceEls.clear();
-    const cellSize = 4.2;
-    const aspect = 17 / 20;
-    const sz = cellSize * 0.8;
-
-    barricades.forEach((nodeId, i) => {
-      const n = nodeMap.get(nodeId);
-      if (!n) return;
-      const el = document.createElement('div');
-      el.className = 'piece barricade';
-      el.textContent = '▬';
-      const pos = nodePos(n);
-      el.style.width = (sz * 0.95) + '%';
-      el.style.height = (sz * 0.95 * aspect) + '%';
-      el.style.left = pos.x + '%';
-      el.style.top = pos.y + '%';
-      el.style.transform = 'translate(-50%, -50%)';
-      pieceLayer.appendChild(el);
-      pieceEls.set('bar-' + i, el);
-    });
-
-    for (const info of playersInfo) {
-      const positions = pawns[info.id] || [];
-      positions.forEach((nodeId, pi) => {
-        const n = nodeMap.get(nodeId);
-        if (!n) return;
-        const el = document.createElement('div');
-        el.className = 'piece pawn pawn-' + info.colorIdx;
-        el.textContent = (pi + 1);
-        const pos = nodePos(n);
-        const offset = getOverlapOffset(nodeId, info.id, pi);
-        el.style.width = sz + '%';
-        el.style.height = (sz * aspect) + '%';
-        el.style.left = (pos.x + offset.dx) + '%';
-        el.style.top = (pos.y + offset.dy) + '%';
-        el.style.transform = 'translate(-50%, -50%)';
-        el.dataset.playerId = info.id;
-        el.dataset.pawnIdx = pi;
-        el.addEventListener('click', () => onPawnClick(info.id, pi));
-        pieceLayer.appendChild(el);
-        pieceEls.set('pawn-' + info.id + '-' + pi, el);
-      });
-    }
-  }
-
-  function getOverlapOffset(nodeId, playerId, pawnIdx) {
-    let count = 0, myOrder = 0;
-    for (const info of playersInfo) {
-      const positions = pawns[info.id] || [];
-      for (let i = 0; i < positions.length; i++) {
-        if (positions[i] === nodeId) {
-          if (info.id === playerId && i === pawnIdx) myOrder = count;
-          count++;
-        }
-      }
-    }
-    if (count <= 1) return { dx: 0, dy: 0 };
-    const offsets = [[-0.8, -0.6], [0.8, -0.6], [-0.8, 0.6], [0.8, 0.6], [0, 0]];
-    return { dx: offsets[myOrder % 5][0], dy: offsets[myOrder % 5][1] };
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  //  HIGHLIGHTING
-  // ══════════════════════════════════════════════════════════════════
-
-  function clearHighlights() {
-    for (const [, el] of cellEls) {
-      el.classList.remove('highlight-dest', 'highlight-pawn', 'highlight-place');
-      el.onclick = null;
-    }
-    for (const [, el] of pieceEls) {
-      el.classList.remove('selectable', 'selected');
-    }
-  }
-
-  function highlightSelectablePawns(indices) {
-    clearHighlights();
-    for (const pi of indices) {
-      const el = pieceEls.get('pawn-' + myId + '-' + pi);
-      if (el) el.classList.add('selectable');
-    }
-  }
-
-  function highlightDestinations(destinations) {
-    for (const d of destinations) {
-      const el = cellEls.get(d.nodeId);
-      if (el) {
-        el.classList.add('highlight-dest');
-        el.onclick = () => onDestClick(d.nodeId);
-      }
-    }
-  }
-
-  function highlightBarricadePlacements(validNodes) {
-    clearHighlights();
-    for (const nid of validNodes) {
-      const el = cellEls.get(nid);
-      if (el) {
-        el.classList.add('highlight-place');
-        el.onclick = () => onBarricadePlaceClick(nid);
-      }
-    }
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  //  PLAYER LIST
-  // ══════════════════════════════════════════════════════════════════
-
-  function updatePlayerList() {
-    playerListEl.innerHTML = '';
-    for (const info of playersInfo) {
-      const card = document.createElement('div');
-      card.className = 'player-card';
-      if (info.id === myId) card.classList.add('me');
-      if (info.id === currentTurnId) card.classList.add('turn');
-      const homeCount = (pawns[info.id] || []).filter(nid => {
-        const n = nodeMap.get(nid);
-        return n && n.type === 'house';
-      }).length;
-      card.innerHTML = `<span class="pc-dot" style="background:${PLAYER_COLORS[info.colorIdx]}"></span>
-        <span class="pc-name">${escapeHtml(info.name)}${info.id === myId ? ' (you)' : ''}</span>
-        <span class="pc-info">${5 - homeCount}/5</span>`;
-      playerListEl.appendChild(card);
-    }
-    playerCountEl.textContent = playersInfo.length;
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  //  DICE
-  // ══════════════════════════════════════════════════════════════════
-
-  function initDicePips() {
-    const layouts = [
-      [[50,50]], [[25,25],[75,75]], [[25,25],[50,50],[75,75]],
-      [[25,25],[75,25],[25,75],[75,75]], [[25,25],[75,25],[50,50],[25,75],[75,75]],
-      [[25,25],[75,25],[25,50],[75,50],[25,75],[75,75]],
+    players = [
+      { row: 0, col: 4, wallsLeft: MAX_WALLS, goalRow: GRID - 1 },
+      { row: GRID - 1, col: 4, wallsLeft: MAX_WALLS, goalRow: 0 }
     ];
-    for (let f = 1; f <= 6; f++) {
-      const face = document.querySelector('.face-' + f);
-      if (!face) continue;
-      face.innerHTML = '';
-      for (const [px, py] of layouts[f - 1]) {
-        const pip = document.createElement('div');
-        pip.className = 'pip';
-        pip.style.cssText = `position:absolute;left:${px}%;top:${py}%;transform:translate(-50%,-50%)`;
-        face.appendChild(pip);
+    walls = [];
+    currentPlayer = 0;
+    action = 'move';
+    gameOver = false;
+
+    if (mode === 'bot') {
+      p2Name.textContent = 'Bot 🤖';
+    } else {
+      p2Name.textContent = 'Player 2';
+    }
+
+    buildBoard();
+    updateUI();
+  }
+
+  function buildBoard() {
+    boardEl.innerHTML = '';
+    cells = [];
+    wallSlots = [];
+    pawnEls = [];
+
+    // Create cells
+    for (let r = 0; r < GRID; r++) {
+      for (let c = 0; c < GRID; c++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.dataset.r = r;
+        cell.dataset.c = c;
+        if (r === GRID - 1) cell.classList.add('goal-p1'); // P1 goal
+        if (r === 0) cell.classList.add('goal-p2'); // P2 goal
+        cell.addEventListener('click', () => onCellClick(r, c));
+        boardEl.appendChild(cell);
+        cells.push(cell);
       }
     }
+
+    // Create wall slots (overlaid on gaps)
+    createWallSlots();
+
+    // Create pawns
+    for (let i = 0; i < 2; i++) {
+      const pawn = document.createElement('div');
+      pawn.className = `pawn p${i + 1}`;
+      pawn.textContent = i === 0 ? '▲' : '▼';
+      pawnEls.push(pawn);
+    }
+    placePawns();
   }
 
-  const DICE_ROT = {
-    1:'rotateX(0deg) rotateY(0deg)', 2:'rotateX(0deg) rotateY(-90deg)',
-    3:'rotateX(-90deg) rotateY(0deg)', 4:'rotateX(90deg) rotateY(0deg)',
-    5:'rotateX(0deg) rotateY(90deg)', 6:'rotateX(0deg) rotateY(180deg)',
-  };
+  function createWallSlots() {
+    // Horizontal walls: between rows r and r+1, spanning cols c and c+1
+    for (let r = 0; r < GRID - 1; r++) {
+      for (let c = 0; c < GRID - 1; c++) {
+        const slot = document.createElement('div');
+        slot.className = 'wall-slot horizontal';
+        slot.dataset.type = 'h';
+        slot.dataset.r = r;
+        slot.dataset.c = c;
+        slot.addEventListener('click', () => onWallClick('h', r, c));
+        slot.addEventListener('mouseenter', () => onWallHover('h', r, c));
+        slot.addEventListener('mouseleave', () => onWallLeave('h', r, c));
+        boardEl.appendChild(slot);
+        wallSlots.push(slot);
+      }
+    }
+    // Vertical walls: between cols c and c+1, spanning rows r and r+1
+    for (let r = 0; r < GRID - 1; r++) {
+      for (let c = 0; c < GRID - 1; c++) {
+        const slot = document.createElement('div');
+        slot.className = 'wall-slot vertical';
+        slot.dataset.type = 'v';
+        slot.dataset.r = r;
+        slot.dataset.c = c;
+        slot.addEventListener('click', () => onWallClick('v', r, c));
+        slot.addEventListener('mouseenter', () => onWallHover('v', r, c));
+        slot.addEventListener('mouseleave', () => onWallLeave('v', r, c));
+        boardEl.appendChild(slot);
+        wallSlots.push(slot);
+      }
+    }
+    requestAnimationFrame(positionWallSlots);
+  }
 
-  function animateDice(value) {
-    return new Promise(resolve => {
-      diceCube.style.transition = 'transform .12s ease';
-      let spins = 0;
-      const spin = () => {
-        diceCube.style.transform = `rotateX(${Math.random()*360|0}deg) rotateY(${Math.random()*360|0}deg)`;
-        if (++spins < 8) setTimeout(spin, 70);
-        else {
-          diceCube.style.transition = 'transform .5s cubic-bezier(.4,0,.2,1)';
-          diceCube.style.transform = DICE_ROT[value];
-          setTimeout(resolve, 520);
-        }
-      };
-      spin();
+  function positionWallSlots() {
+    if (cells.length === 0) return;
+    const boardRect = boardEl.getBoundingClientRect();
+    if (boardRect.width === 0) {
+      requestAnimationFrame(positionWallSlots);
+      return;
+    }
+
+    // Get actual cell positions from the first few cells
+    const c00 = cells[0].getBoundingClientRect();          // row 0, col 0
+    const c01 = cells[1].getBoundingClientRect();          // row 0, col 1
+    const c10 = cells[GRID].getBoundingClientRect();       // row 1, col 0
+    const cellW = c00.width;
+    const cellH = c00.height;
+    const gapH = c01.left - c00.right;  // horizontal gap between cols
+    const gapV = c10.top - c00.bottom;  // vertical gap between rows
+
+    wallSlots.forEach(slot => {
+      const type = slot.dataset.type;
+      const r = parseInt(slot.dataset.r);
+      const c = parseInt(slot.dataset.c);
+
+      // Get cell positions relative to board
+      const cellIdx = r * GRID + c;
+      const cellRect = cells[cellIdx].getBoundingClientRect();
+      const offX = cellRect.left - boardRect.left;
+      const offY = cellRect.top - boardRect.top;
+
+      if (type === 'h') {
+        // Horizontal wall between row r and r+1, spanning col c and c+1
+        slot.style.top = (offY + cellH) + 'px';
+        slot.style.left = offX + 'px';
+        slot.style.width = (2 * cellW + gapH) + 'px';
+        slot.style.height = Math.max(gapV, 6) + 'px';
+      } else {
+        // Vertical wall between col c and c+1, spanning row r and r+1
+        slot.style.top = offY + 'px';
+        slot.style.left = (offX + cellW) + 'px';
+        slot.style.width = Math.max(gapH, 6) + 'px';
+        slot.style.height = (2 * cellH + gapV) + 'px';
+      }
     });
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  //  PIECE ANIMATION
-  // ══════════════════════════════════════════════════════════════════
+  const resizeObserver = new ResizeObserver(() => positionWallSlots());
+  resizeObserver.observe(boardEl);
 
-  function animatePawnSteps(playerId, pawnIdx, path) {
-    return new Promise(resolve => {
-      const el = pieceEls.get('pawn-' + playerId + '-' + pawnIdx);
-      if (!el || !path.length) { resolve(); return; }
-      el.classList.add('step-anim');
-      let step = 0;
-      const next = () => {
-        if (step >= path.length) { el.classList.remove('step-anim'); resolve(); return; }
-        const n = nodeMap.get(path[step]);
-        if (n) { const p = nodePos(n); el.style.left = p.x + '%'; el.style.top = p.y + '%'; }
-        step++;
-        setTimeout(next, 160);
-      };
-      next();
-    });
-  }
-
-  function animateCapture(playerId, pawnIdx) {
-    const el = pieceEls.get('pawn-' + playerId + '-' + pawnIdx);
-    if (el) { el.classList.add('captured'); setTimeout(() => el.classList.remove('captured'), 600); }
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  //  NETWORK
-  // ══════════════════════════════════════════════════════════════════
-
-  function connect() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}`);
-    ws.onopen = () => {
-      const password = sessionStorage.getItem('arena-room-password') || undefined;
-      sessionStorage.removeItem('arena-room-password');
-      wsSend({ type: 'join-room', roomId, name: myName, password, token: sessionStorage.getItem('arena-token') || '' });
-    };
-    ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch (err) { console.error(err); } };
-    ws.onclose = () => { statusEl.textContent = 'Disconnected…'; setTimeout(() => location.href = '/', 3000); };
-  }
-  function wsSend(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
-
-  function handleMsg(msg) {
-    switch (msg.type) {
-      case 'room-joined':
-        myId = msg.myId; leaderId = msg.leaderId; others.clear();
-        for (const p of msg.players) others.set(p.id, { name: p.name });
-        updateLobbyUI();
-        statusEl.textContent = 'Waiting for players… Leader starts the game.';
-        break;
-      case 'player-joined':
-        others.set(msg.id, { name: msg.name }); leaderId = msg.leaderId;
-        updateLobbyUI(); addChat(null, msg.name + ' joined');
-        break;
-      case 'player-left':
-        others.delete(msg.id); leaderId = msg.leaderId; updateLobbyUI();
-        break;
-      case 'bar-start': onGameStart(msg); break;
-      case 'bar-turn': onTurn(msg); break;
-      case 'bar-rolled': onRolled(msg); break;
-      case 'bar-pawn-selected': onPawnSelected(msg); break;
-      case 'bar-no-moves': onNoMoves(msg); break;
-      case 'bar-moved': onMoved(msg); break;
-      case 'bar-captured': onCaptured(msg); break;
-      case 'bar-barricade-captured': onBarricadeCaptured(msg); break;
-      case 'bar-barricade-placed': onBarricadePlaced(msg); break;
-      case 'bar-state': onFullState(msg); break;
-      case 'bar-game-over': onGameOver(msg); break;
-      case 'bar-aborted':
-        gameActive = false; controls.style.display = ''; diceArea.style.display = 'none';
-        boardOuter.style.display = 'none'; statusEl.textContent = msg.reason || 'Game aborted';
-        break;
-      case 'bar-player-disconnect':
-        addLogEntry(msg.name + ' disconnected — waiting 30s for reconnect…', 'capture');
-        statusEl.textContent = msg.name + ' disconnected. Waiting for reconnect…';
-        btnRoll.disabled = true;
-        break;
-      case 'bar-reconnected':
-        addLogEntry(msg.name + ' reconnected!', 'win');
-        if (msg.pawns) { pawns = msg.pawns; barricades = msg.barricades; renderPieces(); }
-        updatePlayerList(); syncUI();
-        break;
-      case 'bar-disconnect-timeout':
-        addLogEntry(msg.name + ' timed out — removed from game', 'capture');
-        if (msg.pawns) { pawns = msg.pawns; barricades = msg.barricades; renderPieces(); }
-        updatePlayerList(); syncUI();
-        break;
-      case 'error': alert(msg.msg); break;
-      case 'chat': addChat(msg.name, msg.text); break;
+  function placePawns() {
+    // Remove existing pawns from cells
+    pawnEls.forEach(p => p.remove());
+    for (let i = 0; i < 2; i++) {
+      const p = players[i];
+      const cell = getCell(p.row, p.col);
+      if (cell) cell.appendChild(pawnEls[i]);
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  //  GAME EVENTS
-  // ══════════════════════════════════════════════════════════════════
-
-  function onGameStart(msg) {
-    gameActive = true;
-    controls.style.display = 'none'; diceArea.style.display = 'flex';
-    boardOuter.style.display = 'flex'; eventLog.style.display = '';
-    if (!msg.reconnect) resultOverlay.style.display = 'none';
-    buildBoardFromLayout(msg.layout);
-    playersInfo = msg.players; pawns = msg.pawns; barricades = msg.barricades;
-    myColorIdx = playersInfo.find(p => p.id === myId)?.colorIdx ?? -1;
-    currentTurnId = msg.turnId;
-    renderBoard(); renderPieces(); updatePlayerList(); syncUI();
-    addLogEntry(msg.reconnect ? 'Reconnected to game' : 'Game started!', 'info');
+  function getCell(r, c) {
+    return cells[r * GRID + c] || null;
   }
 
-  function onTurn(msg) {
-    currentTurnId = msg.turnId; dieResult = null; selectedPawnIdx = null;
-    placingBarricade = false; clearHighlights(); updatePlayerList(); syncUI();
+  // ══════════════════════════════════════════════════════════════════
+  //  MOVEMENT LOGIC
+  // ══════════════════════════════════════════════════════════════════
+
+  function canPassBetween(r1, c1, r2, c2) {
+    // Check if a wall blocks passage between adjacent cells (r1,c1) and (r2,c2)
+    for (const w of walls) {
+      if (w.type === 'h') {
+        // Horizontal wall at (wr, wc): blocks (wr,wc)↔(wr+1,wc) and (wr,wc+1)↔(wr+1,wc+1)
+        if (r2 === r1 + 1 && c1 === c2) {
+          // Moving down from (r1,c1) to (r1+1, c1)
+          if (w.r === r1 && (w.c === c1 || w.c === c1 - 1)) return false;
+        }
+        if (r2 === r1 - 1 && c1 === c2) {
+          // Moving up from (r1,c1) to (r1-1, c1)
+          if (w.r === r1 - 1 && (w.c === c1 || w.c === c1 - 1)) return false;
+        }
+      }
+      if (w.type === 'v') {
+        // Vertical wall at (wr, wc): blocks (wr,wc)↔(wr,wc+1) and (wr+1,wc)↔(wr+1,wc+1)
+        if (c2 === c1 + 1 && r1 === r2) {
+          // Moving right from (r1,c1) to (r1, c1+1)
+          if (w.c === c1 && (w.r === r1 || w.r === r1 - 1)) return false;
+        }
+        if (c2 === c1 - 1 && r1 === r2) {
+          // Moving left from (r1,c1) to (r1, c1-1)
+          if (w.c === c1 - 1 && (w.r === r1 || w.r === r1 - 1)) return false;
+        }
+      }
+    }
+    return true;
   }
 
-  function onRolled(msg) {
-    dieResult = msg.die;
-    animating = true;
-    animateDice(msg.die).then(() => {
-      animating = false;
-      syncUI();
-      if (msg.turnId === myId) {
-        if (msg.selectablePawns && msg.selectablePawns.length > 0) {
-          highlightSelectablePawns(msg.selectablePawns);
-          statusEl.textContent = 'Rolled ' + msg.die + ' — select a pawn';
+  function getValidMoves(playerIdx) {
+    const p = players[playerIdx];
+    const opp = players[1 - playerIdx];
+    const moves = [];
+
+    for (const [dr, dc] of DIRS) {
+      const nr = p.row + dr;
+      const nc = p.col + dc;
+      if (nr < 0 || nr >= GRID || nc < 0 || nc >= GRID) continue;
+      if (!canPassBetween(p.row, p.col, nr, nc)) continue;
+
+      // Check if opponent is there
+      if (nr === opp.row && nc === opp.col) {
+        // Try to jump over opponent
+        const jr = nr + dr;
+        const jc = nc + dc;
+        if (jr >= 0 && jr < GRID && jc >= 0 && jc < GRID &&
+            canPassBetween(nr, nc, jr, jc)) {
+          moves.push({ row: jr, col: jc });
         } else {
-          statusEl.textContent = 'Rolled ' + msg.die + ' — no moves available';
+          // Can't jump straight, try diagonals from opponent's position
+          for (const [dr2, dc2] of DIRS) {
+            if (dr2 === -dr && dc2 === -dc) continue; // Don't go back
+            const sr = nr + dr2;
+            const sc = nc + dc2;
+            if (sr < 0 || sr >= GRID || sc < 0 || sc >= GRID) continue;
+            if (sr === p.row && sc === p.col) continue;
+            if (!canPassBetween(nr, nc, sr, sc)) continue;
+            moves.push({ row: sr, col: sc });
+          }
         }
       } else {
-        statusEl.textContent = getPlayerName(msg.turnId) + ' rolled ' + msg.die;
+        moves.push({ row: nr, col: nc });
       }
-    });
-    addLogEntry(getPlayerName(msg.turnId) + ' rolled ' + msg.die, 'info');
+    }
+    return moves;
   }
 
-  function onPawnSelected(msg) {
-    if (msg.destinations && msg.destinations.length > 0) {
-      clearHighlights();
-      const el = pieceEls.get('pawn-' + myId + '-' + msg.pawnIdx);
-      if (el) el.classList.add('selected');
-      highlightDestinations(msg.destinations);
-      statusEl.textContent = 'Select a destination';
+  // ══════════════════════════════════════════════════════════════════
+  //  WALL LOGIC
+  // ══════════════════════════════════════════════════════════════════
+
+  function isWallValid(type, r, c) {
+    if (r < 0 || r >= GRID - 1 || c < 0 || c >= GRID - 1) return false;
+    // Check overlap
+    for (const w of walls) {
+      if (w.type === type && w.r === r && w.c === c) return false;
+      // Same position different type (crossing)
+      if (w.type !== type && w.r === r && w.c === c) return false;
+      // Adjacent same-type overlap
+      if (w.type === 'h' && type === 'h' && w.r === r && Math.abs(w.c - c) === 1) return false;
+      if (w.type === 'v' && type === 'v' && w.c === c && Math.abs(w.r - r) === 1) return false;
+    }
+    return true;
+  }
+
+  function bfs(startRow, startCol, goalRow, wallSet) {
+    // BFS from (startRow, startCol) to any cell in goalRow
+    const visited = new Set();
+    const queue = [[startRow, startCol, 0]];
+    visited.add(startRow * GRID + startCol);
+
+    while (queue.length > 0) {
+      const [r, c, dist] = queue.shift();
+      if (r === goalRow) return dist;
+
+      for (const [dr, dc] of DIRS) {
+        const nr = r + dr;
+        const nc = c + dc;
+        if (nr < 0 || nr >= GRID || nc < 0 || nc >= GRID) continue;
+        if (visited.has(nr * GRID + nc)) continue;
+        if (!canPassBetweenWithWalls(r, c, nr, nc, wallSet)) continue;
+        visited.add(nr * GRID + nc);
+        queue.push([nr, nc, dist + 1]);
+      }
+    }
+    return -1; // No path
+  }
+
+  function canPassBetweenWithWalls(r1, c1, r2, c2, wallSet) {
+    for (const w of wallSet) {
+      if (w.type === 'h') {
+        if (r2 === r1 + 1 && c1 === c2) {
+          if (w.r === r1 && (w.c === c1 || w.c === c1 - 1)) return false;
+        }
+        if (r2 === r1 - 1 && c1 === c2) {
+          if (w.r === r1 - 1 && (w.c === c1 || w.c === c1 - 1)) return false;
+        }
+      }
+      if (w.type === 'v') {
+        if (c2 === c1 + 1 && r1 === r2) {
+          if (w.c === c1 && (w.r === r1 || w.r === r1 - 1)) return false;
+        }
+        if (c2 === c1 - 1 && r1 === r2) {
+          if (w.c === c1 - 1 && (w.r === r1 || w.r === r1 - 1)) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  function wouldBlockPath(type, r, c) {
+    const testWalls = [...walls, { type, r, c }];
+    for (let i = 0; i < 2; i++) {
+      const dist = bfs(players[i].row, players[i].col, players[i].goalRow, testWalls);
+      if (dist === -1) return true;
+    }
+    return false;
+  }
+
+  function canPlaceWall(type, r, c) {
+    if (players[currentPlayer].wallsLeft <= 0) return false;
+    if (!isWallValid(type, r, c)) return false;
+    if (wouldBlockPath(type, r, c)) return false;
+    return true;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  UI UPDATE
+  // ══════════════════════════════════════════════════════════════════
+
+  function updateUI() {
+    // Player info
+    p1Walls.textContent = `🧱 ×${players[0].wallsLeft}`;
+    p2Walls.textContent = `🧱 ×${players[1].wallsLeft}`;
+
+    // Turn indicator
+    const name = currentPlayer === 0 ? p1Name.textContent : p2Name.textContent;
+    turnText.textContent = `${name}'s Turn`;
+    turnDot.style.background = currentPlayer === 0 ? 'var(--p1)' : 'var(--p2)';
+
+    // Active player highlight
+    p1Info.classList.toggle('active-turn', currentPlayer === 0);
+    p2Info.classList.toggle('active-turn', currentPlayer === 1);
+
+    // Pawn active state
+    pawnEls[0].classList.toggle('active', currentPlayer === 0);
+    pawnEls[1].classList.toggle('active', currentPlayer === 1);
+
+    // Action buttons
+    btnMove.classList.toggle('active', action === 'move');
+    btnWall.classList.toggle('active', action === 'wall');
+    btnWall.disabled = players[currentPlayer].wallsLeft <= 0;
+
+    if (action === 'move') {
+      actionHint.textContent = 'Click a highlighted cell to move';
     } else {
-      statusEl.textContent = 'No valid moves for this pawn. Try another.';
-      selectedPawnIdx = null;
+      actionHint.textContent = 'Click between cells to place a barricade';
+    }
+
+    // Highlight valid moves
+    highlightValidMoves();
+
+    // Show/hide wall slots
+    wallSlots.forEach(slot => {
+      if (slot.classList.contains('placed')) return;
+      slot.style.display = action === 'wall' ? 'block' : 'none';
+    });
+
+    // Reposition wall slots
+    positionWallSlots();
+  }
+
+  function highlightValidMoves() {
+    cells.forEach(cell => cell.classList.remove('valid-move'));
+    if (action !== 'move' || gameOver) return;
+
+    const moves = getValidMoves(currentPlayer);
+    for (const m of moves) {
+      const cell = getCell(m.row, m.col);
+      if (cell) cell.classList.add('valid-move');
     }
   }
 
-  function onNoMoves(msg) {
-    statusEl.textContent = 'No valid moves — turn skipped';
-    addLogEntry(getPlayerName(msg.turnId) + ' — no moves, skipped', 'info');
+  // ══════════════════════════════════════════════════════════════════
+  //  EVENT HANDLERS
+  // ══════════════════════════════════════════════════════════════════
+
+  function onCellClick(r, c) {
+    if (gameOver) return;
+    if (action !== 'move') return;
+    if (mode === 'bot' && currentPlayer === 1) return; // Bot's turn
+
+    const moves = getValidMoves(currentPlayer);
+    const move = moves.find(m => m.row === r && m.col === c);
+    if (!move) return;
+
+    executeMove(r, c);
   }
 
-  function onMoved(msg) {
-    animating = true;
-    clearHighlights();
-    animatePawnSteps(msg.playerId, msg.pawnIdx, msg.path || []).then(() => {
-      pawns = msg.pawns; barricades = msg.barricades;
-      renderPieces(); updatePlayerList(); animating = false; syncUI();
-    });
-    addLogEntry(getPlayerName(msg.playerId) + ' moved pawn ' + (msg.pawnIdx + 1), 'info');
-  }
+  function executeMove(r, c) {
+    players[currentPlayer].row = r;
+    players[currentPlayer].col = c;
 
-  function onCaptured(msg) {
-    animateCapture(msg.capturedPlayerId, msg.capturedPawnIdx);
-    pawns = msg.pawns; barricades = msg.barricades;
-    setTimeout(() => { renderPieces(); updatePlayerList(); syncUI(); }, 600);
-    addLogEntry(getPlayerName(msg.capturedPlayerId) + "'s pawn sent home!", 'capture');
-  }
+    // Animate pawn
+    const cell = getCell(r, c);
+    const pawn = pawnEls[currentPlayer];
+    pawn.remove();
+    cell.appendChild(pawn);
 
-  function onBarricadeCaptured(msg) {
-    pawns = msg.pawns; barricades = msg.barricades; renderPieces();
-    if (msg.playerId === myId) {
-      placingBarricade = true; barricadePlaceBar.style.display = 'flex';
-      highlightBarricadePlacements(msg.validPlacements);
-      statusEl.textContent = 'Place the captured barricade!';
-      startBarricadeTimer();
-    } else {
-      statusEl.textContent = getPlayerName(msg.playerId) + ' placing barricade…';
+    // Check win
+    if (r === players[currentPlayer].goalRow) {
+      endGame(currentPlayer);
+      return;
     }
-    addLogEntry(getPlayerName(msg.playerId) + ' captured a barricade!', 'barricade');
+
+    endTurn();
   }
 
-  function onBarricadePlaced(msg) {
-    placingBarricade = false; barricadePlaceBar.style.display = 'none';
-    clearBarricadeTimer(); clearHighlights();
-    pawns = msg.pawns; barricades = msg.barricades;
-    renderPieces(); updatePlayerList();
-    addLogEntry(getPlayerName(msg.playerId) + ' placed a barricade', 'barricade');
+  function onWallClick(type, r, c) {
+    if (gameOver) return;
+    if (action !== 'wall') return;
+    if (mode === 'bot' && currentPlayer === 1) return;
+
+    if (!canPlaceWall(type, r, c)) return;
+
+    placeWall(type, r, c, currentPlayer);
+    endTurn();
   }
 
-  function onFullState(msg) {
-    pawns = msg.pawns; barricades = msg.barricades; currentTurnId = msg.turnId;
-    if (msg.layout) { buildBoardFromLayout(msg.layout); renderBoard(); }
-    renderPieces(); updatePlayerList(); syncUI();
+  function placeWall(type, r, c, playerIdx) {
+    walls.push({ type, r, c, player: playerIdx });
+    players[playerIdx].wallsLeft--;
+
+    // Mark the slot as placed
+    const slot = wallSlots.find(s =>
+      s.dataset.type === type &&
+      parseInt(s.dataset.r) === r &&
+      parseInt(s.dataset.c) === c
+    );
+    if (slot) {
+      slot.classList.add('placed', `p${playerIdx + 1}-wall`);
+      slot.classList.remove('preview');
+      slot.style.display = 'block';
+    }
   }
 
-  function onGameOver(msg) {
-    gameActive = false; clearHighlights(); clearBarricadeTimer();
-    const info = playersInfo.find(p => p.id === msg.winnerId);
-    const name = info ? info.name : 'Unknown';
-    const isMe = msg.winnerId === myId;
-    resultEmoji.textContent = isMe ? '🏆' : '😔';
-    resultTitle.textContent = isMe ? 'You Win!' : name + ' Wins!';
-    resultSub.textContent = name + ' reached the goal!';
+  function onWallHover(type, r, c) {
+    if (action !== 'wall' || gameOver) return;
+    if (mode === 'bot' && currentPlayer === 1) return;
+    const slot = wallSlots.find(s =>
+      s.dataset.type === type &&
+      parseInt(s.dataset.r) === r &&
+      parseInt(s.dataset.c) === c
+    );
+    if (!slot || slot.classList.contains('placed')) return;
+
+    if (canPlaceWall(type, r, c)) {
+      slot.classList.add('preview');
+      slot.classList.remove('invalid');
+    } else {
+      slot.classList.add('invalid');
+    }
+  }
+
+  function onWallLeave(type, r, c) {
+    const slot = wallSlots.find(s =>
+      s.dataset.type === type &&
+      parseInt(s.dataset.r) === r &&
+      parseInt(s.dataset.c) === c
+    );
+    if (slot) {
+      slot.classList.remove('preview', 'invalid');
+    }
+  }
+
+  function endTurn() {
+    currentPlayer = 1 - currentPlayer;
+    action = 'move';
+    updateUI();
+
+    // Bot turn
+    if (mode === 'bot' && currentPlayer === 1 && !gameOver) {
+      btnMove.disabled = true;
+      btnWall.disabled = true;
+      setTimeout(botTurn, 600);
+    }
+  }
+
+  function endGame(winner) {
+    gameOver = true;
+    const name = winner === 0 ? p1Name.textContent : p2Name.textContent;
+    resultTitle.textContent = `${name} Wins!`;
+    resultSub.textContent = 'Reached the other side!';
     resultOverlay.style.display = 'flex';
-    if (isMe) { reportScore('barricade', 1); launchConfetti(); }
-    addLogEntry(name + ' wins!', 'win');
+    launchConfetti();
   }
 
   // ══════════════════════════════════════════════════════════════════
-  //  USER ACTIONS
+  //  BOT AI
   // ══════════════════════════════════════════════════════════════════
 
-  function onPawnClick(playerId, pawnIdx) {
-    if (animating || !gameActive || placingBarricade) return;
-    if (playerId !== myId || currentTurnId !== myId || dieResult === null) return;
-    selectedPawnIdx = pawnIdx;
-    wsSend({ type: 'bar-select-pawn', pawnIdx });
-  }
+  function botTurn() {
+    if (gameOver) return;
 
-  function onDestClick(nodeId) {
-    if (animating || !gameActive || currentTurnId !== myId || selectedPawnIdx === null) return;
-    wsSend({ type: 'bar-move', pawnIdx: selectedPawnIdx, destNode: nodeId });
-    clearHighlights();
-  }
+    const botIdx = 1;
+    const oppIdx = 0;
 
-  function onBarricadePlaceClick(nodeId) {
-    if (!placingBarricade || currentTurnId !== myId) return;
-    wsSend({ type: 'bar-place-barricade', nodeId });
-    clearHighlights();
-  }
-
-  btnRoll.addEventListener('click', () => {
-    if (currentTurnId !== myId || animating || dieResult !== null) return;
-    wsSend({ type: 'bar-roll' }); btnRoll.disabled = true;
-  });
-
-  btnStartGame.addEventListener('click', () => wsSend({ type: 'bar-start' }));
-  btnPlayAgain.addEventListener('click', () => { resultOverlay.style.display = 'none'; wsSend({ type: 'bar-start' }); });
-
-  // ══════════════════════════════════════════════════════════════════
-  //  UI SYNC
-  // ══════════════════════════════════════════════════════════════════
-
-  function syncUI() {
-    const isMyTurn = currentTurnId === myId && gameActive;
-    btnRoll.disabled = !isMyTurn || animating || dieResult !== null || placingBarricade;
-    if (isMyTurn && !placingBarricade && dieResult === null) {
-      turnTag.textContent = 'Your turn — Roll!'; statusEl.textContent = 'Your turn! Roll the die.';
-    } else if (isMyTurn && placingBarricade) {
-      turnTag.textContent = 'Place barricade';
-    } else if (!isMyTurn && gameActive) {
-      const n = getPlayerName(currentTurnId);
-      turnTag.textContent = n + "'s turn"; statusEl.textContent = n + "'s turn…";
+    // 1. Check if bot can win in one move
+    const moves = getValidMoves(botIdx);
+    const winMove = moves.find(m => m.row === players[botIdx].goalRow);
+    if (winMove) {
+      executeMove(winMove.row, winMove.col);
+      return;
     }
-    controls.style.display = gameActive ? 'none' : '';
-    btnStartGame.style.display = (leaderId === myId && !gameActive) ? '' : 'none';
-  }
 
-  function updateLobbyUI() {
-    if (!gameActive) {
-      playersInfo = []; let idx = 0;
-      playersInfo.push({ id: myId, name: myName, colorIdx: idx++ });
-      for (const [id, p] of others) playersInfo.push({ id, name: p.name, colorIdx: idx++ });
-      updatePlayerList();
+    // 2. Evaluate wall placements vs moving
+    const myPath = bfs(players[botIdx].row, players[botIdx].col, players[botIdx].goalRow, walls);
+    const oppPath = bfs(players[oppIdx].row, players[oppIdx].col, players[oppIdx].goalRow, walls);
+
+    let bestWall = null;
+    let bestWallScore = 0;
+
+    if (players[botIdx].wallsLeft > 0) {
+      // Sample wall placements (check all, but limit computation)
+      for (let r = 0; r < GRID - 1; r++) {
+        for (let c = 0; c < GRID - 1; c++) {
+          for (const type of ['h', 'v']) {
+            if (!canPlaceWall(type, r, c)) continue;
+
+            const testWalls = [...walls, { type, r, c }];
+            const newOppPath = bfs(players[oppIdx].row, players[oppIdx].col, players[oppIdx].goalRow, testWalls);
+            const newMyPath = bfs(players[botIdx].row, players[botIdx].col, players[botIdx].goalRow, testWalls);
+
+            if (newOppPath === -1 || newMyPath === -1) continue;
+
+            const score = (newOppPath - oppPath) - (newMyPath - myPath) * 0.5;
+            if (score > bestWallScore) {
+              bestWallScore = score;
+              bestWall = { type, r, c };
+            }
+          }
+        }
+      }
     }
-    controls.style.display = gameActive ? 'none' : '';
-    btnStartGame.style.display = (leaderId === myId && !gameActive) ? '' : 'none';
+
+    // 3. Decide: place wall or move
+    if (bestWall && bestWallScore >= 2 && players[botIdx].wallsLeft > 3) {
+      placeWall(bestWall.type, bestWall.r, bestWall.c, botIdx);
+      endTurn();
+    } else if (bestWall && bestWallScore >= 3) {
+      placeWall(bestWall.type, bestWall.r, bestWall.c, botIdx);
+      endTurn();
+    } else {
+      // Move along shortest path
+      const bestMove = findBestMove(botIdx);
+      if (bestMove) {
+        executeMove(bestMove.row, bestMove.col);
+      } else {
+        // No moves available (shouldn't happen), just end turn
+        endTurn();
+      }
+    }
   }
 
-  function getPlayerName(pid) {
-    const info = playersInfo.find(p => p.id === pid);
-    return info ? info.name : 'Player';
-  }
+  function findBestMove(playerIdx) {
+    const moves = getValidMoves(playerIdx);
+    if (moves.length === 0) return null;
 
-  // ══════════════════════════════════════════════════════════════════
-  //  BARRICADE TIMER
-  // ══════════════════════════════════════════════════════════════════
+    let best = null;
+    let bestDist = Infinity;
 
-  function startBarricadeTimer() {
-    barricadePlaceCountdownVal = 15; barricadeCountdown.textContent = '15';
-    clearBarricadeTimer();
-    barricadePlaceTimer = setInterval(() => {
-      barricadePlaceCountdownVal--;
-      barricadeCountdown.textContent = barricadePlaceCountdownVal;
-      if (barricadePlaceCountdownVal <= 0) clearBarricadeTimer();
-    }, 1000);
-  }
-
-  function clearBarricadeTimer() {
-    if (barricadePlaceTimer) { clearInterval(barricadePlaceTimer); barricadePlaceTimer = null; }
-    barricadePlaceBar.style.display = 'none';
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  //  CHAT
-  // ══════════════════════════════════════════════════════════════════
-
-  function addChat(name, text) {
-    const el = document.createElement('div');
-    el.className = 'chat-msg' + (name ? '' : ' system');
-    el.innerHTML = name ? `<span class="chat-name">${escapeHtml(name)}:</span> ${escapeHtml(text)}` : escapeHtml(text);
-    chatMessages.appendChild(el); chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
-  function sendChat() {
-    const text = chatInput.value.trim(); if (!text) return;
-    wsSend({ type: 'chat', text }); addChat(myName, text); chatInput.value = '';
-  }
-  chatSend.addEventListener('click', sendChat);
-  chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
-
-  // ══════════════════════════════════════════════════════════════════
-  //  EVENT LOG
-  // ══════════════════════════════════════════════════════════════════
-
-  function addLogEntry(text, cls) {
-    const el = document.createElement('div');
-    el.className = 'event-log-item' + (cls ? ' ' + cls : '');
-    el.textContent = text; eventLogList.appendChild(el);
-    eventLogList.scrollTop = eventLogList.scrollHeight;
+    for (const m of moves) {
+      const dist = bfs(m.row, m.col, players[playerIdx].goalRow, walls);
+      if (dist !== -1 && dist < bestDist) {
+        bestDist = dist;
+        best = m;
+      }
+    }
+    return best || moves[0];
   }
 
   // ══════════════════════════════════════════════════════════════════
   //  CONFETTI
   // ══════════════════════════════════════════════════════════════════
 
+  let confettiParts = [];
+  let confettiAnim = null;
+
   function launchConfetti() {
-    confettiCvs.width = window.innerWidth; confettiCvs.height = window.innerHeight;
-    const ps = [];
-    for (let i = 0; i < 200; i++) ps.push({
-      x: Math.random()*confettiCvs.width, y: Math.random()*-confettiCvs.height,
-      w: Math.random()*8+4, h: Math.random()*6+2,
-      vx: (Math.random()-.5)*4, vy: Math.random()*3+2,
-      rot: Math.random()*360, vr: (Math.random()-.5)*10,
-      color: ['#ef4444','#3b82f6','#22c55e','#fbbf24','#8b5cf6','#06b6d4'][Math.random()*6|0],
-      life: 1,
-    });
-    let frame = 0;
-    (function draw() {
-      cctx.clearRect(0,0,confettiCvs.width,confettiCvs.height);
-      let alive = false;
-      for (const p of ps) {
-        if (p.life <= 0) continue; alive = true;
-        p.x += p.vx; p.y += p.vy; p.vy += .05; p.rot += p.vr;
-        if (frame > 60) p.life -= .01;
-        cctx.save(); cctx.translate(p.x,p.y); cctx.rotate(p.rot*Math.PI/180);
-        cctx.globalAlpha = p.life; cctx.fillStyle = p.color;
-        cctx.fillRect(-p.w/2,-p.h/2,p.w,p.h); cctx.restore();
-      }
-      frame++;
-      if (alive && frame < 300) requestAnimationFrame(draw);
-      else cctx.clearRect(0,0,confettiCvs.width,confettiCvs.height);
-    })();
+    confettiCvs.width = window.innerWidth;
+    confettiCvs.height = window.innerHeight;
+    confettiParts = [];
+    const colors = ['#ef4444', '#3b82f6', '#22c55e', '#fbbf24', '#8b5cf6', '#06b6d4'];
+    for (let i = 0; i < 150; i++) {
+      confettiParts.push({
+        x: Math.random() * confettiCvs.width,
+        y: Math.random() * confettiCvs.height - confettiCvs.height,
+        w: Math.random() * 8 + 4,
+        h: Math.random() * 6 + 3,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        vx: (Math.random() - 0.5) * 4,
+        vy: Math.random() * 3 + 2,
+        rot: Math.random() * 360,
+        vr: (Math.random() - 0.5) * 10
+      });
+    }
+    if (confettiAnim) cancelAnimationFrame(confettiAnim);
+    animateConfetti();
+  }
+
+  function animateConfetti() {
+    cctx.clearRect(0, 0, confettiCvs.width, confettiCvs.height);
+    let alive = false;
+    for (const p of confettiParts) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.05;
+      p.rot += p.vr;
+      if (p.y < confettiCvs.height + 50) alive = true;
+      cctx.save();
+      cctx.translate(p.x, p.y);
+      cctx.rotate(p.rot * Math.PI / 180);
+      cctx.fillStyle = p.color;
+      cctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      cctx.restore();
+    }
+    if (alive) confettiAnim = requestAnimationFrame(animateConfetti);
   }
 
   // ══════════════════════════════════════════════════════════════════
-  //  MISC UI
+  //  EVENT BINDINGS
   // ══════════════════════════════════════════════════════════════════
 
-  btnBack.addEventListener('click', () => { if (confirm('Leave the game?')) { wsSend({ type: 'leave-room' }); location.href = '/'; } });
-  btnRules.addEventListener('click', () => rulesPanel.style.display = 'flex');
-  rulesClose.addEventListener('click', () => rulesPanel.style.display = 'none');
-  rulesPanel.addEventListener('click', e => { if (e.target === rulesPanel) rulesPanel.style.display = 'none'; });
-  btnToggleSidebar.addEventListener('click', () => { sidebar.classList.toggle('open'); panelBackdrop.classList.toggle('open'); });
-  btnToggleChat.addEventListener('click', () => { chatPanel.classList.toggle('open'); panelBackdrop.classList.toggle('open'); });
-  panelBackdrop.addEventListener('click', () => { sidebar.classList.remove('open'); chatPanel.classList.remove('open'); panelBackdrop.classList.remove('open'); });
+  $('btnPvP').addEventListener('click', () => initGame('pvp'));
+  $('btnBot').addEventListener('click', () => initGame('bot'));
+  $('btnBackLobby').addEventListener('click', () => { location.href = '/'; });
+  $('btnBack').addEventListener('click', () => {
+    gameContainer.style.display = 'none';
+    modeOverlay.style.display = 'flex';
+    gameOver = true;
+  });
+  $('btnRules').addEventListener('click', () => { rulesOverlay.style.display = 'flex'; });
+  $('rulesClose').addEventListener('click', () => { rulesOverlay.style.display = 'none'; });
+  rulesOverlay.addEventListener('click', e => { if (e.target === rulesOverlay) rulesOverlay.style.display = 'none'; });
 
-  initDicePips();
-  connect();
+  $('btnPlayAgain').addEventListener('click', () => { initGame(mode); });
+  $('btnBackMenu').addEventListener('click', () => {
+    resultOverlay.style.display = 'none';
+    gameContainer.style.display = 'none';
+    modeOverlay.style.display = 'flex';
+  });
+
+  btnMove.addEventListener('click', () => {
+    if (gameOver) return;
+    if (mode === 'bot' && currentPlayer === 1) return;
+    action = 'move';
+    updateUI();
+  });
+
+  btnWall.addEventListener('click', () => {
+    if (gameOver) return;
+    if (mode === 'bot' && currentPlayer === 1) return;
+    if (players[currentPlayer].wallsLeft <= 0) return;
+    action = 'wall';
+    updateUI();
+  });
+
+  // Resize handler
+  window.addEventListener('resize', () => {
+    positionWallSlots();
+    confettiCvs.width = window.innerWidth;
+    confettiCvs.height = window.innerHeight;
+  });
+
 })();
