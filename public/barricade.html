@@ -6,21 +6,29 @@
   <title>Barricade — Game Arena</title>
   <link rel="stylesheet" href="barricade.css">
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
 </head>
 <body>
 
-  <!-- Mode Selection -->
-  <div class="mode-overlay" id="modeOverlay">
+  <!-- ─── Bot-mode overlay (only shown when no room param) ─── -->
+  <div class="mode-overlay" id="modeOverlay" style="display:none">
     <div class="mode-card">
       <h1 class="mode-title">BARRICADE</h1>
       <p class="mode-sub">Block your opponent. Reach their side to win.</p>
       <div class="mode-buttons">
-        <button class="btn btn-mode" id="btnPvP">
-          <span class="mode-icon">👥</span>
-          <span class="mode-label">Player vs Player</span>
-          <span class="mode-desc">Local 2-player</span>
-        </button>
-        <button class="btn btn-mode" id="btnBot">
+        <button class="btn btn-mode" id="btnBotMode">
           <span class="mode-icon">🤖</span>
           <span class="mode-label">Player vs Bot</span>
           <span class="mode-desc">Challenge the AI</span>
@@ -30,81 +38,105 @@
     </div>
   </div>
 
-  <!-- Game Area -->
-  <div class="game-container" id="gameContainer" style="display:none">
-    <header class="game-header">
-      <button class="btn btn-sm btn-back" id="btnBack">← Menu</button>
-      <h1 class="logo">BARRICADE</h1>
-      <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
-    </header>
+  <!-- ─── Arena Layout ─── -->
+  <div class="layout" id="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">1</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+    </aside>
 
-    <!-- Player Info -->
-    <div class="player-bar">
-      <div class="player-info p1-side" id="p1Info">
-        <div class="player-dot p1-dot"></div>
-        <div class="player-details">
-          <span class="player-name" id="p1Name">Player 1</span>
-          <span class="wall-count" id="p1Walls">🧱 ×10</span>
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
+        <h1 class="logo logo-sm">BARRICADE</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-mobile-toggle" id="btnToggleChat" title="Chat">💬</button>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+
+      <div class="controls" id="controls">
+        <button class="btn btn-primary" id="btnStartGame">▶ Start Game</button>
+      </div>
+      <div class="status" id="status">Connecting…</div>
+
+      <!-- Player Info Bar -->
+      <div class="player-bar" id="playerBar" style="display:none">
+        <div class="player-info p1-side" id="p1Info">
+          <div class="player-dot p1-dot"></div>
+          <div class="player-details">
+            <span class="player-name" id="p1Name">Player 1</span>
+            <span class="wall-count" id="p1Walls">🧱 ×10</span>
+          </div>
+        </div>
+        <div class="turn-badge" id="turnBadge">
+          <span class="turn-dot" id="turnDot"></span>
+          <span id="turnText">Waiting…</span>
+        </div>
+        <div class="player-info p2-side" id="p2Info">
+          <div class="player-dot p2-dot"></div>
+          <div class="player-details">
+            <span class="player-name" id="p2Name">Player 2</span>
+            <span class="wall-count" id="p2Walls">🧱 ×10</span>
+          </div>
         </div>
       </div>
-      <div class="turn-badge" id="turnBadge">
-        <span class="turn-dot" id="turnDot"></span>
-        <span id="turnText">Player 1's Turn</span>
-      </div>
-      <div class="player-info p2-side" id="p2Info">
-        <div class="player-dot p2-dot"></div>
-        <div class="player-details">
-          <span class="player-name" id="p2Name">Player 2</span>
-          <span class="wall-count" id="p2Walls">🧱 ×10</span>
-        </div>
-      </div>
-    </div>
 
-    <!-- Actions -->
-    <div class="action-bar" id="actionBar">
-      <button class="btn btn-action active" id="btnMove">🚶 Move</button>
-      <button class="btn btn-action" id="btnWall">🧱 Barricade</button>
-      <span class="action-hint" id="actionHint">Click an adjacent cell to move</span>
-    </div>
+      <!-- Hint -->
+      <div class="action-bar" id="actionBar" style="display:none">
+        <span class="action-hint" id="actionHint">Move to a cell or place a barricade in the gaps</span>
+      </div>
 
-    <!-- Board -->
-    <div class="board-wrap" id="boardWrap">
-      <div class="board" id="board"></div>
-    </div>
+      <!-- Board -->
+      <div class="board-wrap" id="boardWrap" style="display:none">
+        <div class="board" id="board"></div>
+      </div>
+    </main>
+
+    <aside class="chat-panel" id="chatPanel">
+      <div class="chat-header">Chat</div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" type="text" placeholder="Message…" maxlength="200" autocomplete="off">
+        <button class="btn chat-send-btn" id="chatSend">↑</button>
+      </div>
+    </aside>
   </div>
 
   <!-- Result Overlay -->
   <div class="result-overlay" id="resultOverlay" style="display:none">
     <div class="result-card">
       <div class="result-emoji">🏆</div>
-      <h2 class="result-title" id="resultTitle">Player 1 Wins!</h2>
+      <h2 class="result-title" id="resultTitle">Winner!</h2>
       <p class="result-sub" id="resultSub">Reached the other side!</p>
-      <div class="result-buttons">
-        <button class="btn btn-primary btn-lg" id="btnPlayAgain">Play Again</button>
-        <button class="btn btn-sm btn-secondary" id="btnBackMenu">← Menu</button>
-      </div>
+      <button class="btn btn-primary btn-lg" id="btnPlayAgain">Play Again</button>
     </div>
   </div>
 
-  <!-- Rules Overlay -->
-  <div class="rules-overlay" id="rulesOverlay" style="display:none">
+  <canvas id="confetti"></canvas>
+
+  <!-- Rules -->
+  <div class="rules-panel" id="rulesPanel" style="display:none">
     <div class="rules-card">
       <button class="rules-close" id="rulesClose">✕</button>
       <h2>Barricade Rules</h2>
       <ul>
         <li><strong>Objective:</strong> Reach your opponent's starting row to win.</li>
         <li><strong>Turns:</strong> Each turn you may either <em>move</em> or <em>place a barricade</em>.</li>
-        <li><strong>Movement:</strong> Move one cell in any direction (up, down, left, right). Jump over your opponent if adjacent.</li>
-        <li><strong>Barricades:</strong> Each player has 10 barricades. They are 2 cells wide and block passage.</li>
-        <li><strong>Orientation:</strong> Barricades can be horizontal or vertical.</li>
-        <li><strong>Fair Play:</strong> You cannot completely block all paths — at least one route must always remain open for both players.</li>
+        <li><strong>Movement:</strong> Move one cell in any direction (up/down/left/right). You can jump over your opponent if adjacent.</li>
+        <li><strong>Barricades:</strong> Each player has 10. They are 2 cells wide and block passage.</li>
+        <li><strong>Orientation:</strong> Barricades can be placed horizontally or vertically between cells.</li>
+        <li><strong>Fair Play:</strong> You cannot completely block all paths — at least one route must remain open for both players.</li>
         <li><strong>No Overlap:</strong> Barricades cannot overlap or cross each other.</li>
         <li><strong>Strategy:</strong> Balance advancing toward the goal and slowing your opponent!</li>
       </ul>
     </div>
   </div>
 
-  <canvas id="confetti"></canvas>
+  <div class="panel-backdrop" id="panelBackdrop"></div>
   <script src="barricade.js"></script>
 </body>
 </html>
