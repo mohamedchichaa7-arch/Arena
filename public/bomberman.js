@@ -40,19 +40,25 @@
   let animFrame = null;
   let shakeAmount = 0;
 
-  // ── State interpolation ────────────────────────────────────────────
-  // On each server tick we record:
-  //   iFrom[pid]  — rendered position the moment the tick arrived
-  //   iTo[pid]    — server's confirmed sub-cell float position
-  //   iAt[pid]    — performance.now() when the tick arrived
-  // Each frame we lerp iFrom→iTo over TICK_MS ms, then coast at iTo.
-  // Nothing ever moves backward; wall-stops converge smoothly.
-  const TICK_MS   = 55;   // slightly over server 50ms to avoid pop at boundary
-  const iFrom     = {};
-  const iTo       = {};
-  const iAt       = {};
-  const iFacing   = {};
+  // ── Interpolation for REMOTE players ─────────────────────────────────────────────
+  // Each remote player: we store the last two server snapshots and lerp between them
+  const iFrom   = {};   // render position when latest server tick arrived
+  const iTo     = {};   // server-computed sub-cell float for latest tick
+  const iAt     = {};   // performance.now() when iTo was set
+  const iFacing = {};   // facing direction per player
+  const REMOTE_LERP_MS = 80; // lerp window — slightly > server tick (50ms) to smooth jitter
+
+  // ── Client-side prediction for LOCAL PLAYER ──────────────────────────────────────
+  // Source/target cell model: collision is checked BEFORE animation starts so the
+  // player NEVER visually enters a wall. A single tap always completes one full step.
+  const BM_SPEED = 8; // must match server BM_SPEED_BASE
+  let myGridX = 0, myGridY = 0;   // cell the player is currently at (or animating FROM)
+  let myNextX = 0, myNextY = 0;   // cell the player is animating TOWARD
+  let myProgress = 0;             // 0→1 animation progress between myGrid and myNext
+  let myMoving  = false;          // true while animating between cells
+  let myMoveDir = null;           // current held direction: 'up'|'down'|'left'|'right'|null
   let localFacingDir = 'down';
+  let lastFrameTime = 0;
 
   function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -114,7 +120,19 @@
         break;
 
       case 'bm-remote-detonate':
-        // Already handled in state
+        // Process the detonation events (wall destruction, eliminations, etc.)
+        if (msg.events) {
+          for (const ev of msg.events) {
+            if (ev.type === 'bm-wall-destroyed') {
+              if (grid) grid[ev.y][ev.x] = 0;
+            } else if (ev.type === 'bm-player-eliminated') {
+              addChatMsg('💀', ev.name + ' eliminated!');
+              shakeAmount = 6;
+            } else if (ev.type === 'bm-vest-break') {
+              addChatMsg('🦺', (players[ev.playerId]?.name || 'Player') + "'s vest broke!");
+            }
+          }
+        }
         break;
 
       case 'chat':
@@ -194,13 +212,28 @@
     roundOverlay.style.display = 'none';
     statusEl.textContent = '';
     localFacingDir = 'down';
-    // Seed interpolation state at spawn positions
+    myMoveDir = null;
+    myMoving  = false;
+    myProgress = 0;
+    lastFrameTime = 0;
+
+    // Seed local position from server spawn
+    const myStartPos = players[myId];
+    if (myStartPos) {
+      myGridX = myNextX = myStartPos.x;
+      myGridY = myNextY = myStartPos.y;
+    }
+
+    // Seed remote-player interpolation at spawn positions
     const t0 = performance.now();
     for (const [pid, ps] of Object.entries(players)) {
-      iFrom[pid] = { x: ps.x, y: ps.y };
-      iTo[pid]   = { x: ps.x, y: ps.y };
-      iAt[pid]   = t0;
-      iFacing[pid] = 'down';
+      if (pid === myId) continue;
+      const fx = ps.x + (ps.moving && ps.moveDir === 'right' ? 1 : ps.moving && ps.moveDir === 'left' ? -1 : 0) * (ps.moveProgress || 0);
+      const fy = ps.y + (ps.moving && ps.moveDir === 'down'  ? 1 : ps.moving && ps.moveDir === 'up'   ? -1 : 0) * (ps.moveProgress || 0);
+      iFrom[pid]   = { x: fx, y: fy };
+      iTo[pid]     = { x: fx, y: fy };
+      iAt[pid]     = t0;
+      iFacing[pid] = ps.facingDir || 'down';
     }
     updatePlayerCards();
   }
@@ -242,20 +275,25 @@
     timerDisplay.textContent = m + ':' + String(s).padStart(2, '0');
     timerDisplay.classList.toggle('danger', remain <= 30);
 
-    // Update interpolation targets from server tick
+    // Server is NOT authoritative for local player position (client owns movement).
+    // Only sync curse/powerup state that the server tracks.
+    if (msg.players[myId]) {
+      const sp = msg.players[myId];
+      // If server says we're dead, trust it (explosion logic is server-side)
+      if (!sp.alive && players[myId]?.alive) {
+        players[myId].alive = false;
+      }
+      // Apply speedLevel changes from powerups
+      if (sp.speedLevel !== undefined) players[myId] = { ...players[myId], ...sp };
+    }
+
+    // Update remote-player interpolation targets
     const tickNow = performance.now();
     for (const [pid, ps] of Object.entries(msg.players)) {
-      // Compute server's sub-cell float position
-      const dx = (ps.moving && ps.moveDir === 'left') ? -1 : (ps.moving && ps.moveDir === 'right') ? 1 : 0;
-      const dy = (ps.moving && ps.moveDir === 'up')   ? -1 : (ps.moving && ps.moveDir === 'down')  ? 1 : 0;
-      const prog = ps.moving ? (ps.moveProgress || 0) : 0;
-      const tgtX = ps.x + dx * prog;
-      const tgtY = ps.y + dy * prog;
-
-      // Current rendered position becomes the new origin for this tick's lerp
-      const cur = getRenderPos(pid);
-      iFrom[pid] = cur || { x: tgtX, y: tgtY };
-      iTo[pid]   = { x: tgtX, y: tgtY };
+      if (pid === myId) continue;
+      // For remote players the server IS authoritative — lerp between their last two cell positions
+      iFrom[pid] = getRemoteRenderPos(pid) || iTo[pid] || { x: ps.x, y: ps.y };
+      iTo[pid]   = { x: ps.x, y: ps.y };
       iAt[pid]   = tickNow;
       iFacing[pid] = ps.facingDir || iFacing[pid] || 'down';
     }
@@ -337,6 +375,8 @@
 
   // ── Input ────────────────────────────────────────────────────
   const keysDown = new Set();
+  const dirMap = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right' };
+  let lastMoveDirSent = null;
 
   document.addEventListener('keydown', e => {
     if (e.target === chatInput) return;
@@ -345,10 +385,26 @@
     if (keysDown.has(key)) return;
     keysDown.add(key);
 
-    if (key === 'w' || key === 'arrowup') { localFacingDir = 'up'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'up' }); e.preventDefault(); }
-    else if (key === 's' || key === 'arrowdown') { localFacingDir = 'down'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'down' }); e.preventDefault(); }
-    else if (key === 'a' || key === 'arrowleft') { localFacingDir = 'left'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'left' }); e.preventDefault(); }
-    else if (key === 'd' || key === 'arrowright') { localFacingDir = 'right'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'right' }); e.preventDefault(); }
+    if (key === 'w' || key === 'arrowup') { 
+      localFacingDir = 'up'; 
+      if (myMoveDir !== 'up') { myMoveDir = 'up'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'up' }); }
+      e.preventDefault(); 
+    }
+    else if (key === 's' || key === 'arrowdown') { 
+      localFacingDir = 'down'; 
+      if (myMoveDir !== 'down') { myMoveDir = 'down'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'down' }); }
+      e.preventDefault(); 
+    }
+    else if (key === 'a' || key === 'arrowleft') { 
+      localFacingDir = 'left'; 
+      if (myMoveDir !== 'left') { myMoveDir = 'left'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'left' }); }
+      e.preventDefault(); 
+    }
+    else if (key === 'd' || key === 'arrowright') { 
+      localFacingDir = 'right'; 
+      if (myMoveDir !== 'right') { myMoveDir = 'right'; wsSend({ type: 'bm-input', action: 'move-start', dir: 'right' }); }
+      e.preventDefault(); 
+    }
     else if (key === ' ') { wsSend({ type: 'bm-input', action: 'bomb' }); e.preventDefault(); }
     else if (key === 'e' || key === 'f') { wsSend({ type: 'bm-input', action: 'ability' }); e.preventDefault(); }
   });
@@ -358,17 +414,18 @@
     keysDown.delete(key);
     if (!gameActive) return;
     if (['w','s','a','d','arrowup','arrowdown','arrowleft','arrowright'].includes(key)) {
-      // Check if another direction key is still held
-      const dirKeys = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right' };
-      let stillMoving = false;
+      // Find next direction still held
+      let nextDir = null;
       for (const k of keysDown) {
-        if (dirKeys[k]) { stillMoving = true; break; }
+        if (dirMap[k]) { nextDir = dirMap[k]; localFacingDir = nextDir; break; }
       }
-      if (!stillMoving) {
-        wsSend({ type: 'bm-input', action: 'move-stop' });
-      } else {
-        const dirKeys2 = { w: 'up', arrowup: 'up', s: 'down', arrowdown: 'down', a: 'left', arrowleft: 'left', d: 'right', arrowright: 'right' };
-        for (const k of keysDown) { if (dirKeys2[k]) { localFacingDir = dirKeys2[k]; break; } }
+      if (nextDir !== myMoveDir) {
+        myMoveDir = nextDir;
+        if (nextDir) {
+          wsSend({ type: 'bm-input', action: 'move-start', dir: nextDir });
+        } else {
+          wsSend({ type: 'bm-input', action: 'move-stop' });
+        }
       }
     }
   });
@@ -378,12 +435,19 @@
   dpadBtns.forEach(btn => {
     btn.addEventListener('touchstart', e => {
       e.preventDefault();
-      localFacingDir = btn.dataset.dir;
-      wsSend({ type: 'bm-input', action: 'move-start', dir: btn.dataset.dir });
+      const dir = btn.dataset.dir;
+      localFacingDir = dir;
+      if (myMoveDir !== dir) {
+        myMoveDir = dir;
+        wsSend({ type: 'bm-input', action: 'move-start', dir: dir });
+      }
     });
     btn.addEventListener('touchend', e => {
       e.preventDefault();
-      wsSend({ type: 'bm-input', action: 'move-stop' });
+      if (myMoveDir) {
+        myMoveDir = null;
+        wsSend({ type: 'bm-input', action: 'move-stop' });
+      }
     });
   });
   $('btnBomb')?.addEventListener('touchstart', e => { e.preventDefault(); wsSend({ type: 'bm-input', action: 'bomb' }); });
@@ -402,18 +466,96 @@
   }
   window.addEventListener('resize', resizeCanvas);
 
-  // ── Interpolation sampler ─────────────────────────────────────────
-  function getRenderPos(pid) {
+  // ── Remote player render position (lerp between two server snapshots) ──────────
+  function getRemoteRenderPos(pid) {
     if (!iTo[pid]) return null;
-    if (!iFrom[pid]) return iTo[pid];
-    const t = Math.min((performance.now() - iAt[pid]) / TICK_MS, 1);
+    const from = iFrom[pid] || iTo[pid];
+    const t = Math.min(1, (performance.now() - iAt[pid]) / REMOTE_LERP_MS);
     return {
-      x: iFrom[pid].x + (iTo[pid].x - iFrom[pid].x) * t,
-      y: iFrom[pid].y + (iTo[pid].y - iFrom[pid].y) * t,
+      x: from.x + (iTo[pid].x - from.x) * t,
+      y: from.y + (iTo[pid].y - from.y) * t,
     };
   }
 
-  function renderLoop() {
+  // ── Local player: cell-based collision check (mirrors server exactly) ─────────
+  function localCanStepTo(nx, ny) {
+    if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return false;
+    if (!grid || grid[ny][nx] !== 0) return false;
+    // Bomb blocking: can't enter a bomb's cell (server rule)
+    for (const b of bombs) {
+      if (b.x === nx && b.y === ny && !(b.x === myGridX && b.y === myGridY)) return false;
+    }
+    return true;
+  }
+
+  // ── Update local player movement each frame ─────────────────────────────────
+  function updateLocalMovement(dt) {
+    if (!gameActive) return;
+
+    const myPs = players[myId];
+    const speedLevel = myPs ? (myPs.speedLevel || 0) : 0;
+    let effectiveSpeed = BM_SPEED + speedLevel * 2;
+    if (myPs?.curse === 'slow')  effectiveSpeed *= 0.4;
+    if (myPs?.curse === 'speed') effectiveSpeed *= 2.5;
+
+    if (myMoving) {
+      // Continue animating toward myNext
+      myProgress += dt * effectiveSpeed;
+      if (myProgress >= 1) {
+        // Arrived — commit to destination
+        myGridX = myNextX;
+        myGridY = myNextY;
+        myProgress -= 1;
+        // Tell server we stepped here
+        wsSend({ type: 'bm-input', action: 'pos', x: myGridX, y: myGridY, dir: localFacingDir });
+
+        // Immediately queue next step if direction still held
+        if (myMoveDir) {
+          const nx = myGridX + (myMoveDir === 'right' ? 1 : myMoveDir === 'left' ? -1 : 0);
+          const ny = myGridY + (myMoveDir === 'down'  ? 1 : myMoveDir === 'up'   ? -1 : 0);
+          if (localCanStepTo(nx, ny)) {
+            myNextX = nx; myNextY = ny;
+            // myMoving stays true, myProgress carries over (smooth continuous movement)
+          } else {
+            myMoving = false;
+            myProgress = 0;
+          }
+        } else {
+          myMoving = false;
+          myProgress = 0;
+        }
+      }
+    } else if (myMoveDir) {
+      // Not animating — try to start a step
+      // Apply reverse curse (server used to do this in its movement loop)
+      const myPs = players[myId];
+      let stepDir = myMoveDir;
+      if (myPs?.curse === 'reverse') {
+        stepDir = stepDir === 'up' ? 'down' : stepDir === 'down' ? 'up' : stepDir === 'left' ? 'right' : 'left';
+      }
+      const nx = myGridX + (stepDir === 'right' ? 1 : stepDir === 'left' ? -1 : 0);
+      const ny = myGridY + (stepDir === 'down'  ? 1 : stepDir === 'up'   ? -1 : 0);
+      if (localCanStepTo(nx, ny)) {
+        myNextX = nx; myNextY = ny;
+        myMoving = true;
+        myProgress = 0;
+      }
+    }
+  }
+
+  // ── Visual position for local player ─────────────────────────────────────────
+  function getLocalRenderPos() {
+    if (!myMoving) return { x: myGridX, y: myGridY };
+    return {
+      x: myGridX + (myNextX - myGridX) * myProgress,
+      y: myGridY + (myNextY - myGridY) * myProgress,
+    };
+  }
+
+  function renderLoop(now) {
+    const dt = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, 0.05) : 0;
+    lastFrameTime = now;
+    updateLocalMovement(dt);
     render();
     animFrame = requestAnimationFrame(renderLoop);
   }
@@ -538,7 +680,13 @@
       if (!ps.alive) continue;
       const info = playersInfo.find(i => i.id === pid);
       const color = PLAYER_COLORS[info ? info.colorIdx : 0];
-      const rp = getRenderPos(pid) || { x: ps.x, y: ps.y };
+      // Use client-predicted position for local player, interpolated for remote players
+      let rp;
+      if (pid === myId) {
+        rp = getLocalRenderPos();
+      } else {
+        rp = getRemoteRenderPos(pid) || { x: ps.x, y: ps.y };
+      }
       const px = rp.x * CELL + CELL / 2;
       const py = rp.y * CELL + CELL / 2;
       const facing = (pid === myId) ? localFacingDir : (iFacing[pid] || 'down');

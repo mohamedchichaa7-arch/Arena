@@ -536,7 +536,18 @@ function removeFromRoom(conn) {
       if (bm.tickInterval) clearInterval(bm.tickInterval);
       room.bomberman = null;
     } else {
-      bmCheckRoundEnd(room);
+      // If fewer than 2 non-disconnected players remain, end the match immediately
+      const remaining = Object.values(bm.players).filter(p => !p.disconnected);
+      if (remaining.length < 2) {
+        if (bm.tickInterval) { clearInterval(bm.tickInterval); bm.tickInterval = null; }
+        bm.active = false;
+        bm.roundActive = false;
+        room.status = 'waiting';
+        broadcastRoom(room.id, { type: 'bm-match-over', winnerId: null, winnerName: null, roundWins: bm.roundWins });
+        broadcastLobby();
+      } else {
+        bmCheckRoundEnd(room);
+      }
     }
   }
   if (room.minesweeper && room.minesweeper.active) {
@@ -2048,9 +2059,29 @@ wss.on('connection', (ws, req) => {
         if (msg.action === 'move-start' && ['up','down','left','right'].includes(msg.dir)) {
           ps.moveDir = msg.dir;
           ps.moving = true;
+          ps.facingDir = msg.dir;
         } else if (msg.action === 'move-stop') {
           ps.moving = false;
           ps.moveDir = null;
+        } else if (msg.action === 'pos') {
+          // Client reports a cell step — validate and accept
+          const nx = Math.round(msg.x), ny = Math.round(msg.y);
+          if (nx >= 0 && nx < BM_COLS && ny >= 0 && ny < BM_ROWS) {
+            const dist = Math.abs(nx - ps.x) + Math.abs(ny - ps.y);
+            const cellOk = bm.grid[ny][nx] === 0;
+            // Only accept steps of 0 or 1 cell (no teleporting)
+            if (dist <= 1 && cellOk) {
+              ps.x = nx; ps.y = ny;
+              if (msg.dir && ['up','down','left','right'].includes(msg.dir)) ps.facingDir = msg.dir;
+              // Pick up powerup if present
+              const key = ny + ',' + nx;
+              if (bm.powerupsOnFloor[key]) {
+                const ptype = bm.powerupsOnFloor[key];
+                delete bm.powerupsOnFloor[key];
+                bmApplyPowerup(ps, ptype, Date.now());
+              }
+            }
+          }
         } else if (msg.action === 'bomb') {
           bmPlaceBomb(room, id);
         } else if (msg.action === 'ability') {
@@ -4060,7 +4091,6 @@ function bmSerializePlayers(bm) {
       ability: ps.ability, curse: ps.curse,
       name: ps.name, colorIdx: ps.colorIdx,
       moving: ps.moving, moveDir: ps.moveDir,
-      moveProgress: ps.moveProgress,
       facingDir: ps.facingDir,
     };
   }
@@ -4071,62 +4101,16 @@ function bmTick(room) {
   const bm = room.bomberman;
   if (!bm || !bm.active || !bm.roundActive) return;
   const now = Date.now();
-  const dt = BM_TICK_MS / 1000; // seconds
   const events = [];
 
-  // ── Move players ──
+  // ── Curse effects (server-side only, no movement simulation) ──
   for (const [pid, ps] of Object.entries(bm.players)) {
-    if (!ps.alive || !ps.moving || !ps.moveDir) continue;
-    const speed = BM_SPEED_BASE + ps.speedLevel * BM_SPEED_INCREMENT;
-    let dir = ps.moveDir;
-    // Curse: reverse controls
-    if (ps.curse === 'reverse' && ps.curseUntil > now) {
-      dir = dir === 'up' ? 'down' : dir === 'down' ? 'up' : dir === 'left' ? 'right' : 'left';
-    }
-    // Curse: slow
-    let effectiveSpeed = speed;
-    if (ps.curse === 'slow' && ps.curseUntil > now) effectiveSpeed = speed * 0.4;
-    if (ps.curse === 'speed' && ps.curseUntil > now) effectiveSpeed = speed * 2.5;
-
-    ps.facingDir = dir;
-    const progress = dt * effectiveSpeed;
-    ps.moveProgress += progress;
-
-    while (ps.moveProgress >= 1) {
-      ps.moveProgress -= 1;
-      let nx = ps.x, ny = ps.y;
-      if (dir === 'up') ny--;
-      else if (dir === 'down') ny++;
-      else if (dir === 'left') nx--;
-      else if (dir === 'right') nx++;
-
-      if (nx < 0 || nx >= BM_COLS || ny < 0 || ny >= BM_ROWS || bm.grid[ny][nx] !== 0) {
-        ps.moveProgress = 0;
-        break;
-      }
-      // Check for bomb blocking (can't walk through bombs unless just placed)
-      let bombBlock = false;
-      for (const b of bm.bombs) {
-        if (b.x === nx && b.y === ny && !(b.x === ps.x && b.y === ps.y)) { bombBlock = true; break; }
-      }
-      if (bombBlock) { ps.moveProgress = 0; break; }
-      ps.x = nx; ps.y = ny;
-
-      // Pickup powerup
-      const key = ny + ',' + nx;
-      if (bm.powerupsOnFloor[key]) {
-        const ptype = bm.powerupsOnFloor[key];
-        delete bm.powerupsOnFloor[key];
-        bmApplyPowerup(ps, ptype, now);
-        events.push({ type: 'bm-powerup-collected', playerId: pid, ptype, x: nx, y: ny });
-      }
-    }
-
-    // Curse: auto-bomb
+    if (!ps.alive) continue;
+    // auto-bomb curse
     if (ps.curse === 'auto-bomb' && ps.curseUntil > now) {
       bmPlaceBomb(room, pid);
     }
-    // Clear expired curses
+    // clear expired curses
     if (ps.curse && ps.curseUntil <= now) {
       ps.curse = null;
       ps.curseUntil = 0;
