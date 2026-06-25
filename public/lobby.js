@@ -81,8 +81,10 @@
 
   async function checkTesterAndUnlock() {
     try {
-      const token = sessionStorage.getItem('arena-token');
-      if (!token) return;
+      if (!fbAuth.currentUser) return;
+      // Always get a fresh token — avoids 401s from stale sessionStorage tokens
+      const token = await fbAuth.currentUser.getIdToken();
+      sessionStorage.setItem('arena-token', token);
       const res = await fetch('/api/skins', { headers: { 'Authorization': 'Bearer ' + token } });
       if (!res.ok) return;
       const data = await res.json();

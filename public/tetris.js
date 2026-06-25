@@ -760,9 +760,9 @@
 
   async function loadUserSkins() {
     try {
-      const token = sessionStorage.getItem('arena-token') ||
-        (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
-      if (!token) return;
+      if (typeof fbAuth === 'undefined' || !fbAuth.currentUser) return;
+      const token = await fbAuth.currentUser.getIdToken();
+      sessionStorage.setItem('arena-token', token);
       const res = await fetch('/api/skins', { headers: { 'Authorization': 'Bearer ' + token } });
       if (!res.ok) return;
       const data = await res.json();
@@ -775,9 +775,9 @@
   async function equipSkin(skinId) {
     applySkin(skinId);
     try {
-      const token = sessionStorage.getItem('arena-token') ||
-        (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
-      if (!token) return;
+      if (typeof fbAuth === 'undefined' || !fbAuth.currentUser) return;
+      const token = await fbAuth.currentUser.getIdToken();
+      sessionStorage.setItem('arena-token', token);
       await fetch('/api/skins/equip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
