@@ -12,6 +12,7 @@
   const $ = s => document.getElementById(s);
   const statusEl = $('status'), playerListEl = $('playerList'), playerCountEl = $('playerCount');
   const roomBadge = $('roomBadge'), btnBack = $('btnBack'), btnStart = $('btnStart');
+  const btnAddBot = $('btnAddBot'), btnRemoveBot = $('btnRemoveBot'), botCountEl = $('botCount');
   const timerDisplay = $('timerDisplay'), roundNum = $('roundNum'), roundWinsEl = $('roundWins');
   const canvas = $('arena'), ctx = canvas.getContext('2d');
   const chatMessages = $('chatMessages'), chatInput = $('chatInput'), chatSend = $('chatSend');
@@ -29,8 +30,9 @@
     'vest': '🦺', 'punch': '🔪', 'remote': '🪃', 'skull': '☠️',
   };
 
-  let ws = null, myId = null;
+  let ws = null, myId = null, amHost = false;
   const others = new Map();
+  let botIds = new Set();
   let grid = null, players = {}, bombs = [], explosions = [], powerups = {};
   let roundWins = {}, currentRound = 1;
   let gameActive = false, matchStarted = false;
@@ -83,20 +85,38 @@
     switch (msg.type) {
       case 'room-joined':
         myId = msg.myId;
+        amHost = (msg.players.length === 0); // first player is host
         addPlayerCard('self', myName, true);
         for (const p of msg.players) addPlayerCard(p.id, p.name, false);
         updatePlayerCount();
-        statusEl.textContent = 'Press Start Match when all players are ready';
+        updateBotButtons();
+        statusEl.textContent = 'Press Start Match when ready (or add bots to play solo!)';
         break;
 
       case 'player-joined':
         addPlayerCard(msg.id, msg.name, false);
         updatePlayerCount();
+        updateBotButtons();
         break;
 
       case 'player-left':
         removePlayerCard(msg.id);
         updatePlayerCount();
+        updateBotButtons();
+        break;
+
+      case 'bm-bot-added':
+        botIds.add(msg.botId);
+        addPlayerCard(msg.botId, '🤖 ' + msg.botName, false);
+        updatePlayerCount();
+        updateBotButtons();
+        break;
+
+      case 'bm-bot-removed':
+        botIds.delete(msg.botId);
+        removePlayerCard(msg.botId);
+        updatePlayerCount();
+        updateBotButtons();
         break;
 
       case 'bm-match-start':
@@ -165,6 +185,24 @@
     playerCountEl.textContent = playerListEl.children.length;
   }
 
+  function updateBotButtons() {
+    if (!amHost || matchStarted) {
+      btnAddBot.style.display = 'none';
+      btnRemoveBot.style.display = 'none';
+      botCountEl.style.display = 'none';
+      return;
+    }
+    btnAddBot.style.display = '';
+    if (botIds.size > 0) {
+      btnRemoveBot.style.display = '';
+      botCountEl.style.display = '';
+      botCountEl.textContent = botIds.size + ' bot' + (botIds.size > 1 ? 's' : '');
+    } else {
+      btnRemoveBot.style.display = 'none';
+      botCountEl.style.display = 'none';
+    }
+  }
+
   // ── Game init ────────────────────────────────────────────────
   function onMatchStart(msg) {
     grid = msg.grid;
@@ -173,6 +211,9 @@
     matchStarted = true;
     gameActive = false;
     btnStart.style.display = 'none';
+    btnAddBot.style.display = 'none';
+    btnRemoveBot.style.display = 'none';
+    botCountEl.style.display = 'none';
     statusEl.textContent = '';
 
     // Show countdown
@@ -766,6 +807,8 @@
   // ── Buttons ──────────────────────────────────────────────────
   btnBack.addEventListener('click', () => { location.href = '/'; });
   btnStart.addEventListener('click', () => { wsSend({ type: 'bm-start' }); });
+  btnAddBot.addEventListener('click', () => { wsSend({ type: 'bm-add-bot' }); });
+  btnRemoveBot.addEventListener('click', () => { wsSend({ type: 'bm-remove-bot' }); });
   $('btnCloseRules').addEventListener('click', () => { rulesOverlay.style.display = 'none'; });
   $('btnRules').addEventListener('click', () => { rulesOverlay.style.display = 'flex'; });
   $('btnBackToLobby').addEventListener('click', () => { location.href = '/'; });

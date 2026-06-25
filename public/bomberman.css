@@ -43,7 +43,12 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .timer-display.danger{color:var(--danger);animation:pulse 1s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 
-.controls{display:flex;gap:.6rem;align-items:center;justify-content:center;padding:.6rem}
+.controls{display:flex;gap:.6rem;align-items:center;justify-content:center;padding:.6rem;flex-wrap:wrap}
+.btn-add-bot{background:linear-gradient(135deg,#0ea5e9,#0369a1);color:#fff;font-size:.78rem}
+.btn-add-bot:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(14,165,233,.35)}
+.btn-remove-bot{background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);font-size:.78rem}
+.btn-remove-bot:hover{background:rgba(239,68,68,.25)}
+.bot-count{font-size:.75rem;color:#38bdf8;font-family:'Orbitron',sans-serif;letter-spacing:1px;padding:0 .3rem}
 .status{text-align:center;font-size:.82rem;color:var(--text-dim);padding:.3rem}
 
 .arena-wrap{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:.5rem}

@@ -2044,7 +2044,7 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(conn.roomId);
         if (!room || room.type !== 'bomberman') break;
         if (room.bomberman?.active) break;
-        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need at least 2 players' }); break; }
+        if (room.players.size + (room.bmBots?.length || 0) < 2) { send(ws, { type: 'error', msg: 'Need at least 2 players (add a bot!)' }); break; }
         bmStartMatch(room);
         break;
       }
@@ -2087,6 +2087,29 @@ wss.on('connection', (ws, req) => {
         } else if (msg.action === 'ability') {
           bmUseAbility(room, id);
         }
+        break;
+      }
+      case 'bm-add-bot': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'bomberman' || room.bomberman?.active) break;
+        const hostId = [...room.players.keys()][0];
+        if (id !== hostId) break;
+        if (!room.bmBots) room.bmBots = [];
+        const totalPlayers = room.players.size + room.bmBots.length;
+        if (totalPlayers >= room.maxPlayers) { send(ws, { type: 'error', msg: 'Room is full' }); break; }
+        const botNum = room.bmBots.length + 1;
+        const botId = 'bot-' + botNum;
+        room.bmBots.push({ id: botId, name: 'Bot ' + botNum });
+        broadcastRoom(room.id, { type: 'bm-bot-added', botId, botName: 'Bot ' + botNum });
+        break;
+      }
+      case 'bm-remove-bot': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'bomberman' || room.bomberman?.active) break;
+        const hostId = [...room.players.keys()][0];
+        if (id !== hostId || !room.bmBots?.length) break;
+        const removed = room.bmBots.pop();
+        if (removed) broadcastRoom(room.id, { type: 'bm-bot-removed', botId: removed.id });
         break;
       }
 
@@ -4000,20 +4023,26 @@ function bmGenerateArena() {
 }
 
 function bmStartMatch(room) {
-  const playerIds = [...room.players.keys()];
+  const humanIds = [...room.players.keys()];
+  const bots = room.bmBots || [];
+  const allIds = [...humanIds, ...bots.map(b => b.id)];
   const { grid, softPowerups } = bmGenerateArena();
   const players = {};
-  playerIds.forEach((pid, i) => {
+  allIds.forEach((pid, i) => {
     const [sx, sy] = BM_SPAWN_CORNERS[i % 4];
+    const isBot = bots.some(b => b.id === pid);
+    const name = isBot ? bots.find(b => b.id === pid).name : room.players.get(pid).name;
     players[pid] = {
       x: sx, y: sy, alive: true, disconnected: false,
       bombMax: 1, bombRadius: 2, speedLevel: 0,
-      vest: false, ability: null, // 'punch' or 'remote'
+      vest: false, ability: null,
       curse: null, curseUntil: 0,
-      name: room.players.get(pid).name, colorIdx: i,
+      name, colorIdx: i,
       moving: false, moveDir: null,
-      moveProgress: 0, // 0-1 fractional progress
+      moveProgress: 0,
       facingDir: 'down',
+      isBot,
+      botNextMoveAt: 0,
     };
   });
 
@@ -4027,12 +4056,12 @@ function bmStartMatch(room) {
     tickInterval: null,
     nextBombId: 1,
   };
-  for (const pid of playerIds) room.bomberman.roundWins[pid] = 0;
+  for (const pid of allIds) room.bomberman.roundWins[pid] = 0;
   room.status = 'playing';
   broadcastLobby();
 
   // Send start countdown
-  const playersInfo = playerIds.map(pid => ({ id: pid, name: players[pid].name, colorIdx: players[pid].colorIdx }));
+  const playersInfo = allIds.map(pid => ({ id: pid, name: players[pid].name, colorIdx: players[pid].colorIdx, isBot: players[pid].isBot }));
   broadcastRoom(room.id, { type: 'bm-match-start', grid, playersInfo, roundWins: room.bomberman.roundWins });
 
   // Start round after countdown
@@ -4139,6 +4168,9 @@ function bmTick(room) {
     bm.lastShrinkAt = now;
     bmShrinkRing(room, events, now);
   }
+
+  // ── Bot AI ──
+  bmTickBots(room);
 
   // ── Broadcast state ──
   const state = {
@@ -4350,6 +4382,279 @@ function bmCheckRoundEnd(room) {
   }
 }
 
+
+// ── Bomberman Bot AI ────────────────────────────────────────────────
+
+const BM_BOT_BASE_INTERVAL_MS = 320; // ms between bot moves at speed level 0
+
+function bmTickBots(room) {
+  const bm = room.bomberman;
+  const now = Date.now();
+  for (const [pid, ps] of Object.entries(bm.players)) {
+    if (!ps.isBot || !ps.alive) continue;
+    if ((ps.botNextMoveAt || 0) > now) continue;
+    const speedInterval = Math.max(100, BM_BOT_BASE_INTERVAL_MS - (ps.speedLevel || 0) * 60);
+    ps.botNextMoveAt = now + speedInterval;
+    bmBotDecide(room, pid);
+  }
+}
+
+function bmBotDecide(room, botId) {
+  const bm = room.bomberman;
+  const ps = bm.players[botId];
+  if (!ps || !ps.alive) return;
+  const now = Date.now();
+
+  // ── Pick up powerup if standing on one ──────────────────────────
+  const puKey = ps.y + ',' + ps.x;
+  if (bm.powerupsOnFloor[puKey]) {
+    const ptype = bm.powerupsOnFloor[puKey];
+    delete bm.powerupsOnFloor[puKey];
+    bmApplyPowerup(ps, ptype, now);
+  }
+
+  // ── 1. Build danger map (bombs with <2500ms fuse) ──────────────
+  const dangerMap = new Set();
+  for (const b of bm.bombs) {
+    const fuseLeft = b.remote ? Infinity : (b.detonateAt - now);
+    if (fuseLeft > 2500) continue;
+    bmBotBlastCells(bm, b.x, b.y, b.radius).forEach(c => dangerMap.add(c.x + ',' + c.y));
+  }
+
+  // ── 2. FLEE if currently in danger ─────────────────────────────
+  if (dangerMap.has(ps.x + ',' + ps.y)) {
+    const safeCell = bmBotFindSafeCell(bm, ps.x, ps.y, dangerMap);
+    if (safeCell) {
+      const step = bmBotNextStep(bm, ps.x, ps.y, safeCell.x, safeCell.y, dangerMap, false);
+      if (step) { ps.x = step.x; ps.y = step.y; ps.facingDir = step.dir; }
+    }
+    return;
+  }
+
+  // ── 2.5. Handle remote detonation ability ──────────────────────
+  // Remote bombs have Infinity fuse so they never appear in dangerMap.
+  // The bot must: (a) flee its own blast zone before detonating, (b) detonate once safe.
+  if (ps.ability === 'remote') {
+    const myRemoteBombs = bm.bombs.filter(b => b.ownerId === botId && b.remote);
+    if (myRemoteBombs.length > 0) {
+      const remoteDanger = new Set();
+      for (const rb of myRemoteBombs) {
+        bmBotBlastCells(bm, rb.x, rb.y, rb.radius).forEach(c => remoteDanger.add(c.x + ',' + c.y));
+      }
+      if (remoteDanger.has(ps.x + ',' + ps.y)) {
+        // Still inside own blast zone — move to safety first
+        const safeCell = bmBotFindSafeCell(bm, ps.x, ps.y, remoteDanger);
+        if (safeCell) {
+          const step = bmBotNextStep(bm, ps.x, ps.y, safeCell.x, safeCell.y, remoteDanger, false);
+          if (step) { ps.x = step.x; ps.y = step.y; ps.facingDir = step.dir; }
+        }
+        return;
+      }
+      // Bot is clear — detonate (destroys walls and/or hits enemies in blast zone)
+      bmUseAbility(room, botId);
+      return;
+    }
+  }
+
+  const activeBombs = bm.bombs.filter(b => b.ownerId === botId).length;
+  const canBomb = activeBombs < ps.bombMax && !bm.bombs.some(b => b.x === ps.x && b.y === ps.y);
+
+  // ── 3. BOMB if enemy is directly in blast range ─────────────────
+  if (canBomb) {
+    const blastCells = bmBotBlastCells(bm, ps.x, ps.y, ps.bombRadius);
+    const hitsEnemy = blastCells.some(c =>
+      Object.entries(bm.players).some(([epid, ep]) => epid !== botId && ep.alive && ep.x === c.x && ep.y === c.y)
+    );
+    if (hitsEnemy) {
+      const futureDanger = new Set(dangerMap);
+      blastCells.forEach(c => futureDanger.add(c.x + ',' + c.y));
+      const escape = bmBotFindSafeCell(bm, ps.x, ps.y, futureDanger);
+      if (escape) {
+        bmPlaceBomb(room, botId);
+        const step = bmBotNextStep(bm, ps.x, ps.y, escape.x, escape.y, futureDanger, false);
+        if (step) { ps.x = step.x; ps.y = step.y; ps.facingDir = step.dir; }
+        return;
+      }
+    }
+  }
+
+  // ── 4. Pick target: nearby powerup on open path, else nearest enemy ──
+  let target = null;
+  let bestDist = Infinity;
+  for (const [key] of Object.entries(bm.powerupsOnFloor)) {
+    const [ky, kx] = key.split(',').map(Number);
+    const d = Math.abs(kx - ps.x) + Math.abs(ky - ps.y);
+    if (d < 5 && d < bestDist) { bestDist = d; target = { x: kx, y: ky }; }
+  }
+  if (!target) {
+    for (const [epid, ep] of Object.entries(bm.players)) {
+      if (epid === botId || !ep.alive) continue;
+      const d = Math.abs(ep.x - ps.x) + Math.abs(ep.y - ps.y);
+      if (d < bestDist) { bestDist = d; target = { x: ep.x, y: ep.y }; }
+    }
+  }
+  if (!target) return;
+
+  // ── Navigation danger: all active bomb blast zones (any fuse), not just urgent ──
+  // dangerMap only covers <2500ms fuse, so without navDanger the bot happily
+  // walks back into the blast zone of its freshly placed bomb every tick.
+  const navDanger = new Set(dangerMap);
+  for (const b of bm.bombs) {
+    bmBotBlastCells(bm, b.x, b.y, b.radius).forEach(c => navDanger.add(c.x + ',' + c.y));
+  }
+
+  // ── 5. Try direct floor-only path first ───────────────────────
+  const directStep = bmBotNextStep(bm, ps.x, ps.y, target.x, target.y, navDanger, true);
+  if (directStep) {
+    ps.x = directStep.x; ps.y = directStep.y; ps.facingDir = directStep.dir;
+    return;
+  }
+
+  // ── 6. No open path — wall-passthrough BFS to find direction ──
+  // This finds the shortest path treating soft walls as passable, then:
+  //   • If next cell is a soft wall → bomb it (and flee) to create a corridor
+  //   • If next cell is floor → move there (longer detour around walls)
+  const wallStep = bmBotPathThroughWalls(bm, ps.x, ps.y, target.x, target.y);
+  if (!wallStep) return;
+
+  if (wallStep.isWall) {
+    // The soft wall is directly in our way — bomb it if we can escape
+    if (canBomb) {
+      const blastCells = bmBotBlastCells(bm, ps.x, ps.y, ps.bombRadius);
+      const hitsWall = blastCells.some(c => bm.grid[c.y][c.x] === 2);
+      if (hitsWall) {
+        const futureDanger = new Set(dangerMap);
+        blastCells.forEach(c => futureDanger.add(c.x + ',' + c.y));
+        const escape = bmBotFindSafeCell(bm, ps.x, ps.y, futureDanger);
+        if (escape) {
+          bmPlaceBomb(room, botId);
+          const step = bmBotNextStep(bm, ps.x, ps.y, escape.x, escape.y, futureDanger, false);
+          if (step) { ps.x = step.x; ps.y = step.y; ps.facingDir = step.dir; }
+          return;
+        }
+      }
+    }
+    // Can't bomb right now — face the wall and wait for bomb cooldown
+    ps.facingDir = wallStep.dir;
+  } else {
+    // Detour through floor cells — only move if the cell is not inside a bomb blast zone
+    if (!navDanger.has(wallStep.x + ',' + wallStep.y)) {
+      ps.x = wallStep.x; ps.y = wallStep.y; ps.facingDir = wallStep.dir;
+    } else {
+      ps.facingDir = wallStep.dir; // face the direction but wait for blast to clear
+    }
+  }
+}
+
+// BFS that passes through soft walls (treats them as floor for planning).
+// Returns the first step info including isWall flag.
+function bmBotPathThroughWalls(bm, startX, startY, goalX, goalY) {
+  if (startX === goalX && startY === goalY) return null;
+  const visited = new Map([[startX + ',' + startY, null]]);
+  const queue = [{ x: startX, y: startY }];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (cur.x === goalX && cur.y === goalY) {
+      let node = cur;
+      let prev = visited.get(node.x + ',' + node.y);
+      while (prev !== null) {
+        const pp = visited.get(prev.x + ',' + prev.y);
+        if (pp === null) {
+          const dx = node.x - startX, dy = node.y - startY;
+          const dir = dx === 1 ? 'right' : dx === -1 ? 'left' : dy === 1 ? 'down' : 'up';
+          const isWall = bm.grid[node.y][node.x] === 2;
+          return { x: node.x, y: node.y, dir, isWall };
+        }
+        node = prev; prev = pp;
+      }
+      return null;
+    }
+    for (const [ddx, ddy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+      const nx = cur.x + ddx, ny = cur.y + ddy;
+      const k = nx + ',' + ny;
+      if (visited.has(k)) continue;
+      if (nx < 0 || nx >= BM_COLS || ny < 0 || ny >= BM_ROWS) continue;
+      if (bm.grid[ny][nx] === 1) continue; // hard walls always block
+      visited.set(k, cur);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return null;
+}
+
+function bmBotBlastCells(bm, bx, by, radius) {
+  const cells = [{ x: bx, y: by }];
+  for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+    for (let i = 1; i <= radius; i++) {
+      const nx = bx + dx * i, ny = by + dy * i;
+      if (nx < 0 || nx >= BM_COLS || ny < 0 || ny >= BM_ROWS) break;
+      if (bm.grid[ny][nx] === 1) break;
+      cells.push({ x: nx, y: ny });
+      if (bm.grid[ny][nx] === 2) break;
+    }
+  }
+  return cells;
+}
+
+function bmBotCanStep(bm, nx, ny) {
+  if (nx < 0 || nx >= BM_COLS || ny < 0 || ny >= BM_ROWS) return false;
+  if (bm.grid[ny][nx] !== 0) return false;
+  if (bm.bombs.some(b => b.x === nx && b.y === ny)) return false;
+  return true;
+}
+
+// BFS: find nearest reachable cell NOT in dangerMap (excluding start)
+function bmBotFindSafeCell(bm, startX, startY, dangerMap) {
+  const visited = new Set([startX + ',' + startY]);
+  const queue = [{ x: startX, y: startY }];
+  while (queue.length) {
+    const { x, y } = queue.shift();
+    if (!dangerMap.has(x + ',' + y) && (x !== startX || y !== startY)) return { x, y };
+    for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+      const nx = x + dx, ny = y + dy;
+      const k = nx + ',' + ny;
+      if (visited.has(k) || !bmBotCanStep(bm, nx, ny)) continue;
+      visited.add(k);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return null;
+}
+
+// BFS path: return {x, y, dir} of first step from start toward (goalX, goalY)
+function bmBotNextStep(bm, startX, startY, goalX, goalY, dangerMap, avoidDanger) {
+  const visited = new Map([[startX + ',' + startY, null]]);
+  const queue = [{ x: startX, y: startY }];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (cur.x === goalX && cur.y === goalY) {
+      // Trace back to find the first step
+      let node = cur;
+      let prev = visited.get(node.x + ',' + node.y);
+      while (prev !== null) {
+        const pp = visited.get(prev.x + ',' + prev.y);
+        if (pp === null) {
+          // prev is start — node is the first step
+          const dx = node.x - startX, dy = node.y - startY;
+          return { x: node.x, y: node.y, dir: dx === 1 ? 'right' : dx === -1 ? 'left' : dy === 1 ? 'down' : 'up' };
+        }
+        node = prev;
+        prev = pp;
+      }
+      return null; // start === goal
+    }
+    for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+      const nx = cur.x + dx, ny = cur.y + dy;
+      const k = nx + ',' + ny;
+      if (visited.has(k)) continue;
+      if (!bmBotCanStep(bm, nx, ny)) continue;
+      if (avoidDanger && dangerMap.has(k)) continue;
+      visited.set(k, cur);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return null;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  MINESWEEPER HELPERS
