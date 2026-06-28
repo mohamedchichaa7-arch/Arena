@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tower Defense — Game Arena</title>
+  <link rel="stylesheet" href="td.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+  <div class="layout">
+    <!-- ── Players sidebar ── -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">0</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+      <div class="legend">
+        <div class="legend-title">Enemies</div>
+        <div class="legend-row"><span class="lg-dot" style="background:#9ca3af"></span>Grunt</div>
+        <div class="legend-row"><span class="lg-dot" style="background:#fde047"></span>Runner</div>
+        <div class="legend-row"><span class="lg-dot" style="background:#b45309"></span>Brute</div>
+        <div class="legend-row"><span class="lg-dot" style="background:#64748b"></span>Armored</div>
+        <div class="legend-row"><span class="lg-dot" style="background:#c084fc"></span>Phantom</div>
+        <div class="legend-row"><span class="lg-dot" style="background:#dc2626"></span>Boss</div>
+      </div>
+    </aside>
+
+    <!-- ── Main lane ── -->
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
+        <h1 class="logo logo-sm">TOWER DEFENSE</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <span class="mode-badge" id="modeBadge" style="display:none"></span>
+        <div class="wave-pill" id="wavePill">Wave —</div>
+        <div class="timer-display" id="timerDisplay"></div>
+        <button class="btn btn-mobile-toggle" id="btnToggleRail" title="Minimaps & Chat">🗺️</button>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+
+      <div class="controls" id="controls">
+        <div class="cfg-row" id="cfgRow">
+          <label class="cfg-field">Mode <select id="modeSelect"></select></label>
+          <label class="cfg-field">Map <select id="mapSelect"></select></label>
+          <span class="cfg-hint" style="display:none">Host chooses mode &amp; map</span>
+        </div>
+        <div class="cfg-desc" id="cfgDesc"></div>
+        <button class="btn btn-primary" id="btnStart">Start Match</button>
+      </div>
+
+      <div class="status" id="status">Connecting…</div>
+
+      <div class="lane-stage">
+        <div class="lane-wrap">
+          <canvas id="lane"></canvas>
+
+          <!-- Floating HUD -->
+          <div class="hud hud-tl">
+            <div class="hud-chip gold-chip">💰 <span id="goldVal">0</span></div>
+            <div class="hud-chip hp-chip" id="hpChip">🛡️ <span id="hpVal">20</span>/20</div>
+          </div>
+
+          <!-- Incoming attack banner -->
+          <div class="incoming-banner" id="incomingBanner"></div>
+
+          <!-- Kill feed -->
+          <div class="kill-feed" id="killFeed"></div>
+
+          <!-- Selected tower panel -->
+          <div class="tower-panel" id="towerPanel" style="display:none"></div>
+
+          <!-- Target picker -->
+          <div class="target-picker" id="targetPicker" style="display:none">
+            <div class="tp-title">Send to…</div>
+            <div class="tp-list" id="tpList"></div>
+            <button class="btn btn-sm tp-cancel" id="tpCancel">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Send meter -->
+        <div class="send-bar">
+          <div class="send-meter-wrap">
+            <div class="send-label">⚔️ Send Meter — <span id="sendThreshold">charge to attack</span></div>
+            <div class="send-track"><div class="send-fill" id="sendFill"></div>
+              <div class="send-ticks" id="sendTicks"></div>
+            </div>
+          </div>
+          <button class="btn send-btn" id="btnSend" disabled>SEND</button>
+        </div>
+
+        <!-- Tower shop -->
+        <div class="tower-shop" id="towerShop"></div>
+      </div>
+    </main>
+
+    <!-- ── Right rail: minimaps + chat ── -->
+    <aside class="right-rail" id="rightRail">
+      <div class="rail-section minimaps" id="minimaps"></div>
+      <div class="rail-section chat-panel">
+        <div class="chat-header">Chat</div>
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="chat-input-row">
+          <input class="chat-input" id="chatInput" placeholder="Message…" maxlength="200">
+          <button class="chat-send-btn" id="chatSend">➤</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Rules overlay -->
+  <div class="overlay rules-overlay" id="rulesOverlay" style="display:none">
+    <div class="rules-card">
+      <h2>🏰 Tower Defense — How to Play</h2>
+      <ul>
+        <li>Defend your lane. Enemies walk the path toward your base.</li>
+        <li>Buy towers (bottom bar) and place them on dark buildable tiles near the path.</li>
+        <li>Kill enemies to earn gold and charge your <b>send meter</b>.</li>
+        <li>When the meter hits a threshold, send a wave of enemies to an opponent.</li>
+        <li>Each enemy reaching your base costs 1 HP (Boss = 10). At 0 HP you're eliminated.</li>
+        <li>Waves are synchronized — 15s prep between each. Last base standing wins!</li>
+        <li>Click a placed tower to upgrade (3 levels), buy <b>modifiers</b>, or sell (60% refund).</li>
+        <li>Damage types: Arrow/Cannon/Sniper = physical (armor matters). Tesla/Inferno = magic (great vs Armored).</li>
+        <li><b>Modifiers</b> add new abilities — e.g. Piercing, Crits, Napalm, Shatter, Cold Snap, Conductor, Wildfire, Armor Piercing, Executioner & more. Each tower can stack all three of its perks.</li>
+        <li><b>Game modes:</b> 🏰 Classic · ⚡ Blitz (fast) · 💀 Sudden Death (3 HP) · 💰 Gold Rush (rich vs beefy) · 👑 Boss Rush (bosses every wave) · 🎲 Chaos (random twist each wave).</li>
+        <li><b>Maps:</b> Serpentine, Switchback (open, sniper-friendly), Spiral (splash heaven), Labyrinth (tight — slows/AoE shine).</li>
+      </ul>
+      <button class="btn btn-primary" id="btnCloseRules">Got it</button>
+    </div>
+  </div>
+
+  <!-- Countdown overlay -->
+  <div class="overlay countdown-overlay" id="countdownOverlay" style="display:none">
+    <div class="countdown-number" id="countdownNumber">3</div>
+  </div>
+
+  <!-- Wave announce -->
+  <div class="wave-announce" id="waveAnnounce" style="display:none"></div>
+
+  <!-- Game over overlay -->
+  <div class="overlay" id="gameOverlay" style="display:none">
+    <div class="result-title" id="resultTitle">Game Over</div>
+    <div class="round-scores" id="finalRanking"></div>
+    <button class="btn btn-primary" id="btnBackLobby">Back to Lobby</button>
+  </div>
+
+  <script src="td.js"></script>
+</body>
+</html>

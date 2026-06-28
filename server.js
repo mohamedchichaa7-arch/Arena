@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -570,6 +570,13 @@ function removeFromRoom(conn) {
     broadcastLobby();
     log('info', 'bar2-disconnect-forfeit', { roomId, name: conn.name });
   }
+  if (room.td && room.td.active) {
+    tdEliminatePlayer(room, conn.id, true);
+    if (room.players.size === 0) {
+      if (room.td.tickInterval) clearInterval(room.td.tickInterval);
+      room.td = null;
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -577,7 +584,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -673,9 +680,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -781,6 +788,10 @@ wss.on('connection', (ws, req) => {
         if (room.status === 'playing' && room.type === 'barricade') {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
+        // Lock tower-defense rooms while game is running
+        if (room.status === 'playing' && room.type === 'td') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
 
         removeFromRoom(conn); // leave any existing room
         conn.mode = 'room';
@@ -795,6 +806,11 @@ wss.on('connection', (ws, req) => {
           type: 'player-joined', id, name: conn.name,
           leaderId: room.players.keys().next().value,
         }, id);
+
+        // Send current TD lobby config to the joiner so they see the host's mode/map pick
+        if (room.type === 'td' && room.tdConfig) {
+          send(ws, { type: 'td-config', mode: room.tdConfig.mode, map: room.tdConfig.map });
+        }
 
         // Restore BR hand on reconnect
         if (isBrReconnect) {
@@ -2246,6 +2262,62 @@ wss.on('connection', (ws, req) => {
         bar2AdvanceTurn(bar);
         broadcastRoom(room.id, { type: 'bar2-turn', currentPlayer: bar.turnIdx });
         log('info', 'bar2-wall', { roomId: room.id, player: conn.name, wallType, r, c });
+        break;
+      }
+
+      // ── Tower Defense ──────────────────────────────────────
+      case 'td-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'td') break;
+        if (room.td?.active) break;
+        const hostId = [...room.players.keys()][0];
+        if (id !== hostId) { send(ws, { type: 'error', msg: 'Only the host can start' }); break; }
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need at least 2 players' }); break; }
+        const cfg = room.tdConfig || {};
+        const mode = TD_MODES[msg.mode] ? msg.mode : (cfg.mode || 'classic');
+        const map = (TD_MAPS[msg.map] || msg.map === 'random') ? msg.map : (cfg.map || 'serpent');
+        tdStartMatch(room, mode, map);
+        break;
+      }
+      case 'td-config': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'td' || room.td?.active) break;
+        const hostId = [...room.players.keys()][0];
+        if (id !== hostId) break;
+        const mode = TD_MODES[msg.mode] ? msg.mode : 'classic';
+        const map = (TD_MAPS[msg.map] || msg.map === 'random') ? msg.map : 'serpent';
+        room.tdConfig = { mode, map };
+        broadcastRoom(room.id, { type: 'td-config', mode, map });
+        break;
+      }
+      case 'td-place-tower': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        tdPlaceTower(room, id, msg.towerType, parseInt(msg.x), parseInt(msg.y));
+        break;
+      }
+      case 'td-upgrade-tower': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        tdUpgradeTower(room, id, parseInt(msg.towerId));
+        break;
+      }
+      case 'td-buy-perk': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        tdBuyPerk(room, id, parseInt(msg.towerId), String(msg.perkId || ''));
+        break;
+      }
+      case 'td-sell-tower': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        tdSellTower(room, id, parseInt(msg.towerId));
+        break;
+      }
+      case 'td-send-enemies': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        tdSendEnemies(room, id, parseInt(msg.packageIdx), msg.targetId);
         break;
       }
 
@@ -5104,6 +5176,909 @@ function bar2WouldBlock(bar, type, r, c) {
   }
   return false;
 }
+
+// ── Tower Defense ────────────────────────────────────────────────
+const TD_COLS = 20, TD_ROWS = 15;
+const TD_TICK_MS = 50;            // 20 ticks/sec
+const TD_COUNTDOWN_MS = 3000;
+const TD_SEND_REBATE = 5;
+// Defaults (game modes override these)
+const TD_PREP_MS = 15000;
+const TD_FIRST_PREP_MS = 12000;
+const TD_START_GOLD = 150;
+const TD_START_HP = 20;
+const TD_INCOME = 10;
+const TD_INCOME_INTERVAL = 5000;
+const TD_WAVE_CLEAR_BONUS = 20;
+
+// Expand orthogonal waypoints (each segment horizontal or vertical) into a full adjacent-cell path.
+// ── Procedural path generator (seeded) ──────────────────────────────────────
+// Zigzag bands with random turn depths, row gaps, and occasional short detours.
+// Guaranteed: non-self-intersecting, all cells in-bounds, strictly adjacent.
+function tdGenerateProceduralPath(seed) {
+  let s = ((seed ^ 2463534242) >>> 0) || 1;
+  function rng() { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }
+  function ri(a, b) { return a + Math.floor(rng() * (b - a + 1)); }
+
+  const MX = TD_COLS - 2, MY = TD_ROWS - 2; // usable range 1..18, 1..13
+  const out = [];
+  const vis = new Set();
+  function push(x, y) {
+    const k = y * TD_COLS + x;
+    if (x >= 1 && x <= MX && y >= 1 && y <= MY && !vis.has(k)) { out.push({x, y}); vis.add(k); return true; }
+    return false;
+  }
+
+  let x = 1, y = ri(1, 3);
+  push(x, y);
+  let right = true;
+
+  // Main band loop — each iteration does one horizontal run + vertical drop.
+  // Randomised turn depth and row-gap guarantee non-self-intersecting paths.
+  while (y < MY) {
+    // How far to go this band (don't always reach the wall for variety)
+    const tX = right ? ri(MX - 5, MX) : ri(1, 6);
+    const dx = right ? 1 : -1;
+    // Main horizontal run
+    while (x !== tX) { x += dx; push(x, y); }
+    // Vertical drop (random 1-4 rows)
+    const drop = ri(1, Math.min(4, MY - y));
+    for (let i = 0; i < drop; i++) { y++; push(x, y); }
+    right = !right;
+  }
+
+  // Reach the bottom if not already there
+  while (y < MY) { y++; push(x, y); }
+  // Final horizontal to right side
+  const fx = ri(MX - 4, MX);
+  const fdx = x < fx ? 1 : -1;
+  while (x !== fx) { x += fdx; push(x, y); }
+
+  return out;
+}
+
+function tdExpand(waypoints) {
+  const path = [{ x: waypoints[0].x, y: waypoints[0].y }];
+  for (let i = 1; i < waypoints.length; i++) {
+    const a = waypoints[i - 1], b = waypoints[i];
+    const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+    let cx = a.x, cy = a.y;
+    while (cx !== b.x || cy !== b.y) { cx += dx; cy += dy; path.push({ x: cx, y: cy }); }
+  }
+  return path;
+}
+function tdBuildSerpent() {
+  const path = [];
+  const bands = [1, 3, 5, 7, 9, 11, 13]; // 7 horizontal bands
+  for (let i = 0; i < bands.length; i++) {
+    const y = bands[i];
+    if (i % 2 === 0) { for (let x = 1; x <= 18; x++) path.push({ x, y }); }
+    else { for (let x = 18; x >= 1; x--) path.push({ x, y }); }
+    if (i < bands.length - 1) { const x = (i % 2 === 0) ? 18 : 1; path.push({ x, y: y + 1 }); path.push({ x, y: y + 2 }); }
+  }
+  return path;
+}
+
+// ── Maps ── each a distinct enemy route. Entrance = path[0], base = last cell.
+const TD_MAPS = {
+  serpent:    { name: 'Serpentine', desc: 'Classic 7-band weave — balanced.', path: tdBuildSerpent() },
+  switchback: { name: 'Switchback', desc: 'Long open lanes — snipers thrive.',
+    path: tdExpand([{x:1,y:1},{x:18,y:1},{x:18,y:5},{x:1,y:5},{x:1,y:9},{x:18,y:9},{x:18,y:13},{x:1,y:13}]) },
+  spiral:     { name: 'Spiral', desc: 'Coils inward to the core — splash heaven.',
+    path: tdExpand([{x:1,y:1},{x:18,y:1},{x:18,y:13},{x:1,y:13},{x:1,y:3},{x:16,y:3},{x:16,y:11},{x:3,y:11},{x:3,y:5},{x:14,y:5},{x:14,y:9},{x:5,y:9},{x:5,y:7},{x:12,y:7}]) },
+  labyrinth:  { name: 'Labyrinth', desc: 'Tight comb — slows & AoE shine.',
+    path: tdExpand([{x:1,y:1},{x:1,y:13},{x:3,y:13},{x:3,y:1},{x:5,y:1},{x:5,y:13},{x:7,y:13},{x:7,y:1},{x:9,y:1},{x:9,y:13},{x:11,y:13},{x:11,y:1},{x:13,y:1},{x:13,y:13},{x:15,y:13},{x:15,y:1},{x:17,y:1},{x:17,y:13}]) },
+  // Procedural maps (seeded — same layout each game)
+  delta:      { name: 'Delta', desc: 'Procedural meander — organic river bends.',    path: tdGenerateProceduralPath(0x1A2B3C4D) },
+  canyon:     { name: 'Canyon', desc: 'Procedural gorge — deep flanking corridors.', path: tdGenerateProceduralPath(0xDEADBEEF) },
+  ruins:      { name: 'Ruins', desc: 'Procedural ruins — chaotic broken passages.', path: tdGenerateProceduralPath(0xC0FFEE42) },
+  // Special: regenerated fresh every match
+  random:     { name: 'Random', desc: 'New procedural maze every game!', path: [] /* overridden at match start */ },
+};
+const TD_MAP_KEYS = Object.keys(TD_MAPS);
+const TD_PATH = TD_MAPS.serpent.path;        // default / back-compat
+const TD_PATH_LEN = TD_PATH.length;
+function tdPathSet(path) { return new Set(path.map(p => p.y * TD_COLS + p.x)); }
+
+// ── Game modes ── each tweaks economy, pacing and enemy stats.
+const TD_MODES = {
+  classic:  { name:'Classic',      icon:'🏰', desc:'Standard survival. Build, defend, send.',
+    startGold:150, startHp:20, income:10, incomeIntervalMs:5000, prepMs:15000, firstPrepMs:12000, hpMul:1,    speedMul:1,    rewardMul:1,    sendMul:1,   sizeMul:1,    clearBonus:20 },
+  blitz:    { name:'Blitz',        icon:'⚡', desc:'Short prep, rapid waves, fat income.',
+    startGold:210, startHp:20, income:16, incomeIntervalMs:4000, prepMs:8000,  firstPrepMs:8000,  hpMul:0.9,  speedMul:1.35, rewardMul:1.1,  sendMul:1.2, sizeMul:1.15, clearBonus:25 },
+  ironman:  { name:'Sudden Death', icon:'💀', desc:'Start at 3 HP. Every leak stings.',
+    startGold:280, startHp:3,  income:15, incomeIntervalMs:4000, prepMs:14000, firstPrepMs:14000, hpMul:1,    speedMul:1,    rewardMul:1.2,  sendMul:1,   sizeMul:1,    clearBonus:35 },
+  goldrush: { name:'Gold Rush',    icon:'💰', desc:'Booming economy vs beefy hordes.',
+    startGold:320, startHp:25, income:24, incomeIntervalMs:4000, prepMs:15000, firstPrepMs:12000, hpMul:1.55, speedMul:1,    rewardMul:1.85, sendMul:1,   sizeMul:1.25, clearBonus:45 },
+  bossrush: { name:'Boss Rush',    icon:'👑', desc:'Elites & bosses every single wave.',
+    startGold:260, startHp:20, income:14, incomeIntervalMs:4500, prepMs:16000, firstPrepMs:14000, hpMul:1.1,  speedMul:1,    rewardMul:1.35, sendMul:1,   sizeMul:0.7,  clearBonus:30, everyWaveBoss:true },
+  chaos:    { name:'Chaos',        icon:'🎲', desc:'A random twist every wave.',
+    startGold:210, startHp:20, income:12, incomeIntervalMs:5000, prepMs:13000, firstPrepMs:12000, hpMul:1,    speedMul:1,    rewardMul:1.1,  sendMul:1.1, sizeMul:1,    clearBonus:25, chaos:true },
+};
+const TD_MODE_KEYS = Object.keys(TD_MODES);
+const TD_CHAOS_TWISTS = [
+  { label:'Calm Wave',     hpMul:1,    speedMul:1,    rewardMul:1,   sizeMul:1 },
+  { label:'Swarm!',        hpMul:0.75, speedMul:1.05, rewardMul:0.9, sizeMul:1.6 },
+  { label:'Juggernauts',   hpMul:1.7,  speedMul:0.85, rewardMul:1.4, sizeMul:0.85 },
+  { label:'Frenzy',        hpMul:0.85, speedMul:1.55, rewardMul:1.1, sizeMul:1 },
+  { label:'Gilded Horde',  hpMul:1.25, speedMul:1,    rewardMul:1.9, sizeMul:1 },
+  { label:'Glass Cannons', hpMul:0.5,  speedMul:1.3,  rewardMul:0.8, sizeMul:1.3 },
+];
+
+// Enemy definitions. dmgClass on towers: 'physical' or 'magic'. armor reduces physical.
+const TD_ENEMIES = {
+  grunt:   { name: 'Grunt',   hp: 60,   speed: 1.7, armor: 0.0,  magicRes: 0.0, slowImmune: false, reward: 10, sendPts: 1,  baseDmg: 1 },
+  runner:  { name: 'Runner',  hp: 40,   speed: 3.4, armor: 0.0,  magicRes: 0.0, slowImmune: false, reward: 8,  sendPts: 1,  baseDmg: 1 },
+  brute:   { name: 'Brute',   hp: 240,  speed: 1.1, armor: 0.3,  magicRes: 0.0, slowImmune: false, reward: 25, sendPts: 3,  baseDmg: 1 },
+  armored: { name: 'Armored', hp: 150,  speed: 1.5, armor: 0.6,  magicRes: -0.3, slowImmune: false, reward: 20, sendPts: 3,  baseDmg: 1 },
+  phantom: { name: 'Phantom', hp: 110,  speed: 2.8, armor: 0.0,  magicRes: 0.0, slowImmune: true,  reward: 18, sendPts: 2,  baseDmg: 1 },
+  boss:    { name: 'Boss',    hp: 2600, speed: 0.85, armor: 0.4, magicRes: 0.4, slowImmune: false, reward: 100, sendPts: 10, baseDmg: 10 },
+};
+
+// Tower definitions per level (index 0 = level 1). cost = build/upgrade cost for that level.
+const TD_TOWERS = {
+  arrow: {
+    name: 'Arrow', dmgClass: 'physical', behavior: 'single',
+    levels: [
+      { cost: 50, damage: 14, range: 3.0, fireMs: 480 },
+      { cost: 45, damage: 26, range: 3.3, fireMs: 420 },
+      { cost: 75, damage: 44, range: 3.6, fireMs: 350 },
+    ],
+  },
+  cannon: {
+    name: 'Cannon', dmgClass: 'physical', behavior: 'splash',
+    levels: [
+      { cost: 100, damage: 45, range: 2.6, fireMs: 1300, splash: 1.3 },
+      { cost: 85,  damage: 80, range: 2.7, fireMs: 1200, splash: 1.5 },
+      { cost: 150, damage: 135, range: 2.9, fireMs: 1050, splash: 1.7 },
+    ],
+  },
+  frost: {
+    name: 'Frost', dmgClass: 'none', behavior: 'frost',
+    levels: [
+      { cost: 80,  damage: 0, range: 2.8, fireMs: 700, slow: 0.4, slowMs: 2000 },
+      { cost: 65,  damage: 0, range: 3.0, fireMs: 700, slow: 0.5, slowMs: 2000 },
+      { cost: 110, damage: 0, range: 3.3, fireMs: 700, slow: 0.6, slowMs: 2500 },
+    ],
+  },
+  tesla: {
+    name: 'Tesla', dmgClass: 'magic', behavior: 'chain',
+    levels: [
+      { cost: 150, damage: 24, range: 3.0, fireMs: 700, chains: 4 },
+      { cost: 115, damage: 38, range: 3.2, fireMs: 650, chains: 5 },
+      { cost: 185, damage: 58, range: 3.4, fireMs: 600, chains: 6 },
+    ],
+  },
+  inferno: {
+    name: 'Inferno', dmgClass: 'magic', behavior: 'burn',
+    levels: [
+      { cost: 120, damage: 0, range: 2.8, fireMs: 500, burn: 9,  burnMs: 3000 },
+      { cost: 90,  damage: 0, range: 3.0, fireMs: 500, burn: 15, burnMs: 3000 },
+      { cost: 150, damage: 0, range: 3.2, fireMs: 500, burn: 24, burnMs: 3000 },
+    ],
+  },
+  sniper: {
+    name: 'Sniper', dmgClass: 'physical', behavior: 'sniper',
+    levels: [
+      { cost: 180, damage: 160, range: 8.0, fireMs: 3000 },
+      { cost: 140, damage: 300, range: 8.5, fireMs: 2600 },
+      { cost: 220, damage: 520, range: 9.5, fireMs: 2200 },
+    ],
+  },
+};
+
+// ── Per-tower perks ── purchasable modifiers that grant new abilities/stats.
+// A tower may own any/all of its three perks (each once).
+const TD_PERKS = {
+  arrow: [
+    { id:'pierce', name:'Piercing Shot', icon:'➶', cost:120, desc:'Each shot strikes up to 3 enemies down the lane.' },
+    { id:'eagle',  name:'Eagle Eye',     icon:'👁', cost:140, desc:'+0.8 range · 25% chance for a triple-damage crit.' },
+    { id:'rapid',  name:'Rapid Fire',    icon:'💨', cost:130, desc:'Reload 35% faster.' },
+  ],
+  cannon: [
+    { id:'cluster', name:'Cluster Bombs', icon:'✸', cost:150, desc:'+0.9 splash radius · +15% damage.' },
+    { id:'siege',   name:'Siege Payload', icon:'🛠', cost:170, desc:'+60% damage to Brutes, Armored & Bosses.' },
+    { id:'napalm',  name:'Napalm',        icon:'🔥', cost:160, desc:'Blasts ignite everything they hit.' },
+  ],
+  frost: [
+    { id:'permafrost', name:'Permafrost', icon:'🧊', cost:120, desc:'Stronger slow that lasts far longer.' },
+    { id:'shatter',    name:'Shatter',    icon:'💔', cost:150, desc:'Slowed enemies take +25% damage from everything.' },
+    { id:'coldsnap',   name:'Cold Snap',  icon:'❄', cost:200, desc:'12% chance to freeze an enemy solid for 0.8s.' },
+  ],
+  tesla: [
+    { id:'overload', name:'Overload',     icon:'⚡', cost:160, desc:'+2 chain jumps · +20% damage.' },
+    { id:'conduct',  name:'Conductor',    icon:'🔗', cost:170, desc:'Each chain jump deals 25% more than the last.' },
+    { id:'static',   name:'Static Field', icon:'🌀', cost:140, desc:'Struck enemies are slowed 25%.' },
+  ],
+  inferno: [
+    { id:'incinerate', name:'Incinerate', icon:'☄', cost:180, desc:'+60% burn damage.' },
+    { id:'pyro',       name:'Pyromaniac', icon:'🎇', cost:130, desc:'Burn stacks to 5 and ignites two targets.' },
+    { id:'wildfire',   name:'Wildfire',   icon:'🌋', cost:160, desc:'Burns spread to a nearby enemy.' },
+  ],
+  sniper: [
+    { id:'armorpierce', name:'Armor Piercing', icon:'🗡', cost:150, desc:'Shots ignore all armor.' },
+    { id:'execute',     name:'Executioner',    icon:'☠', cost:220, desc:'Instakill non-bosses under 18% HP · +40% vs bosses.' },
+    { id:'doubletap',   name:'Double Tap',     icon:'⏩', cost:200, desc:'Fires twice per shot.' },
+  ],
+};
+
+// Resolve a tower's effective stats + ability flags from its level and owned perks.
+function tdTowerStats(tower) {
+  const def = TD_TOWERS[tower.type];
+  const base = def.levels[tower.level - 1];
+  const s = {
+    damage: base.damage || 0, range: base.range, fireMs: base.fireMs,
+    splash: base.splash || 0, slow: base.slow || 0, slowMs: base.slowMs || 0,
+    chains: base.chains || 0, burn: base.burn || 0, burnMs: base.burnMs || 0,
+    pierce: 1, crit: 0, critMul: 3, vsBig: 1, napalm: false,
+    shatter: false, freezeChance: 0, amplify: 1, staticSlow: 0,
+    burnSpread: false, burnStacks: 3, burnTargets: 1,
+    armorPierce: false, executeFrac: 0, bossBonus: 1, multishot: 1,
+  };
+  const perks = tower.perks || [];
+  for (const id of perks) {
+    switch (id) {
+      case 'pierce': s.pierce = 3; break;
+      case 'eagle': s.range += 0.8; s.crit = 0.25; break;
+      case 'rapid': s.fireMs = Math.round(s.fireMs * 0.65); break;
+      case 'cluster': s.splash += 0.9; s.damage = Math.round(s.damage * 1.15); break;
+      case 'siege': s.vsBig = 1.6; break;
+      case 'napalm': s.napalm = true; break;
+      case 'permafrost': s.slow = Math.min(0.85, s.slow + 0.12); s.slowMs = Math.round(s.slowMs * 1.6); break;
+      case 'shatter': s.shatter = true; break;
+      case 'coldsnap': s.freezeChance = 0.12; break;
+      case 'overload': s.chains += 2; s.damage = Math.round(s.damage * 1.2); break;
+      case 'conduct': s.amplify = 1.25; break;
+      case 'static': s.staticSlow = 0.25; break;
+      case 'incinerate': s.burn = Math.round(s.burn * 1.6); break;
+      case 'pyro': s.burnStacks = 5; s.burnTargets = 2; break;
+      case 'wildfire': s.burnSpread = true; break;
+      case 'armorpierce': s.armorPierce = true; break;
+      case 'execute': s.executeFrac = 0.18; s.bossBonus = 1.4; break;
+      case 'doubletap': s.multishot = 2; break;
+    }
+  }
+  return s;
+}
+
+// Send-meter packages. Player must have >= pts; meter resets to 0 after a send.
+const TD_SEND_PACKAGES = [
+  { pts: 10, label: '5 Grunts',           enemies: ['grunt','grunt','grunt','grunt','grunt'] },
+  { pts: 20, label: '3 Runners',          enemies: ['runner','runner','runner'] },
+  { pts: 35, label: '2 Brutes',           enemies: ['brute','brute'] },
+  { pts: 50, label: '1 Armored + 3 Runners', enemies: ['armored','runner','runner','runner'] },
+  { pts: 75, label: '1 Boss',             enemies: ['boss'] },
+];
+
+function tdStartMatch(room, modeKey, mapKey) {
+  const mode = TD_MODES[modeKey] || TD_MODES.classic;
+  modeKey = TD_MODES[modeKey] ? modeKey : 'classic';
+
+  // Procedural 'random' map: generate a fresh path per match
+  let map, path;
+  if (mapKey === 'random') {
+    const seed = Math.floor(Math.random() * 0xFFFFFFFF) >>> 0;
+    path = tdGenerateProceduralPath(seed);
+    map = { name: 'Random', desc: `Procedural maze (seed ${seed.toString(16).toUpperCase()})` };
+    // mapKey stays 'random' for bookkeeping but we use the fresh path
+  } else {
+    map = TD_MAPS[mapKey] || TD_MAPS.serpent;
+    mapKey = TD_MAPS[mapKey] ? mapKey : 'serpent';
+    path = map.path;
+  }
+
+  const pathLen = path.length;
+  const pathSet = tdPathSet(path);
+
+  const ids = [...room.players.keys()];
+  const lanes = {};
+  ids.forEach((pid, i) => {
+    lanes[pid] = {
+      name: room.players.get(pid).name,
+      colorIdx: i,
+      baseHp: mode.startHp,
+      gold: mode.startGold,
+      towers: [],
+      enemies: [],
+      spawnQueue: [],     // [{type, at, muls}]
+      sendMeter: 0,
+      alive: true,
+      damagedThisWave: false,
+      killsThisWave: 0,
+      sentCount: 0,
+      lastIncomeAt: 0,
+    };
+  });
+
+  room.td = {
+    active: true,
+    lanes,
+    order: ids,
+    wave: 0,
+    phase: 'prep',
+    phaseEndsAt: Date.now() + TD_COUNTDOWN_MS + mode.firstPrepMs,
+    nextTowerId: 1,
+    nextEnemyId: 1,
+    eliminationOrder: [],   // [{id, name, wave, hpAtDeath}] in death order
+    tickInterval: null,
+    startedAt: Date.now(),
+    mode, modeKey, mapKey,
+    path, pathLen, pathSet,
+    maxHp: mode.startHp,
+    waveMod: null,
+  };
+  room.status = 'playing';
+  broadcastLobby();
+
+  const playersInfo = ids.map((pid, i) => ({ id: pid, name: lanes[pid].name, colorIdx: i }));
+  broadcastRoom(room.id, {
+    type: 'td-match-start',
+    path, cols: TD_COLS, rows: TD_ROWS,
+    playersInfo, startGold: mode.startGold, startHp: mode.startHp,
+    prepMs: mode.firstPrepMs, countdownMs: TD_COUNTDOWN_MS,
+    mode: modeKey, modeName: mode.name, modeIcon: mode.icon, modeDesc: mode.desc,
+    map: mapKey, mapName: map.name, mapDesc: map.desc,
+  });
+
+  if (room.td.tickInterval) clearInterval(room.td.tickInterval);
+  room.td.tickInterval = setInterval(() => tdTick(room), TD_TICK_MS);
+}
+
+// Generate the (shared) wave composition for a given wave number.
+function tdGenerateWave(waveNum, opts) {
+  opts = opts || {};
+  const sizeMul = opts.sizeMul || 1;
+  const sc = n => Math.max(0, Math.round(n * sizeMul));
+  const out = [];
+  let t = 0;
+  const spawnGap = Math.max(300, 900 - waveNum * 45); // ms between spawns, faster over time
+  const grunts = sc(4 + Math.floor(waveNum * 1.5));
+  for (let i = 0; i < grunts; i++) { out.push({ type: 'grunt', at: t }); t += spawnGap; }
+  if (waveNum >= 2) {
+    const runners = sc(2 + Math.floor(waveNum * 0.8));
+    for (let i = 0; i < runners; i++) { out.push({ type: 'runner', at: t }); t += spawnGap * 0.7; }
+  }
+  if (waveNum >= 3) {
+    const brutes = sc(Math.floor(waveNum / 2));
+    for (let i = 0; i < brutes; i++) { out.push({ type: 'brute', at: t }); t += spawnGap * 1.4; }
+  }
+  if (waveNum >= 4) {
+    const armored = sc(Math.floor(waveNum / 3));
+    for (let i = 0; i < armored; i++) { out.push({ type: 'armored', at: t }); t += spawnGap * 1.2; }
+  }
+  if (waveNum >= 5) {
+    const phantoms = sc(Math.floor(waveNum / 3));
+    for (let i = 0; i < phantoms; i++) { out.push({ type: 'phantom', at: t }); t += spawnGap; }
+  }
+  if (opts.everyWaveBoss) {
+    const bosses = 1 + Math.floor(waveNum / 6);
+    for (let i = 0; i < bosses; i++) { out.push({ type: 'boss', at: t + 500 + i * 1200 }); }
+  } else if (waveNum % 5 === 0) {
+    out.push({ type: 'boss', at: t + 500 });
+  }
+  return out;
+}
+
+function tdStartWave(room) {
+  const td = room.td;
+  td.wave++;
+  td.phase = 'wave';
+  const mode = td.mode;
+  // Roll a chaos twist for this wave (chaos mode only).
+  const twist = mode.chaos ? TD_CHAOS_TWISTS[Math.floor(Math.random() * TD_CHAOS_TWISTS.length)] : null;
+  td.waveMod = twist;
+  const sizeMul = mode.sizeMul * (twist ? twist.sizeMul : 1);
+  const comp = tdGenerateWave(td.wave, { sizeMul, everyWaveBoss: mode.everyWaveBoss });
+  const muls = {
+    hp: mode.hpMul * (twist ? twist.hpMul : 1),
+    spd: mode.speedMul * (twist ? twist.speedMul : 1),
+    reward: mode.rewardMul * (twist ? twist.rewardMul : 1),
+    send: mode.sendMul,
+  };
+  const now = Date.now();
+  for (const pid of td.order) {
+    const lane = td.lanes[pid];
+    if (!lane.alive) continue;
+    lane.damagedThisWave = false;
+    lane.killsThisWave = 0;
+    lane.spawnQueue = comp.map(e => ({ type: e.type, at: now + e.at, muls }));
+  }
+  broadcastRoom(room.id, { type: 'td-wave-start', wave: td.wave, twist: twist ? twist.label : null });
+}
+
+function tdEndWave(room) {
+  const td = room.td;
+  td.phase = 'prep';
+  td.phaseEndsAt = Date.now() + td.mode.prepMs;
+  for (const pid of td.order) {
+    const lane = td.lanes[pid];
+    if (lane.alive && !lane.damagedThisWave) {
+      lane.gold += td.mode.clearBonus;
+    }
+  }
+  broadcastRoom(room.id, { type: 'td-wave-end', wave: td.wave, prepMs: td.mode.prepMs });
+}
+
+// Validate a cell as a placeable buildable tile (in bounds, not on path).
+function tdIsBuildable(td, x, y) {
+  if (x < 0 || x >= TD_COLS || y < 0 || y >= TD_ROWS) return false;
+  return !td.pathSet.has(y * TD_COLS + x);
+}
+
+function tdPlaceTower(room, pid, towerType, x, y) {
+  const td = room.td;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  const def = TD_TOWERS[towerType];
+  if (!def) return;
+  if (!Number.isInteger(x) || !Number.isInteger(y) || !tdIsBuildable(td, x, y)) {
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Invalid tile' }); return;
+  }
+  if (lane.towers.some(t => t.x === x && t.y === y)) {
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Tile occupied' }); return;
+  }
+  const cost = def.levels[0].cost;
+  if (lane.gold < cost) {
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Not enough gold' }); return;
+  }
+  lane.gold -= cost;
+  const tower = {
+    id: td.nextTowerId++, type: towerType, level: 1,
+    x, y, invested: cost, cooldown: 0, perks: [],
+  };
+  lane.towers.push(tower);
+  send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold });
+  broadcastRoom(room.id, { type: 'td-tower-placed', playerId: pid, tower: tdSerializeTower(tower) });
+}
+
+function tdUpgradeTower(room, pid, towerId) {
+  const td = room.td;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  const tower = lane.towers.find(t => t.id === towerId);
+  if (!tower) return;
+  const def = TD_TOWERS[tower.type];
+  if (tower.level >= def.levels.length) {
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Max level' }); return;
+  }
+  const cost = def.levels[tower.level].cost; // next level cost
+  if (lane.gold < cost) {
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Not enough gold' }); return;
+  }
+  lane.gold -= cost;
+  tower.level++;
+  tower.invested += cost;
+  send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold });
+  broadcastRoom(room.id, { type: 'td-tower-upgraded', playerId: pid, tower: tdSerializeTower(tower) });
+}
+
+function tdBuyPerk(room, pid, towerId, perkId) {
+  const td = room.td;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  const tower = lane.towers.find(t => t.id === towerId);
+  if (!tower) return;
+  const list = TD_PERKS[tower.type] || [];
+  const perk = list.find(p => p.id === perkId);
+  if (!perk) return;
+  if (!tower.perks) tower.perks = [];
+  if (tower.perks.includes(perkId)) {
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Already installed' }); return;
+  }
+  if (lane.gold < perk.cost) {
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Not enough gold' }); return;
+  }
+  lane.gold -= perk.cost;
+  tower.perks.push(perkId);
+  tower.invested += perk.cost;
+  send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold });
+  broadcastRoom(room.id, { type: 'td-tower-upgraded', playerId: pid, tower: tdSerializeTower(tower) });
+}
+
+function tdSellTower(room, pid, towerId) {
+  const td = room.td;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  const idx = lane.towers.findIndex(t => t.id === towerId);
+  if (idx === -1) return;
+  const tower = lane.towers[idx];
+  const refund = Math.floor(tower.invested * 0.6);
+  lane.gold += refund;
+  lane.towers.splice(idx, 1);
+  send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold });
+  broadcastRoom(room.id, { type: 'td-tower-sold', playerId: pid, towerId, refund });
+}
+
+function tdSendEnemies(room, pid, packageIdx, targetId) {
+  const td = room.td;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  const pkg = TD_SEND_PACKAGES[packageIdx];
+  if (!pkg) return;
+  if (lane.sendMeter < pkg.pts) {
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Meter not charged' }); return;
+  }
+  // Resolve target
+  let target = targetId;
+  const aliveOpponents = td.order.filter(o => o !== pid && td.lanes[o].alive);
+  if (aliveOpponents.length === 0) return;
+  if (aliveOpponents.length === 1) target = aliveOpponents[0];
+  if (!aliveOpponents.includes(target)) {
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Pick a valid target' }); return;
+  }
+  lane.sendMeter = 0;
+  lane.sentCount += pkg.enemies.length;
+  const tLane = td.lanes[target];
+  const now = Date.now();
+  const muls = { hp: td.mode.hpMul, spd: td.mode.speedMul, reward: td.mode.rewardMul, send: td.mode.sendMul };
+  pkg.enemies.forEach((etype, i) => {
+    tLane.spawnQueue.push({ type: etype, at: now + i * 250, sentBy: pid, muls });
+  });
+  broadcastRoom(room.id, {
+    type: 'td-enemies-sent', fromId: pid, fromName: lane.name,
+    toId: target, toName: tLane.name, label: pkg.label, colorIdx: lane.colorIdx,
+  });
+  send(room.players.get(pid).ws, { type: 'td-send-meter', meter: lane.sendMeter });
+}
+
+function tdSpawnEnemy(td, lane, type, sentBy, muls) {
+  const def = TD_ENEMIES[type];
+  const m = muls || {};
+  const hp = Math.max(1, Math.round(def.hp * (m.hp || 1)));
+  lane.enemies.push({
+    id: td.nextEnemyId++, type, hp, maxHp: hp,
+    dist: 0, slowUntil: 0, slowFactor: 1, freezeUntil: 0, shatterUntil: 0,
+    burns: [], sentBy: sentBy || null,
+    spdMul: m.spd || 1, rewardMul: m.reward || 1, sendMul: m.send || 1,
+  });
+}
+
+// Compute enemy world position (cell coords, floats) from path distance.
+function tdEnemyPos(td, dist) {
+  const path = td.path, len = td.pathLen;
+  if (dist >= len - 1) return { x: path[len - 1].x, y: path[len - 1].y };
+  const i = Math.floor(dist);
+  const f = dist - i;
+  const a = path[i], b = path[i + 1];
+  return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+}
+
+// Apply damage to an enemy accounting for class/armor/resistances. Returns actual damage dealt.
+function tdDamageEnemy(enemy, amount, dmgClass) {
+  const def = TD_ENEMIES[enemy.type];
+  let mult = 1;
+  if (dmgClass === 'physical') mult = 1 - def.armor;
+  else if (dmgClass === 'magic') mult = 1 - def.magicRes; // magicRes can be negative (weakness)
+  else if (dmgClass === 'true') mult = 1;
+  let dealt = Math.max(0, amount * mult);
+  if (enemy.shatterUntil && Date.now() < enemy.shatterUntil) dealt *= 1.25; // Shatter perk vulnerability
+  enemy.hp -= dealt;
+  return dealt;
+}
+
+function tdTick(room) {
+  const td = room.td;
+  if (!td || !td.active) return;
+  const now = Date.now();
+  const dt = TD_TICK_MS / 1000;
+  const events = [];
+
+  // ── Passive income (per lane) ──
+  for (const pid of td.order) {
+    const lane = td.lanes[pid];
+    if (!lane.alive) continue;
+    if (lane.lastIncomeAt === 0) lane.lastIncomeAt = now;
+    if (now - lane.lastIncomeAt >= td.mode.incomeIntervalMs) {
+      lane.lastIncomeAt = now;
+      lane.gold += td.mode.income;
+      send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold });
+    }
+  }
+
+  // ── Phase transitions ──
+  if (td.phase === 'prep') {
+    if (now >= td.phaseEndsAt) tdStartWave(room);
+  }
+
+  // ── Per-lane simulation ──
+  for (const pid of td.order) {
+    const lane = td.lanes[pid];
+    if (!lane.alive) continue;
+
+    // Spawn from queue
+    if (lane.spawnQueue.length) {
+      const remain = [];
+      for (const s of lane.spawnQueue) {
+        if (now >= s.at) tdSpawnEnemy(td, lane, s.type, s.sentBy, s.muls);
+        else remain.push(s);
+      }
+      lane.spawnQueue = remain;
+    }
+
+    // Move enemies + burn DoT
+    const survivors = [];
+    for (const e of lane.enemies) {
+      // burn stacks
+      if (e.burns.length) {
+        e.burns = e.burns.filter(b => now < b.until);
+        for (const b of e.burns) {
+          const dealt = tdDamageEnemy(e, b.dps * dt, 'magic');
+          if (dealt > 0) { /* burn damage, no event spam */ }
+        }
+      }
+      if (e.hp <= 0) { tdOnKill(room, lane, e, events, pid); continue; }
+
+      const def = TD_ENEMIES[e.type];
+      const frozen = now < e.freezeUntil;
+      const slowed = now < e.slowUntil && !def.slowImmune;
+      const factor = frozen ? 0 : (slowed ? e.slowFactor : 1);
+      e.dist += def.speed * (e.spdMul || 1) * factor * dt;
+
+      if (e.dist >= td.pathLen - 1) {
+        // Reached base
+        lane.baseHp -= def.baseDmg;
+        lane.damagedThisWave = true;
+        events.push({ ev: 'reached', pid, etype: e.type });
+        // Send rebate to whoever sent this enemy
+        if (e.sentBy && td.lanes[e.sentBy]?.alive) {
+          td.lanes[e.sentBy].gold += TD_SEND_REBATE;
+          send(room.players.get(e.sentBy).ws, { type: 'td-gold', gold: td.lanes[e.sentBy].gold });
+        }
+        if (lane.baseHp <= 0) {
+          lane.baseHp = 0;
+          tdEliminatePlayer(room, pid, false);
+        }
+        continue;
+      }
+      survivors.push(e);
+    }
+    lane.enemies = survivors;
+    if (!lane.alive) continue;
+
+    // Towers fire
+    for (const tower of lane.towers) {
+      tower.cooldown -= TD_TICK_MS;
+      if (tower.cooldown > 0) continue;
+      const def = TD_TOWERS[tower.type];
+      const s = tdTowerStats(tower);
+      const fired = tdTowerFire(td, lane, tower, def, s, now, events, pid);
+      if (fired) tower.cooldown = s.fireMs;
+      else tower.cooldown = 0; // ready, retry next tick
+    }
+
+    // Clean up enemies killed by towers
+    const after = [];
+    for (const e of lane.enemies) {
+      if (e.hp <= 0) tdOnKill(room, lane, e, events, pid);
+      else after.push(e);
+    }
+    lane.enemies = after;
+  }
+
+  // End-of-wave detection
+  tdMaybeEndWave(room);
+
+  // Check win condition
+  tdCheckGameOver(room);
+  if (!td.active) return;
+
+  // ── Broadcast compact state ──
+  const phaseRemainingMs = td.phase === 'prep' ? Math.max(0, td.phaseEndsAt - now) : 0;
+  const laneState = {};
+  for (const pid of td.order) {
+    const lane = td.lanes[pid];
+    laneState[pid] = {
+      baseHp: lane.baseHp, gold: lane.gold, alive: lane.alive,
+      sendMeter: lane.sendMeter, kills: lane.killsThisWave, sent: lane.sentCount,
+      towers: lane.towers.map(tdSerializeTower),
+      enemies: lane.enemies.map(e => {
+        const p = tdEnemyPos(td, e.dist);
+        return { i: e.id, t: e.type, x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100,
+                 h: Math.max(0, Math.round(e.hp / e.maxHp * 100) / 100),
+                 sl: now < e.slowUntil ? 1 : 0, bn: e.burns.length ? 1 : 0,
+                 fz: now < e.freezeUntil ? 1 : 0 };
+      }),
+    };
+  }
+  broadcastRoom(room.id, {
+    type: 'td-state', wave: td.wave, phase: td.phase,
+    phaseRemainingMs, lanes: laneState, events,
+  });
+}
+
+function tdSerializeTower(t) {
+  return { id: t.id, type: t.type, level: t.level, x: t.x, y: t.y, invested: t.invested, perks: t.perks || [] };
+}
+
+// Find best target & fire. Returns true if it actually fired. `s` = resolved stats+perk flags.
+function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
+  const inRange = [];
+  for (const e of lane.enemies) {
+    if (e.hp <= 0) continue;
+    const p = tdEnemyPos(td, e.dist);
+    const d = Math.hypot(p.x - tower.x, p.y - tower.y);
+    if (d <= s.range) inRange.push({ e, d, p });
+  }
+  if (!inRange.length) return false;
+
+  // Shared damage resolver applying big-target / armor-pierce / boss / execute / crit perks.
+  const resolve = (e, amount, cls) => {
+    let amt = amount;
+    if (s.vsBig > 1 && (e.type === 'brute' || e.type === 'armored' || e.type === 'boss')) amt *= s.vsBig;
+    if (e.type === 'boss' && s.bossBonus > 1) amt *= s.bossBonus;
+    const useCls = (s.armorPierce && cls === 'physical') ? 'true' : cls;
+    if (s.executeFrac > 0 && e.type !== 'boss' && e.maxHp > 0 && (e.hp / e.maxHp) <= s.executeFrac) {
+      const d = e.hp; e.hp = 0; return d;
+    }
+    let dealt = tdDamageEnemy(e, amt, useCls);
+    if (s.crit > 0 && Math.random() < s.crit) dealt += tdDamageEnemy(e, amt * (s.critMul - 1), useCls);
+    return dealt;
+  };
+
+  if (def.behavior === 'frost') {
+    // Slow everything in range, deal no damage
+    for (const { e } of inRange) {
+      if (s.freezeChance > 0 && Math.random() < s.freezeChance && !TD_ENEMIES[e.type].slowImmune) e.freezeUntil = now + 800;
+      e.slowUntil = now + s.slowMs;
+      e.slowFactor = 1 - s.slow;
+      if (s.shatter) e.shatterUntil = now + s.slowMs;
+    }
+    events.push({ ev: 'frost', pid, tx: tower.x, ty: tower.y });
+    return true;
+  }
+
+  if (def.behavior === 'burn') {
+    // Apply burn stacks to the furthest-along enemy/enemies
+    const ordered = inRange.slice().sort((a, b) => b.e.dist - a.e.dist);
+    const targets = ordered.slice(0, s.burnTargets);
+    for (const c of targets) {
+      const e = c.e;
+      if (e.burns.length < s.burnStacks) e.burns.push({ dps: s.burn, until: now + s.burnMs });
+      else e.burns[e.burns.length - 1] = { dps: s.burn, until: now + s.burnMs };
+      events.push({ ev: 'burn', pid, tx: tower.x, ty: tower.y, ex: c.p.x, ey: c.p.y });
+    }
+    if (s.burnSpread) {
+      const tset = new Set(targets.map(c => c.e.id));
+      let near = null, nd = 1.8;
+      for (const c of inRange) {
+        if (tset.has(c.e.id)) continue;
+        for (const tg of targets) {
+          const dd = Math.hypot(c.p.x - tg.p.x, c.p.y - tg.p.y);
+          if (dd < nd) { nd = dd; near = c; }
+        }
+      }
+      if (near && near.e.burns.length < s.burnStacks) near.e.burns.push({ dps: s.burn, until: now + s.burnMs });
+    }
+    return true;
+  }
+
+  if (def.behavior === 'chain') {
+    // Hit up to `chains` enemies, closest first; each jump amplified by Conductor perk
+    inRange.sort((a, b) => a.d - b.d);
+    const hits = inRange.slice(0, s.chains);
+    const chainPts = [{ x: tower.x, y: tower.y }];
+    let amp = 1;
+    for (const c of hits) {
+      const dealt = tdDamageEnemy(c.e, s.damage * amp, def.dmgClass);
+      if (s.staticSlow > 0 && !TD_ENEMIES[c.e.type].slowImmune) {
+        c.e.slowUntil = Math.max(c.e.slowUntil, now + 1000);
+        c.e.slowFactor = Math.min(c.e.slowFactor || 1, 1 - s.staticSlow);
+      }
+      chainPts.push({ x: c.p.x, y: c.p.y });
+      events.push({ ev: 'hit', pid, ex: c.p.x, ey: c.p.y, dmg: Math.round(dealt) });
+      amp *= s.amplify;
+    }
+    events.push({ ev: 'chain', pid, pts: chainPts });
+    return true;
+  }
+
+  if (def.behavior === 'splash') {
+    // Target furthest-along, splash around impact
+    let target = inRange[0];
+    for (const c of inRange) if (c.e.dist > target.e.dist) target = c;
+    const cx = target.p.x, cy = target.p.y;
+    for (const e of lane.enemies) {
+      if (e.hp <= 0) continue;
+      const p = tdEnemyPos(td, e.dist);
+      if (Math.hypot(p.x - cx, p.y - cy) <= s.splash) {
+        const dealt = resolve(e, s.damage, def.dmgClass);
+        if (s.napalm && e.burns.length < 3) e.burns.push({ dps: Math.round(s.damage * 0.1) + 4, until: now + 2500 });
+        events.push({ ev: 'hit', pid, ex: p.x, ey: p.y, dmg: Math.round(dealt) });
+      }
+    }
+    events.push({ ev: 'splash', pid, x: cx, y: cy, r: s.splash, tx: tower.x, ty: tower.y });
+    return true;
+  }
+
+  if (def.behavior === 'sniper') {
+    // Highest-HP enemy in range; Double Tap fires twice
+    let target = inRange[0];
+    for (const c of inRange) if (c.e.hp > target.e.hp) target = c;
+    let total = 0;
+    for (let k = 0; k < s.multishot; k++) { if (target.e.hp <= 0) break; total += resolve(target.e, s.damage, def.dmgClass); }
+    events.push({ ev: 'snipe', pid, tx: tower.x, ty: tower.y, ex: target.p.x, ey: target.p.y, dmg: Math.round(total) });
+    return true;
+  }
+
+  // single (arrow): furthest-along enemy/enemies (Piercing hits several)
+  const ordered = inRange.slice().sort((a, b) => b.e.dist - a.e.dist).slice(0, s.pierce);
+  for (const c of ordered) {
+    const dealt = resolve(c.e, s.damage, def.dmgClass);
+    events.push({ ev: 'hit', pid, ex: c.p.x, ey: c.p.y, dmg: Math.round(dealt), tx: tower.x, ty: tower.y, single: 1 });
+  }
+  return true;
+}
+
+function tdOnKill(room, lane, enemy, events, pid) {
+  const def = TD_ENEMIES[enemy.type];
+  const reward = Math.round(def.reward * (enemy.rewardMul || 1));
+  lane.gold += reward;
+  lane.killsThisWave++;
+  lane.sendMeter += Math.max(1, Math.round(def.sendPts * (enemy.sendMul || 1)));
+  const p = tdEnemyPos(room.td, enemy.dist);
+  events.push({ ev: 'kill', pid, etype: enemy.type, ex: p.x, ey: p.y, reward });
+}
+
+function tdEliminatePlayer(room, pid, isDisconnect) {
+  const td = room.td;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  lane.alive = false;
+  lane.enemies = [];
+  lane.spawnQueue = [];
+  td.eliminationOrder.push({ id: pid, name: lane.name, wave: td.wave, hpAtDeath: lane.baseHp });
+  broadcastRoom(room.id, {
+    type: 'td-player-eliminated', playerId: pid, name: lane.name,
+    reason: isDisconnect ? 'disconnect' : 'base-destroyed', wave: td.wave,
+  });
+}
+
+function tdCheckGameOver(room) {
+  const td = room.td;
+  if (!td || !td.active) return;
+  const alive = td.order.filter(pid => td.lanes[pid].alive);
+  if (alive.length > 1) return;
+
+  td.active = false;
+  if (td.tickInterval) { clearInterval(td.tickInterval); td.tickInterval = null; }
+
+  let winnerId = alive[0] || null;
+  // Build final ranking: survivors first, then by survival (later wave / higher HP at death ranks higher).
+  const ranking = [];
+  if (winnerId) ranking.push({ id: winnerId, name: td.lanes[winnerId].name, place: 1 });
+  const elims = [...td.eliminationOrder].sort((a, b) => b.wave - a.wave || b.hpAtDeath - a.hpAtDeath);
+  let place = ranking.length + 1;
+  for (const e of elims) {
+    if (e.id === winnerId) continue;
+    ranking.push({ id: e.id, name: e.name, place: place++ });
+  }
+
+  if (winnerId) {
+    const p = room.players.get(winnerId);
+    if (p) {
+      // Persist a win for the leaderboard (mirrors other win-increment games)
+      send(p.ws, { type: 'td-record-win' });
+    }
+  }
+
+  broadcastRoom(room.id, { type: 'td-game-over', winnerId, winnerName: winnerId ? td.lanes[winnerId].name : null, ranking, wave: td.wave });
+  room.status = 'waiting';
+  broadcastLobby();
+  log('info', 'td-game-over', { roomId: room.id, winner: winnerId ? td.lanes[winnerId].name : '(none)', wave: td.wave });
+}
+
+// Detect end of wave: all alive lanes have no enemies & empty spawn queue while in wave phase.
+function tdMaybeEndWave(room) {
+  const td = room.td;
+  if (!td || td.phase !== 'wave') return;
+  for (const pid of td.order) {
+    const lane = td.lanes[pid];
+    if (!lane.alive) continue;
+    if (lane.enemies.length > 0 || lane.spawnQueue.length > 0) return;
+  }
+  tdEndWave(room);
+}
+
 
 // ── Start ───────────────────────────────────────────────────────
 ensureFirestoreDatabase().then(async dbReady => {
