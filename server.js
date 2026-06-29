@@ -2309,6 +2309,54 @@ wss.on('connection', (ws, req) => {
         tdBuyPerk(room, id, parseInt(msg.towerId), String(msg.perkId || ''));
         break;
       }
+      case 'td-buy-upgrade': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        const td = room.td; const lane = td.lanes[id];
+        if (!lane || !lane.alive) break;
+        const upg = TD_LANE_UPGRADES[msg.upgradeId];
+        if (!upg || lane.upgrades.has(msg.upgradeId)) { send(ws, { type: 'td-action-error', reason: 'Already owned or invalid' }); break; }
+        if (lane.gold < upg.cost) { send(ws, { type: 'td-action-error', reason: 'Not enough gold' }); break; }
+        lane.gold -= upg.cost; lane.upgrades.add(msg.upgradeId);
+        tdResolveLaneAmps(lane);
+        send(ws, { type: 'td-gold', gold: lane.gold });
+        break;
+      }
+      case 'td-buy-ability': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        const td = room.td; const lane = td.lanes[id];
+        if (!lane || !lane.alive) break;
+        const abi = TD_ABILITIES[msg.abilityId];
+        if (!abi || lane.abilityOwned.has(msg.abilityId)) { send(ws, { type: 'td-action-error', reason: 'Already owned or invalid' }); break; }
+        if (lane.gold < abi.cost) { send(ws, { type: 'td-action-error', reason: 'Not enough gold' }); break; }
+        lane.gold -= abi.cost; lane.abilityOwned.add(msg.abilityId);
+        send(ws, { type: 'td-gold', gold: lane.gold });
+        break;
+      }
+      case 'td-use-ability': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        tdUseAbility(room, id, String(msg.abilityId || ''));
+        break;
+      }
+      case 'td-config-autosend': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        const lane = room.td.lanes[id];
+        if (!lane || !lane.alive) break;
+        if (msg.enabled !== undefined) lane.autoSend.enabled = !!msg.enabled;
+        if (msg.packageIdx !== undefined && TD_SEND_PACKAGES[msg.packageIdx]) lane.autoSend.packageIdx = parseInt(msg.packageIdx);
+        if (['random','lowest_hp','highest_hp'].includes(msg.targeting)) lane.autoSend.targeting = msg.targeting;
+        send(ws, { type: 'td-autosend-cfg', autoSend: lane.autoSend });
+        break;
+      }
+      case 'td-skip-prep': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.td?.active) break;
+        tdSkipPrep(room, id);
+        break;
+      }
       case 'td-sell-tower': {
         const room = rooms.get(conn.roomId);
         if (!room || !room.td?.active) break;
@@ -5584,12 +5632,36 @@ function tdTowerStats(tower) {
 
 // Send-meter packages. Player must have >= pts; meter resets to 0 after a send.
 const TD_SEND_PACKAGES = [
-  { pts: 10, label: '5 Grunts',           enemies: ['grunt','grunt','grunt','grunt','grunt'] },
-  { pts: 20, label: '3 Runners',          enemies: ['runner','runner','runner'] },
-  { pts: 35, label: '2 Brutes',           enemies: ['brute','brute'] },
+  { pts: 10, label: '5 Grunts',              enemies: ['grunt','grunt','grunt','grunt','grunt'] },
+  { pts: 20, label: '3 Runners',             enemies: ['runner','runner','runner'] },
+  { pts: 35, label: '2 Brutes',              enemies: ['brute','brute'] },
   { pts: 50, label: '1 Armored + 3 Runners', enemies: ['armored','runner','runner','runner'] },
-  { pts: 75, label: '1 Boss',             enemies: ['boss'] },
+  { pts: 75, label: '1 Boss',                enemies: ['boss'] },
 ];
+
+// ── Lane-wide permanent upgrades (bought once each) ──────────────────────────
+const TD_LANE_UPGRADES = {
+  income:     { name:'Tax Office',     icon:'💰', cost:120, desc:'+6 passive income per interval.' },
+  kill_gold:  { name:'Bounty Board',   icon:'🎯', cost:140, desc:'+2g per enemy killed.' },
+  wave_bonus: { name:'War Chest',      icon:'🎁', cost:180, desc:'+50g at the start of each wave.' },
+  dmg_amp:    { name:'Forge',          icon:'⚒',  cost:150, desc:'All towers deal +15% damage.' },
+  range_amp:  { name:'Watchtower',     icon:'🗼', cost:160, desc:'All towers gain +0.5 range.' },
+  speed_amp:  { name:'Clockwork',      icon:'⏱', cost:200, desc:'All towers reload 15% faster.' },
+  regen:      { name:'Field Hospital', icon:'❤',  cost:180, desc:'Restore 1 HP every 3 clean waves.' },
+  send_amp:   { name:'War Machine',    icon:'⚔',  cost:150, desc:'+25% send meter from kills.' },
+  boss_bane:  { name:'Giant Slayer',   icon:'🐉', cost:220, desc:'All towers deal +35% damage to Bosses.' },
+};
+const TD_LANE_UPGRADE_ORDER = ['income','kill_gold','wave_bonus','dmg_amp','range_amp','speed_amp','regen','send_amp','boss_bane'];
+
+// ── Active special abilities (buyable once, triggered by player, have cooldowns) ──
+const TD_ABILITIES = {
+  airstrike: { name:'Airstrike',  icon:'✈',  cost:350, cooldownMs:90000,  desc:'Deal 500 dmg to every enemy in your lane.' },
+  gold_rush:  { name:'Gold Rush', icon:'💎', cost:200, cooldownMs:75000,  desc:'Instantly gain 150g.' },
+  fortify:   { name:'Fortify',    icon:'🛡', cost:220, cooldownMs:120000, desc:'All towers +50% damage for 12 sec.' },
+  overclock: { name:'Overclock',  icon:'⚡', cost:180, cooldownMs:100000, desc:'Towers fire 60% faster for 10 sec.' },
+  repair:    { name:'Repair',     icon:'🔧', cost:300, cooldownMs:180000, desc:'Restore 2 HP to your base.' },
+};
+const TD_ABILITY_ORDER = ['airstrike','gold_rush','fortify','overclock','repair'];
 
 function tdStartMatch(room, modeKey, mapKey, botEnabled) {
   const mode = TD_MODES[modeKey] || TD_MODES.classic;
@@ -5646,6 +5718,15 @@ function tdStartMatch(room, modeKey, mapKey, botEnabled) {
       killsThisWave: 0,
       sentCount: 0,
       lastIncomeAt: 0,
+      // Upgrades & abilities
+      upgrades: new Set(),
+      abilityOwned: new Set(),
+      abilityCooldown: {},  // abilityId -> expiresAt timestamp
+      abilityActive: {},    // abilityId -> { until } for timed effects
+      autoSend: { enabled: false, packageIdx: 0, targeting: 'random' },
+      waveQueued: false,    // true once this lane's wave enemies are queued (skip support)
+      cleanWaves: 0,        // consecutive waves survived without damage (regen tracking)
+      amps: { dmg:1, range:0, reload:1, killGold:0, income:0, waveBonus:0, regen:false, sendAmp:1, bossBonus:1 },
     };
   });
 
@@ -5727,29 +5808,112 @@ function tdGenerateWave(waveNum, opts) {
   return out;
 }
 
+// Recompute lane-level amplifier cache whenever upgrades change.
+function tdResolveLaneAmps(lane) {
+  const u = lane.upgrades;
+  lane.amps = {
+    dmg:       u.has('dmg_amp')    ? 1.15 : 1,
+    range:     u.has('range_amp')  ? 0.5  : 0,
+    reload:    u.has('speed_amp')  ? 0.85 : 1,
+    killGold:  u.has('kill_gold')  ? 2    : 0,
+    income:    u.has('income')     ? 6    : 0,
+    waveBonus: u.has('wave_bonus') ? 50   : 0,
+    regen:     u.has('regen'),
+    sendAmp:   u.has('send_amp')   ? 1.25 : 1,
+    bossBonus: u.has('boss_bane')  ? 1.35 : 1,
+  };
+}
+
+// Skip the current prep phase for a single player — queue their wave enemies immediately.
+function tdSkipPrep(room, pid) {
+  const td = room.td;
+  if (td.phase !== 'prep' || !td.nextWaveData) return; // only usable between waves
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive || lane.waveQueued) return;
+  lane.waveQueued = true;
+  const { comp, muls } = td.nextWaveData;
+  const now = Date.now();
+  lane.spawnQueue = comp.map(e => ({ type: e.type, at: now + e.at, muls }));
+  lane.gold += 20; // bonus for skipping early
+  send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold });
+  send(room.players.get(pid).ws, { type: 'td-skipped', bonus: 20 });
+}
+
+// Use an active special ability.
+function tdUseAbility(room, pid, abilityId) {
+  const td = room.td;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  const abi = TD_ABILITIES[abilityId];
+  if (!abi || !lane.abilityOwned.has(abilityId)) { send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'Ability not unlocked' }); return; }
+  const now = Date.now();
+  if (lane.abilityCooldown[abilityId] && now < lane.abilityCooldown[abilityId]) {
+    const rem = Math.ceil((lane.abilityCooldown[abilityId] - now) / 1000);
+    send(room.players.get(pid).ws, { type: 'td-action-error', reason: `${abi.name} on cooldown (${rem}s)` }); return;
+  }
+  lane.abilityCooldown[abilityId] = now + abi.cooldownMs;
+  switch (abilityId) {
+    case 'airstrike':
+      for (const e of lane.enemies) tdDamageEnemy(e, 500, 'true');
+      broadcastRoom(room.id, { type: 'td-ability-used', pid, abilityId, label: abi.icon + ' Airstrike!' });
+      break;
+    case 'gold_rush':
+      lane.gold += 150;
+      send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold });
+      send(room.players.get(pid).ws, { type: 'td-ability-used', pid, abilityId, label: abi.icon + ' +150g!' });
+      break;
+    case 'fortify':
+      lane.abilityActive.fortify = { until: now + 12000 };
+      send(room.players.get(pid).ws, { type: 'td-ability-used', pid, abilityId, label: abi.icon + ' Fortify 12s!' });
+      break;
+    case 'overclock':
+      lane.abilityActive.overclock = { until: now + 10000 };
+      send(room.players.get(pid).ws, { type: 'td-ability-used', pid, abilityId, label: abi.icon + ' Overclock 10s!' });
+      break;
+    case 'repair':
+      if (lane.baseHp >= td.maxHp) { send(room.players.get(pid).ws, { type: 'td-action-error', reason: 'HP already full' }); lane.abilityCooldown[abilityId] = 0; return; }
+      lane.baseHp = Math.min(td.maxHp, lane.baseHp + 2);
+      send(room.players.get(pid).ws, { type: 'td-ability-used', pid, abilityId, label: abi.icon + ' +2 HP!' });
+      break;
+  }
+}
+
 function tdStartWave(room) {
   const td = room.td;
-  td.wave++;
-  td.phase = 'wave';
-  const mode = td.mode;
-  // Roll a chaos twist for this wave (chaos mode only).
-  const twist = mode.chaos ? TD_CHAOS_TWISTS[Math.floor(Math.random() * TD_CHAOS_TWISTS.length)] : null;
+  // Use precomputed wave data if available (set by tdEndWave to support per-player skip).
+  let waveNum, comp, muls, twist;
+  if (td.nextWaveData) {
+    ({ wave: waveNum, comp, muls, twist } = td.nextWaveData);
+    td.nextWaveData = null;
+    td.wave = waveNum;
+  } else {
+    td.wave++;
+    twist = td.mode.chaos ? TD_CHAOS_TWISTS[Math.floor(Math.random() * TD_CHAOS_TWISTS.length)] : null;
+    const sizeMul = td.mode.sizeMul * (twist ? twist.sizeMul : 1);
+    comp = tdGenerateWave(td.wave, { sizeMul, everyWaveBoss: td.mode.everyWaveBoss });
+    muls = {
+      hp: td.mode.hpMul * (twist ? twist.hpMul : 1),
+      spd: td.mode.speedMul * (twist ? twist.speedMul : 1),
+      reward: td.mode.rewardMul * (twist ? twist.rewardMul : 1),
+      send: td.mode.sendMul,
+    };
+  }
   td.waveMod = twist;
-  const sizeMul = mode.sizeMul * (twist ? twist.sizeMul : 1);
-  const comp = tdGenerateWave(td.wave, { sizeMul, everyWaveBoss: mode.everyWaveBoss });
-  const muls = {
-    hp: mode.hpMul * (twist ? twist.hpMul : 1),
-    spd: mode.speedMul * (twist ? twist.speedMul : 1),
-    reward: mode.rewardMul * (twist ? twist.rewardMul : 1),
-    send: mode.sendMul,
-  };
+  td.phase = 'wave';
   const now = Date.now();
   for (const pid of td.order) {
     const lane = td.lanes[pid];
     if (!lane.alive) continue;
     lane.damagedThisWave = false;
     lane.killsThisWave = 0;
-    lane.spawnQueue = comp.map(e => ({ type: e.type, at: now + e.at, muls }));
+    if (!lane.waveQueued) {
+      // Player hasn't skipped — queue their enemies now.
+      lane.spawnQueue = comp.map(e => ({ type: e.type, at: now + e.at, muls }));
+      lane.waveQueued = true;
+    }
+    // War Chest upgrade: bonus gold at wave start.
+    const bonus = (lane.amps && lane.amps.waveBonus) || 0;
+    if (bonus > 0) { lane.gold += bonus; send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold }); }
   }
   broadcastRoom(room.id, { type: 'td-wave-start', wave: td.wave, twist: twist ? twist.label : null });
 }
@@ -5758,13 +5922,39 @@ function tdEndWave(room) {
   const td = room.td;
   td.phase = 'prep';
   td.phaseEndsAt = Date.now() + td.mode.prepMs;
+
+  // Precompute next wave composition now so players can independently skip during prep.
+  const nextWave = td.wave + 1;
+  const twist = td.mode.chaos ? TD_CHAOS_TWISTS[Math.floor(Math.random() * TD_CHAOS_TWISTS.length)] : null;
+  const sizeMul = td.mode.sizeMul * (twist ? twist.sizeMul : 1);
+  const comp = tdGenerateWave(nextWave, { sizeMul, everyWaveBoss: td.mode.everyWaveBoss });
+  const muls = {
+    hp: td.mode.hpMul * (twist ? twist.hpMul : 1),
+    spd: td.mode.speedMul * (twist ? twist.speedMul : 1),
+    reward: td.mode.rewardMul * (twist ? twist.rewardMul : 1),
+    send: td.mode.sendMul,
+  };
+  td.nextWaveData = { wave: nextWave, comp, muls, twist };
+
   for (const pid of td.order) {
     const lane = td.lanes[pid];
-    if (lane.alive && !lane.damagedThisWave) {
+    if (!lane.alive) continue;
+    lane.waveQueued = false; // reset for next wave
+    if (!lane.damagedThisWave) {
       lane.gold += td.mode.clearBonus;
+      // Field Hospital (regen): restore 1 HP every 3 consecutive clean waves.
+      if (lane.amps && lane.amps.regen) {
+        lane.cleanWaves = (lane.cleanWaves || 0) + 1;
+        if (lane.cleanWaves % 3 === 0) lane.baseHp = Math.min(td.maxHp, lane.baseHp + 1);
+      }
+    } else if (lane.amps && lane.amps.regen) {
+      lane.cleanWaves = 0; // damage resets streak
     }
   }
-  broadcastRoom(room.id, { type: 'td-wave-end', wave: td.wave, prepMs: td.mode.prepMs });
+  broadcastRoom(room.id, {
+    type: 'td-wave-end', wave: td.wave, prepMs: td.mode.prepMs,
+    upcomingTwist: twist ? twist.label : null,
+  });
 }
 
 // Validate a cell as a placeable buildable tile (in bounds, not on path).
@@ -5941,7 +6131,8 @@ function tdTick(room) {
     if (lane.lastIncomeAt === 0) lane.lastIncomeAt = now;
     if (now - lane.lastIncomeAt >= td.mode.incomeIntervalMs) {
       lane.lastIncomeAt = now;
-      lane.gold += td.mode.income;
+      const inc = td.mode.income + ((lane.amps && lane.amps.income) || 0);
+      lane.gold += inc;
       send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold });
     }
   }
@@ -6012,9 +6203,19 @@ function tdTick(room) {
       if (tower.cooldown > 0) continue;
       const def = TD_TOWERS[tower.type];
       const s = tdTowerStats(tower);
+      // Apply lane-wide amplifiers + timed ability effects
+      const la = lane.amps || {};
+      const fortActive = lane.abilityActive && lane.abilityActive.fortify && now < lane.abilityActive.fortify.until;
+      const clockActive = lane.abilityActive && lane.abilityActive.overclock && now < lane.abilityActive.overclock.until;
+      s.range     += la.range || 0;
+      const dmgMul = (la.dmg || 1) * (fortActive ? 1.5 : 1);
+      if (s.damage > 0) s.damage = Math.round(s.damage * dmgMul);
+      if (s.burn   > 0) s.burn   = Math.round(s.burn   * dmgMul);
+      s.bossBonus  = (s.bossBonus || 1) * (la.bossBonus || 1);
+      s.fireMs     = Math.round(s.fireMs * (la.reload || 1) * (clockActive ? 0.4 : 1));
       const fired = tdTowerFire(td, lane, tower, def, s, now, events, pid);
       if (fired) tower.cooldown = s.fireMs;
-      else tower.cooldown = 0; // ready, retry next tick
+      else tower.cooldown = 0;
     }
 
     // Clean up enemies killed by towers
@@ -6024,6 +6225,26 @@ function tdTick(room) {
       else after.push(e);
     }
     lane.enemies = after;
+
+    // Auto-send: fire automatically when meter threshold is reached
+    const pws = room.players.get(pid);
+    if (!pws || !pws._bot) { // human players only
+      const as = lane.autoSend;
+      if (as && as.enabled) {
+        let bestPkg = -1;
+        for (let i = 0; i < TD_SEND_PACKAGES.length; i++) if (lane.sendMeter >= TD_SEND_PACKAGES[i].pts && i <= as.packageIdx) bestPkg = i;
+        if (bestPkg >= 0) {
+          const targets = td.order.filter(q => q !== pid && td.lanes[q] && td.lanes[q].alive);
+          if (targets.length) {
+            let tgt;
+            if (as.targeting === 'lowest_hp')  tgt = targets.reduce((a,b) => td.lanes[a].baseHp <= td.lanes[b].baseHp ? a : b);
+            else if (as.targeting === 'highest_hp') tgt = targets.reduce((a,b) => td.lanes[a].baseHp >= td.lanes[b].baseHp ? a : b);
+            else tgt = targets[Math.floor(Math.random() * targets.length)];
+            tdSendEnemies(room, pid, bestPkg, tgt);
+          }
+        }
+      }
+    }
   }
 
   // End-of-wave detection
@@ -6038,6 +6259,8 @@ function tdTick(room) {
   const laneState = {};
   for (const pid of td.order) {
     const lane = td.lanes[pid];
+    const cdMs = {}; for (const [k,v] of Object.entries(lane.abilityCooldown||{})) cdMs[k] = Math.max(0, v - now);
+    const actMs = {}; for (const [k,v] of Object.entries(lane.abilityActive||{})) actMs[k] = Math.max(0, v.until - now);
     laneState[pid] = {
       baseHp: lane.baseHp, gold: lane.gold, alive: lane.alive,
       sendMeter: lane.sendMeter, kills: lane.killsThisWave, sent: lane.sentCount,
@@ -6049,6 +6272,12 @@ function tdTick(room) {
                  sl: now < e.slowUntil ? 1 : 0, bn: e.burns.length ? 1 : 0,
                  fz: now < e.freezeUntil ? 1 : 0 };
       }),
+      upgrades: [...(lane.upgrades||[])],
+      abilityOwned: [...(lane.abilityOwned||[])],
+      abilityCooldownMs: cdMs,
+      abilityActiveMs: actMs,
+      autoSend: lane.autoSend,
+      waveQueued: lane.waveQueued,
     };
   }
   broadcastRoom(room.id, {
@@ -6183,9 +6412,10 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
 function tdOnKill(room, lane, enemy, events, pid) {
   const def = TD_ENEMIES[enemy.type];
   const reward = Math.round(def.reward * (enemy.rewardMul || 1));
-  lane.gold += reward;
+  lane.gold += reward + ((lane.amps && lane.amps.killGold) || 0);
   lane.killsThisWave++;
-  lane.sendMeter += Math.max(1, Math.round(def.sendPts * (enemy.sendMul || 1)));
+  const sendPts = Math.max(1, Math.round(def.sendPts * (enemy.sendMul || 1) * ((lane.amps && lane.amps.sendAmp) || 1)));
+  lane.sendMeter += sendPts;
   const p = tdEnemyPos(room.td, enemy.dist);
   events.push({ ev: 'kill', pid, etype: enemy.type, ex: p.x, ey: p.y, reward });
 }

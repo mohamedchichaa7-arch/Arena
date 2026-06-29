@@ -91,6 +91,30 @@
   };
   const MAP_ORDER = ['serpent', 'switchback', 'spiral', 'labyrinth', 'delta', 'canyon', 'ruins', 'random'];
 
+  // ── Lane upgrades (mirror server) ──
+  const LANE_UPGRADES = {
+    income:     { name:'Tax Office',     icon:'\u{1F4B0}', cost:120, desc:'+6 income per interval.' },
+    kill_gold:  { name:'Bounty Board',   icon:'\u{1F3AF}', cost:140, desc:'+2g per kill.' },
+    wave_bonus: { name:'War Chest',      icon:'\u{1F381}', cost:180, desc:'+50g at wave start.' },
+    dmg_amp:    { name:'Forge',          icon:'\u2692',    cost:150, desc:'All towers +15% damage.' },
+    range_amp:  { name:'Watchtower',     icon:'\u{1F5FC}', cost:160, desc:'All towers +0.5 range.' },
+    speed_amp:  { name:'Clockwork',      icon:'\u23F1',    cost:200, desc:'Towers reload 15% faster.' },
+    regen:      { name:'Field Hospital', icon:'\u2764',    cost:180, desc:'+1 HP every 3 clean waves.' },
+    send_amp:   { name:'War Machine',    icon:'\u2694',    cost:150, desc:'+25% send meter from kills.' },
+    boss_bane:  { name:'Giant Slayer',   icon:'\u{1F409}', cost:220, desc:'All towers +35% vs Bosses.' },
+  };
+  const LANE_UPGRADE_ORDER = ['income','kill_gold','wave_bonus','dmg_amp','range_amp','speed_amp','regen','send_amp','boss_bane'];
+
+  // ── Active abilities (mirror server) ──
+  const ABILITIES = {
+    airstrike: { name:'Airstrike',  icon:'\u2708',    cost:350, cooldownMs:90000,  desc:'Deal 500 dmg to all enemies in your lane.' },
+    gold_rush:  { name:'Gold Rush', icon:'\u{1F48E}', cost:200, cooldownMs:75000,  desc:'Instantly gain 150g.' },
+    fortify:   { name:'Fortify',    icon:'\u{1F6E1}', cost:220, cooldownMs:120000, desc:'All towers +50% dmg for 12 sec.' },
+    overclock: { name:'Overclock',  icon:'\u26A1',    cost:180, cooldownMs:100000, desc:'Towers fire 60% faster for 10 sec.' },
+    repair:    { name:'Repair',     icon:'\u{1F527}', cost:300, cooldownMs:180000, desc:'Restore 2 HP to your base.' },
+  };
+  const ABILITY_ORDER = ['airstrike','gold_rush','fortify','overclock','repair'];
+
   // ── Per-tower perks (mirror server) ──
   const PERKS = {
     arrow: [
@@ -133,6 +157,12 @@
   let lanes = {};               // latest server lane snapshot
   let myGold = 150, myHp = 20, maxHp = 20, mySendMeter = 0;
   let wave = 0, phase = 'prep', phaseRemainingMs = 0, phaseStampAt = 0;
+  // Upgrade / ability panel state (my lane)
+  let myUpgrades = new Set(), myAbilityOwned = new Set();
+  let myAbilityCooldownMs = {}, myAbilityActiveMs = {};
+  let myAutoSend = { enabled: false, packageIdx: 0, targeting: 'random' };
+  let myWaveQueued = false;
+  let upgradePanel = null; // will be set after DOM build
 
   let selectedShopTower = null;   // tower type to place
   let selectedTowerId = null;     // placed tower selected for panel
@@ -191,18 +221,21 @@
       case 'td-match-start': onMatchStart(msg); break;
       case 'td-config':      onConfig(msg); break;
       case 'td-state':       onState(msg); break;
-      case 'td-gold':        myGold = msg.gold; goldVal.textContent = myGold; refreshShopAffordability(); break;
+      case 'td-gold':        myGold = msg.gold; goldVal.textContent = myGold; refreshShopAffordability(); refreshUpgradePanel(); break;
       case 'td-send-meter':  mySendMeter = msg.meter; break;
       case 'td-action-error': flashStatus(msg.reason); break;
       case 'td-tower-placed':
       case 'td-tower-upgraded':
-      case 'td-tower-sold':  break; // reflected in next state
+      case 'td-tower-sold':  break;
       case 'td-wave-start':  onWaveStart(msg); break;
       case 'td-wave-end':    onWaveEnd(msg); break;
       case 'td-enemies-sent': onEnemiesSent(msg); break;
       case 'td-player-eliminated': onEliminated(msg); break;
       case 'td-record-win':  reportScore('td', 1); break;
       case 'td-game-over':   onGameOver(msg); break;
+      case 'td-skipped':     showToast(`⚡ Skipped! +${msg.bonus}g`); break;
+      case 'td-ability-used': if (msg.label) showToast(msg.label); break;
+      case 'td-autosend-cfg': myAutoSend = msg.autoSend; refreshAutoSendUI(); break;
     }
   }
 
@@ -316,8 +349,14 @@
     }
     runCountdown(Math.round(msg.countdownMs / 1000));
     if (modeBadge) { modeBadge.textContent = `${msg.modeIcon || ''} ${msg.modeName || ''} · 🗺️ ${msg.mapName || ''}`; modeBadge.style.display = 'inline-flex'; }
-    setTimeout(() => announce(`${msg.modeIcon || ''} ${msg.modeName || 'Classic'}`), 200);
+    setTimeout(() => showToast(`${msg.modeIcon || ''} ${msg.modeName || 'Classic'}`), 200);
     statusEl.textContent = 'Build your defenses! First wave incoming…';
+    // Reset and build upgrade / ability panel
+    myUpgrades = new Set(); myAbilityOwned = new Set();
+    myAbilityCooldownMs = {}; myAbilityActiveMs = {};
+    myAutoSend = { enabled: false, packageIdx: 0, targeting: 'random' };
+    myWaveQueued = false;
+    buildUpgradePanel();
     if (!rafId) loop();
   }
 
@@ -334,16 +373,26 @@
   function onWaveStart(msg) {
     wave = msg.wave;
     announce('WAVE ' + msg.wave + (msg.twist && msg.twist !== 'Calm Wave' ? ' · ' + msg.twist : ''));
-    if (msg.twist && msg.twist !== 'Calm Wave') sysChat('🎲 ' + msg.twist);
+    refreshSkipButton();
+    if (msg.twist && msg.twist !== 'Calm Wave') sysChat('\u{1F3B2} ' + msg.twist);
   }
   function onWaveEnd(msg) {
     announce('Wave ' + msg.wave + ' cleared!');
+    refreshSkipButton();
   }
   function announce(text) {
     waveAnnounce.textContent = text;
     waveAnnounce.style.display = 'block';
     waveAnnounce.style.animation = 'none'; void waveAnnounce.offsetWidth; waveAnnounce.style.animation = '';
     setTimeout(() => { waveAnnounce.style.display = 'none'; }, 1800);
+  }
+
+  function showToast(text) {
+    const el = document.createElement('div');
+    el.className = 'announce-toast';
+    el.textContent = text;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 2200);
   }
 
   function onEnemiesSent(msg) {
@@ -414,6 +463,16 @@
       if (me.baseHp !== myHp) { prevHp = myHp; myHp = me.baseHp; onHpChange(); }
       updateSendUI();
       refreshShopAffordability();
+      // Sync upgrade / ability / autosend / skip state
+      if (me.upgrades)          myUpgrades       = new Set(me.upgrades);
+      if (me.abilityOwned)      myAbilityOwned   = new Set(me.abilityOwned);
+      if (me.abilityCooldownMs) myAbilityCooldownMs = me.abilityCooldownMs;
+      if (me.abilityActiveMs)   myAbilityActiveMs   = me.abilityActiveMs;
+      if (me.autoSend)          myAutoSend          = me.autoSend;
+      if (me.waveQueued !== undefined) myWaveQueued = me.waveQueued;
+      refreshUpgradePanel();
+      refreshAbilityPanel();
+      refreshSkipButton();
     }
     // process events
     if (msg.events) for (const ev of msg.events) handleEvent(ev);
@@ -752,6 +811,140 @@
     }
   }
 
+  // ── Upgrade / Ability / AutoSend / Skip UI ──────────────────────────────────
+
+  function buildUpgradePanel() {
+    const p = document.getElementById('upgradePanel');
+    if (!p) return;
+    // build once
+    if (p.dataset.built) return;
+    p.dataset.built = '1';
+
+    // Upgrades section
+    const secU = document.createElement('div');
+    secU.className = 'up-section';
+    const hU = document.createElement('h4'); hU.textContent = '⚙ Lane Upgrades'; secU.appendChild(hU);
+    const gridU = document.createElement('div'); gridU.className = 'up-grid'; gridU.id = 'upgGrid'; secU.appendChild(gridU);
+    for (const id of LANE_UPGRADE_ORDER) {
+      const u = LANE_UPGRADES[id];
+      const btn = document.createElement('button');
+      btn.className = 'upg-btn'; btn.dataset.upgId = id; btn.id = 'upg_' + id;
+      btn.innerHTML = `<span class="upg-icon">${u.icon}</span><span class="upg-name">${u.name}</span><span class="upg-cost">💰${u.cost}</span><span class="upg-desc">${u.desc}</span>`;
+      btn.title = u.desc;
+      btn.addEventListener('click', () => { if (ws) ws.send(JSON.stringify({ type: 'td-buy-upgrade', upgradeId: id })); });
+      gridU.appendChild(btn);
+    }
+    p.appendChild(secU);
+
+    // Abilities section
+    const secA = document.createElement('div');
+    secA.className = 'up-section';
+    const hA = document.createElement('h4'); hA.textContent = '⚡ Abilities'; secA.appendChild(hA);
+    const gridA = document.createElement('div'); gridA.className = 'up-grid'; gridA.id = 'abiGrid'; secA.appendChild(gridA);
+    for (const id of ABILITY_ORDER) {
+      const a = ABILITIES[id];
+      const wrap = document.createElement('div'); wrap.className = 'abi-wrap';
+      const btn = document.createElement('button');
+      btn.className = 'upg-btn abi-btn'; btn.dataset.abiId = id; btn.id = 'abi_' + id;
+      btn.innerHTML = `<span class="upg-icon">${a.icon}</span><span class="upg-name">${a.name}</span><span class="upg-cost">💰${a.cost}</span><span class="upg-desc">${a.desc}</span><div class="abi-cd-overlay" id="abicd_${id}"></div>`;
+      btn.title = a.desc;
+      btn.addEventListener('click', () => handleAbilityClick(id));
+      wrap.appendChild(btn);
+      gridA.appendChild(wrap);
+    }
+    p.appendChild(secA);
+
+    // Auto-send config
+    const secAS = document.createElement('div');
+    secAS.className = 'up-section';
+    secAS.id = 'autoSendSec';
+    const hAS = document.createElement('h4'); hAS.textContent = '🤖 Auto-Send'; secAS.appendChild(hAS);
+    secAS.innerHTML += `
+      <label class="as-row"><input type="checkbox" id="asEnabled"> Enable Auto-Send</label>
+      <div class="as-row"><label>Max Package:</label>
+        <select id="asPkgSel">${Array.from({length: 6},(_,i)=>i).map(i=>`<option value="${i}">Pkg ${i+1}</option>`).join('')}</select>
+      </div>
+      <div class="as-row"><label>Target:</label>
+        <select id="asTarget">
+          <option value="random">Random</option>
+          <option value="lowest_hp">Lowest HP</option>
+          <option value="highest_hp">Highest HP</option>
+        </select>
+      </div>`;
+    p.appendChild(secAS);
+
+    // Wire auto-send listeners after injection
+    const asEn = document.getElementById('asEnabled');
+    const asPkg = document.getElementById('asPkgSel');
+    const asTgt = document.getElementById('asTarget');
+    if (asEn) asEn.addEventListener('change', sendAutoSendCfg);
+    if (asPkg) asPkg.addEventListener('change', sendAutoSendCfg);
+    if (asTgt) asTgt.addEventListener('change', sendAutoSendCfg);
+
+    upgradePanel = p;
+  }
+
+  function sendAutoSendCfg() {
+    const en  = document.getElementById('asEnabled')?.checked ?? false;
+    const pkg = parseInt(document.getElementById('asPkgSel')?.value ?? '0');
+    const tgt = document.getElementById('asTarget')?.value ?? 'random';
+    if (ws) ws.send(JSON.stringify({ type: 'td-config-autosend', enabled: en, packageIdx: pkg, targeting: tgt }));
+  }
+
+  function handleAbilityClick(id) {
+    if (!myAbilityOwned.has(id)) {
+      // buy
+      if (ws) ws.send(JSON.stringify({ type: 'td-buy-ability', abilityId: id }));
+    } else {
+      // use
+      if (ws) ws.send(JSON.stringify({ type: 'td-use-ability', abilityId: id }));
+    }
+  }
+
+  function refreshUpgradePanel() {
+    for (const id of LANE_UPGRADE_ORDER) {
+      const btn = document.getElementById('upg_' + id);
+      if (!btn) continue;
+      const owned = myUpgrades.has(id);
+      btn.classList.toggle('owned', owned);
+      btn.disabled = owned || myGold < LANE_UPGRADES[id].cost;
+    }
+  }
+
+  function refreshAbilityPanel() {
+    const now = Date.now();
+    for (const id of ABILITY_ORDER) {
+      const btn = document.getElementById('abi_' + id);
+      if (!btn) continue;
+      const owned = myAbilityOwned.has(id);
+      const cdLeft = myAbilityCooldownMs[id] || 0;
+      const activeLeft = myAbilityActiveMs[id] || 0;
+      btn.classList.toggle('owned', owned);
+      btn.classList.toggle('on-cooldown', owned && cdLeft > 0);
+      btn.classList.toggle('ability-active', owned && activeLeft > 0);
+      btn.disabled = !owned ? myGold < ABILITIES[id].cost : cdLeft > 0;
+      const overlay = document.getElementById('abicd_' + id);
+      if (overlay) overlay.textContent = owned && cdLeft > 0 ? `${Math.ceil(cdLeft/1000)}s` : (owned && activeLeft > 0 ? `${Math.ceil(activeLeft/1000)}s` : '');
+    }
+  }
+
+  function refreshAutoSendUI() {
+    const asEn  = document.getElementById('asEnabled');
+    const asPkg = document.getElementById('asPkgSel');
+    const asTgt = document.getElementById('asTarget');
+    if (asEn  && asEn.checked  !== myAutoSend.enabled)     asEn.checked  = myAutoSend.enabled;
+    if (asPkg && parseInt(asPkg.value) !== myAutoSend.packageIdx) asPkg.value = myAutoSend.packageIdx;
+    if (asTgt && asTgt.value   !== myAutoSend.targeting)   asTgt.value   = myAutoSend.targeting;
+  }
+
+  function refreshSkipButton() {
+    const btn = document.getElementById('btnSkip');
+    if (!btn) return;
+    btn.style.display = phase === 'prep' ? '' : 'none';
+    btn.disabled = myWaveQueued;
+    btn.textContent = myWaveQueued ? '⚡ Ready!' : '⚡ Skip Wait';
+  }
+
   function updateSidebarStats() {
     for (const [pid, lane] of Object.entries(lanes)) {
       const c = playerCards.get(pid);
@@ -849,9 +1042,25 @@
   chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
   function sendChat() { const text = chatInput.value.trim(); if (!text) return; wsSend({ type: 'chat', text }); chatInput.value = ''; }
 
+  // Upgrade panel toggle
+  const _btnUpgrade = $('btnUpgrade');
+  if (_btnUpgrade) {
+    _btnUpgrade.addEventListener('click', () => {
+      const p = $('upgradePanel');
+      if (!p) return;
+      const vis = p.style.display === 'none' || !p.style.display;
+      p.style.display = vis ? '' : 'none';
+    });
+  }
+  // Skip button
+  const _btnSkip = $('btnSkip');
+  if (_btnSkip) {
+    _btnSkip.addEventListener('click', () => { if (ws) ws.send(JSON.stringify({ type: 'td-skip-prep' })); });
+  }
+
   document.addEventListener('keydown', e => {
     if (document.activeElement === chatInput) return;
-    if (e.key === 'Escape') { selectedShopTower = null; selectedTowerId = null; towerPanel.style.display = 'none'; targetPicker.style.display = 'none'; refreshShopSelection(); }
+    if (e.key === 'Escape') { selectedShopTower = null; selectedTowerId = null; towerPanel.style.display = 'none'; targetPicker.style.display = 'none'; refreshShopSelection(); const p=$('upgradePanel'); if(p) p.style.display='none'; }
     const idx = parseInt(e.key); // 1-6 quick select towers
     if (idx >= 1 && idx <= 6) { selectedShopTower = TOWER_ORDER[idx - 1]; selectedTowerId = null; towerPanel.style.display = 'none'; refreshShopSelection(); }
     if (e.key === ' ' && !btnSend.disabled) { e.preventDefault(); doSend(); }
