@@ -13,6 +13,7 @@
   const statusEl = $('status'), playerListEl = $('playerList'), playerCountEl = $('playerCount');
   const roomBadge = $('roomBadge'), btnBack = $('btnBack'), btnStart = $('btnStart'), controlsEl = $('controls');
   const modeSelect = $('modeSelect'), mapSelect = $('mapSelect'), cfgDesc = $('cfgDesc'), cfgRow = $('cfgRow');
+  const botToggle = $('botToggle'), botLabel = $('botLabel');
   const modeBadge = $('modeBadge');
   const wavePill = $('wavePill'), timerDisplay = $('timerDisplay');
   const canvas = $('lane'), ctx = canvas.getContext('2d');
@@ -137,7 +138,7 @@
   let selectedTowerId = null;     // placed tower selected for panel
   let hoverCell = null;
   let prevHp = 20;
-  let selMode = 'classic', selMap = 'serpent';
+  let selMode = 'classic', selMap = 'serpent', selBot = false;
 
   // Interpolation buffers: per lane, Map(enemyId -> {fx,fy,tx,ty,at,h,sl,bn,t})
   const laneRender = {};
@@ -206,13 +207,14 @@
   }
 
   // ── Lobby UI ──
-  function addPlayerCard(pid, name, isMe) {
+  function addPlayerCard(pid, name, isMe, isBot) {
     if (playerCards.has(pid)) return;
     const el = document.createElement('div');
-    el.className = 'player-card' + (isMe ? ' is-me' : '');
-    el.innerHTML = `<span class="pc-color"></span><div class="pc-body"><div class="pc-name">${escapeHtml(name)}${isMe ? ' (you)' : ''}</div><div class="pc-stats" data-stats></div></div>`;
+    el.className = 'player-card' + (isMe ? ' is-me' : '') + (isBot ? ' is-bot' : '');
+    const icon = isBot ? '🤖' : '';
+    el.innerHTML = `<span class="pc-color">${icon}</span><div class="pc-body"><div class="pc-name">${escapeHtml(name)}${isMe ? ' (you)' : ''}</div><div class="pc-stats" data-stats></div></div>`;
     playerListEl.appendChild(el);
-    playerCards.set(pid, { el, name, colorIdx: playerCards.size });
+    playerCards.set(pid, { el, name, colorIdx: playerCards.size, isBot: !!isBot });
     paintCardColors();
   }
   function removePlayerCard(pid) { const c = playerCards.get(pid); if (c) { c.el.remove(); playerCards.delete(pid); } paintCardColors(); }
@@ -222,13 +224,15 @@
     if (matchActive) { controlsEl.style.display = 'none'; return; }
     controlsEl.style.display = 'flex';
     btnStart.style.display = amHost ? 'inline-flex' : 'none';
-    btnStart.disabled = playerCards.size < 2;
-    // Mode/map selectors: host can change them, others see them locked.
+    if (botToggle) { botToggle.disabled = !amHost; botToggle.style.display = amHost ? '' : 'none'; if (botLabel) botLabel.style.display = amHost ? '' : 'none'; }
+    // Enable start if 2+ humans OR solo+bot
+    const canStart = playerCards.size >= 2 || (amHost && selBot);
+    btnStart.disabled = !canStart;
     modeSelect.disabled = !amHost;
     mapSelect.disabled = !amHost;
     cfgRow.querySelector('.cfg-hint') && (cfgRow.querySelector('.cfg-hint').style.display = amHost ? 'none' : 'block');
     statusEl.textContent = amHost
-      ? (playerCards.size < 2 ? 'Pick a mode & map — waiting for one more player…' : 'Choose mode & map, then Start Match')
+      ? (canStart ? 'Choose mode & map, then Start Match' : 'Waiting for one more player (or enable bot)…')
       : 'Waiting for the host to start…';
   }
 
@@ -239,8 +243,10 @@
       for (const k of MAP_ORDER) { const o = document.createElement('option'); o.value = k; o.textContent = MAPS[k].name; mapSelect.appendChild(o); }
       modeSelect.addEventListener('change', onConfigChanged);
       mapSelect.addEventListener('change', onConfigChanged);
+      if (botToggle) botToggle.addEventListener('change', () => { selBot = botToggle.checked; refreshLobbyControls(); });
     }
     modeSelect.value = selMode; mapSelect.value = selMap;
+    if (botToggle) botToggle.checked = selBot;
     updateConfigDesc();
   }
   function onConfigChanged() {
@@ -293,13 +299,20 @@
     wave = 0; phase = 'prep';
     controlsEl.style.display = 'none';
     rulesOverlay.style.display = 'none';
+    // Ensure bot player cards exist in the sidebar
+    for (const p of playersInfo) {
+      if (!playerCards.has(p.id)) addPlayerCard(p.id, p.name, p.id === myId, p.isBot);
+    }
     buildShop();
     buildSendTicks();
     buildMinimaps();
     // colour sidebar cards by authoritative colorIdx
     for (const p of playersInfo) {
       const c = playerCards.get(p.id);
-      if (c) c.el.querySelector('.pc-color').style.background = COLORS[p.colorIdx % 4];
+      if (c) {
+        c.colorIdx = p.colorIdx;
+        if (!p.isBot) c.el.querySelector('.pc-color').style.background = COLORS[p.colorIdx % 4];
+      }
     }
     runCountdown(Math.round(msg.countdownMs / 1000));
     if (modeBadge) { modeBadge.textContent = `${msg.modeIcon || ''} ${msg.modeName || ''} · 🗺️ ${msg.mapName || ''}`; modeBadge.style.display = 'inline-flex'; }
@@ -531,8 +544,11 @@
     const mw = 200, mh = Math.round(mw * ROWS / COLS);
     for (const p of opponents) {
       const wrap = document.createElement('div');
-      wrap.className = 'mini';
-      wrap.innerHTML = `<div class="mini-head"><span class="dot" style="background:${COLORS[p.colorIdx % 4]}"></span><span class="nm">${escapeHtml(p.name)}</span><span class="wv" data-wv></span></div>`;
+      wrap.className = 'mini' + (p.isBot ? ' is-bot' : '');
+      const dotHtml = p.isBot
+        ? `<span class="dot bot-dot">🤖</span>`
+        : `<span class="dot" style="background:${COLORS[p.colorIdx % 4]}"></span>`;
+      wrap.innerHTML = `<div class="mini-head">${dotHtml}<span class="nm">${escapeHtml(p.name)}</span><span class="wv" data-wv></span></div>`;
       const cv = document.createElement('canvas');
       cv.width = mw; cv.height = mh;
       wrap.appendChild(cv);
@@ -820,7 +836,7 @@
   }
 
   // ── Buttons ──
-  btnStart.addEventListener('click', () => wsSend({ type: 'td-start', mode: selMode, map: selMap }));
+  btnStart.addEventListener('click', () => wsSend({ type: 'td-start', mode: selMode, map: selMap, bot: selBot }));
   btnSend.addEventListener('click', doSend);
   tpCancel.addEventListener('click', () => { targetPicker.style.display = 'none'; });
   btnBack.addEventListener('click', () => { wsSend({ type: 'leave-room' }); location.href = '/'; });

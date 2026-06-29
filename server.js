@@ -2272,11 +2272,12 @@ wss.on('connection', (ws, req) => {
         if (room.td?.active) break;
         const hostId = [...room.players.keys()][0];
         if (id !== hostId) { send(ws, { type: 'error', msg: 'Only the host can start' }); break; }
-        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need at least 2 players' }); break; }
+        const botEnabled = !!msg.bot;
+        if (room.players.size < 2 && !botEnabled) { send(ws, { type: 'error', msg: 'Need at least 2 players or enable bot' }); break; }
         const cfg = room.tdConfig || {};
         const mode = TD_MODES[msg.mode] ? msg.mode : (cfg.mode || 'classic');
         const map = (TD_MAPS[msg.map] || msg.map === 'random') ? msg.map : (cfg.map || 'serpent');
-        tdStartMatch(room, mode, map);
+        tdStartMatch(room, mode, map, botEnabled || room.players.size < 2);
         break;
       }
       case 'td-config': {
@@ -5191,6 +5192,146 @@ const TD_INCOME = 10;
 const TD_INCOME_INTERVAL = 5000;
 const TD_WAVE_CLEAR_BONUS = 20;
 
+// ── Bot AI ────────────────────────────────────────────────────────────────────
+const TD_BOT_NAMES    = ['Alaric','Seraph','Kira','Dex','Voss','Nyx','Colt','Zeta'];
+const TD_BOT_THINK_MS = 1800;   // base ms between decisions
+const TD_BOT_JITTER   = 1600;   // extra random ms added — total think gap 1.8s–3.4s
+
+// Six personality archetypes; one is picked at match-start and noised ± 0.1
+const TD_BOT_ARCHETYPES = [
+  { name:'Rusher',    aggression:0.88, thrift:0.15, upgradeWeight:0.28 },
+  { name:'Fortifier', aggression:0.22, thrift:0.42, upgradeWeight:0.82 },
+  { name:'Economist', aggression:0.38, thrift:0.78, upgradeWeight:0.52 },
+  { name:'Balanced',  aggression:0.52, thrift:0.44, upgradeWeight:0.56 },
+  { name:'Blitzer',   aggression:0.92, thrift:0.08, upgradeWeight:0.22 },
+  { name:'Turtle',    aggression:0.12, thrift:0.68, upgradeWeight:0.78 },
+];
+
+// Score every buildable cell for every affordable tower — returns { score, type, x, y }
+function tdBotBestBuild(td, lane) {
+  const rng = Math.random;
+  // Sample candidate tiles (human-like: don't exhaustively search the map)
+  const sampleN = 30 + Math.floor(rng() * 25);
+  const cells = [];
+  for (let i = 0; i < sampleN; i++) {
+    const x = 1 + Math.floor(rng() * (TD_COLS - 2));
+    const y = 1 + Math.floor(rng() * (TD_ROWS - 2));
+    if (tdIsBuildable(td, x, y) && !lane.towers.some(t => t.x === x && t.y === y)) cells.push({x, y});
+  }
+  if (!cells.length) return null;
+
+  const existTypes = new Set(lane.towers.map(t => t.type));
+  let best = null, bestScore = 0;
+
+  for (const [type, def] of Object.entries(TD_TOWERS)) {
+    if (lane.gold < def.levels[0].cost) continue;
+    const range = def.levels[0].range;
+    const variety = existTypes.has(type) ? 0.7 : 1.2; // reward diversification
+
+    for (const {x, y} of cells) {
+      let coverage = 0, maxLate = 0;
+      for (let i = 0; i < td.path.length; i++) {
+        const p = td.path[i];
+        const d = Math.sqrt((p.x - x) ** 2 + (p.y - y) ** 2);
+        if (d <= range) { coverage++; maxLate = Math.max(maxLate, i / td.pathLen); }
+      }
+      if (!coverage) continue;
+      const score = coverage * (0.55 + maxLate * 1.45) * variety * (0.82 + rng() * 0.36);
+      if (score > bestScore) { bestScore = score; best = { type, x, y }; }
+    }
+  }
+  return bestScore > 0 ? { score: bestScore, ...best } : null;
+}
+
+// Score the best upgrade available — returns { score, towerId } or null
+function tdBotBestUpgrade(td, lane) {
+  let best = null, bestScore = 0;
+  for (const tower of lane.towers) {
+    const def = TD_TOWERS[tower.type];
+    if (tower.level >= def.levels.length) continue;
+    const cost = def.levels[tower.level].cost;
+    if (lane.gold < cost) continue;
+    // Efficiency: kills earned per gold invested, with level-depth bonus
+    const eff = (tower.kills || 0) / Math.max(1, tower.invested);
+    const score = (eff * 800 + 1) * (1 + 0.25 * tower.level) * (0.75 + Math.random() * 0.5);
+    if (score > bestScore) { bestScore = score; best = { score, towerId: tower.id }; }
+  }
+  return best;
+}
+
+// Best perk to buy — returns { score, towerId, perkId } or null
+function tdBotBestPerk(td, lane) {
+  let best = null, bestScore = 0;
+  for (const tower of lane.towers) {
+    for (const perk of (TD_PERKS[tower.type] || [])) {
+      if ((tower.perks || []).includes(perk.id)) continue;
+      if (lane.gold < perk.cost) continue;
+      // Perks valued more on high-kill towers; scaled by wave progress
+      const score = ((tower.kills || 0) + 5) / perk.cost * (0.8 + Math.random() * 0.4);
+      if (score > bestScore) { bestScore = score; best = { score, towerId: tower.id, perkId: perk.id }; }
+    }
+  }
+  return best;
+}
+
+// Main bot think function — called from tdTick at throttled intervals
+function tdBotThink(room) {
+  const td = room.td;
+  const pid = td.botId;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  const now = Date.now();
+  if (now < (td.botNextThink || 0)) return;
+
+  // Irregular human-like think cadence
+  td.botNextThink = now + TD_BOT_THINK_MS + Math.floor(Math.random() * TD_BOT_JITTER);
+
+  // 13% hesitation — bot "thinks" but doesn't act this tick
+  if (Math.random() < 0.13) return;
+
+  const p = td.botPersonality;
+
+  // ── Always check sending during wave ──
+  if (td.phase === 'wave') {
+    let bestPkg = -1;
+    for (let i = 0; i < TD_SEND_PACKAGES.length; i++) if (lane.sendMeter >= TD_SEND_PACKAGES[i].pts) bestPkg = i;
+    if (bestPkg >= 0) {
+      // Aggression roll: aggressive bots send at lower thresholds
+      const rollNeeded = (1 - p.aggression) * 0.75; // 0=always send, 0.75=rarely send
+      if (Math.random() > rollNeeded) {
+        const targets = td.order.filter(q => q !== pid && td.lanes[q] && td.lanes[q].alive);
+        if (targets.length) {
+          const tgt = targets[Math.floor(Math.random() * targets.length)];
+          tdSendEnemies(room, pid, bestPkg, tgt);
+        }
+      }
+    }
+  }
+
+  // ── Gold threshold: thrifty bots wait for more gold before building ──
+  const spendFloor = 100 + p.thrift * 250; // 100g (Blitzer) – 295g (Economist)
+  if (lane.gold < spendFloor && lane.towers.length > 0) return;
+
+  // ── Decide: build / upgrade / perk via noisy weighted comparison ──
+  const build   = tdBotBestBuild(td, lane);
+  const upgrade = tdBotBestUpgrade(td, lane);
+  const perk    = (td.wave >= 3) ? tdBotBestPerk(td, lane) : null;
+
+  const bScore  = build   ? build.score   * (0.9 + Math.random() * 0.2)                      : 0;
+  const uScore  = upgrade ? upgrade.score * (0.9 + Math.random() * 0.2) * (0.4 + p.upgradeWeight * 0.8) : 0;
+  const pkScore = perk    ? perk.score    * (0.9 + Math.random() * 0.2) * (td.wave / 8)       : 0;
+
+  if (bScore <= 0 && uScore <= 0 && pkScore <= 0) return;
+
+  if (uScore >= bScore && uScore >= pkScore && upgrade) {
+    tdUpgradeTower(room, pid, upgrade.towerId);
+  } else if (pkScore >= bScore && pkScore >= uScore && perk) {
+    tdBuyPerk(room, pid, perk.towerId, perk.perkId);
+  } else if (build) {
+    tdPlaceTower(room, pid, build.type, build.x, build.y);
+  }
+}
+
 // Expand orthogonal waypoints (each segment horizontal or vertical) into a full adjacent-cell path.
 // ── Procedural path generator (seeded) ──────────────────────────────────────
 // Zigzag bands with random turn depths, row gaps, and occasional short detours.
@@ -5450,9 +5591,27 @@ const TD_SEND_PACKAGES = [
   { pts: 75, label: '1 Boss',             enemies: ['boss'] },
 ];
 
-function tdStartMatch(room, modeKey, mapKey) {
+function tdStartMatch(room, modeKey, mapKey, botEnabled) {
   const mode = TD_MODES[modeKey] || TD_MODES.classic;
   modeKey = TD_MODES[modeKey] ? modeKey : 'classic';
+
+  // Inject a bot player if requested or if only 1 human is present
+  if (botEnabled || room.players.size < 2) {
+    const botId = 'bot_' + Date.now();
+    const archetype = TD_BOT_ARCHETYPES[Math.floor(Math.random() * TD_BOT_ARCHETYPES.length)];
+    const noise = () => (Math.random() - 0.5) * 0.2;
+    const personality = {
+      name: archetype.name,
+      aggression:    Math.max(0, Math.min(1, archetype.aggression    + noise())),
+      thrift:        Math.max(0, Math.min(1, archetype.thrift        + noise())),
+      upgradeWeight: Math.max(0, Math.min(1, archetype.upgradeWeight + noise())),
+    };
+    const botName = TD_BOT_NAMES[Math.floor(Math.random() * TD_BOT_NAMES.length)] + ' [Bot]';
+    // Mock ws — silently swallows all messages
+    const botWs = { readyState: 1, send: () => {}, _bot: true };
+    room.players.set(botId, { ws: botWs, name: botName, isBot: true });
+    room.botMeta = { id: botId, personality, name: botName };
+  }
 
   // Procedural 'random' map: generate a fresh path per match
   let map, path;
@@ -5490,6 +5649,9 @@ function tdStartMatch(room, modeKey, mapKey) {
     };
   });
 
+  const botMeta = room.botMeta || null;
+  delete room.botMeta; // consumed here
+
   room.td = {
     active: true,
     lanes,
@@ -5506,11 +5668,17 @@ function tdStartMatch(room, modeKey, mapKey) {
     path, pathLen, pathSet,
     maxHp: mode.startHp,
     waveMod: null,
+    botId: botMeta ? botMeta.id : null,
+    botPersonality: botMeta ? botMeta.personality : null,
+    botNextThink: 0,
   };
   room.status = 'playing';
   broadcastLobby();
 
-  const playersInfo = ids.map((pid, i) => ({ id: pid, name: lanes[pid].name, colorIdx: i }));
+  const playersInfo = ids.map((pid, i) => ({
+    id: pid, name: lanes[pid].name, colorIdx: i,
+    isBot: !!(room.players.get(pid) && room.players.get(pid).isBot),
+  }));
   broadcastRoom(room.id, {
     type: 'td-match-start',
     path, cols: TD_COLS, rows: TD_ROWS,
@@ -5762,6 +5930,9 @@ function tdTick(room) {
   const now = Date.now();
   const dt = TD_TICK_MS / 1000;
   const events = [];
+
+  // ── Bot AI ──
+  if (td.botId) tdBotThink(room);
 
   // ── Passive income (per lane) ──
   for (const pid of td.order) {

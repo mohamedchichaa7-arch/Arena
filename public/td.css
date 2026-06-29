@@ -102,6 +102,12 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .cfg-hint{font-size:.6rem;color:var(--text-dim)}
 .cfg-desc{font-size:.7rem;color:var(--text-dim);text-align:center;max-width:560px;line-height:1.4}
 .cfg-desc b{color:var(--accent-g)}
+.bot-row{display:flex;align-items:center;gap:.9rem;justify-content:center;flex-wrap:wrap}
+.bot-toggle{display:flex;align-items:center;gap:.35rem;font-size:.78rem;color:var(--text-dim);cursor:pointer;padding:.28rem .6rem;background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2);border-radius:8px;user-select:none;transition:all .15s}
+.bot-toggle:hover{background:rgba(124,58,237,.2);color:var(--text)}
+.bot-toggle input{accent-color:var(--accent);cursor:pointer}
+.player-card.is-bot .pc-color{font-size:.9rem;background:none!important}
+.mini.is-bot .bot-dot{background:none;font-size:.85rem;width:auto}
 .mode-badge{display:inline-flex;align-items:center;font-family:'Orbitron',sans-serif;font-size:.55rem;color:var(--accent-g);background:rgba(124,58,237,.12);padding:.2rem .6rem;border-radius:6px;border:1px solid rgba(124,58,237,.3)}
 
 /* Target picker */
