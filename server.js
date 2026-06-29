@@ -5340,7 +5340,7 @@ function tdBotThink(room) {
   const p = td.botPersonality;
 
   // ── Always check sending during wave ──
-  if (td.phase === 'wave') {
+  if (lane.phase === 'wave') {
     let bestPkg = -1;
     for (let i = 0; i < TD_SEND_PACKAGES.length; i++) if (lane.sendMeter >= TD_SEND_PACKAGES[i].pts) bestPkg = i;
     if (bestPkg >= 0) {
@@ -5363,11 +5363,11 @@ function tdBotThink(room) {
   // ── Decide: build / upgrade / perk via noisy weighted comparison ──
   const build   = tdBotBestBuild(td, lane);
   const upgrade = tdBotBestUpgrade(td, lane);
-  const perk    = (td.wave >= 3) ? tdBotBestPerk(td, lane) : null;
+  const perk    = (lane.wave >= 3) ? tdBotBestPerk(td, lane) : null;
 
   const bScore  = build   ? build.score   * (0.9 + Math.random() * 0.2)                      : 0;
   const uScore  = upgrade ? upgrade.score * (0.9 + Math.random() * 0.2) * (0.4 + p.upgradeWeight * 0.8) : 0;
-  const pkScore = perk    ? perk.score    * (0.9 + Math.random() * 0.2) * (td.wave / 8)       : 0;
+  const pkScore = perk    ? perk.score    * (0.9 + Math.random() * 0.2) * (lane.wave / 8)     : 0;
 
   if (bScore <= 0 && uScore <= 0 && pkScore <= 0) return;
 
@@ -5704,6 +5704,7 @@ function tdStartMatch(room, modeKey, mapKey, botEnabled) {
   const ids = [...room.players.keys()];
   const lanes = {};
   ids.forEach((pid, i) => {
+    const laneInitAt = Date.now();
     lanes[pid] = {
       name: room.players.get(pid).name,
       colorIdx: i,
@@ -5718,13 +5719,17 @@ function tdStartMatch(room, modeKey, mapKey, botEnabled) {
       killsThisWave: 0,
       sentCount: 0,
       lastIncomeAt: 0,
+      // Per-lane wave progression (independent)
+      wave: 0,
+      phase: 'prep',
+      phaseEndsAt: laneInitAt + TD_COUNTDOWN_MS + mode.firstPrepMs,
+      nextWaveData: null,
       // Upgrades & abilities
       upgrades: new Set(),
       abilityOwned: new Set(),
       abilityCooldown: {},  // abilityId -> expiresAt timestamp
       abilityActive: {},    // abilityId -> { until } for timed effects
       autoSend: { enabled: false, packageIdx: 0, targeting: 'random' },
-      waveQueued: false,    // true once this lane's wave enemies are queued (skip support)
       cleanWaves: 0,        // consecutive waves survived without damage (regen tracking)
       amps: { dmg:1, range:0, reload:1, killGold:0, income:0, waveBonus:0, regen:false, sendAmp:1, bossBonus:1 },
     };
@@ -5737,9 +5742,6 @@ function tdStartMatch(room, modeKey, mapKey, botEnabled) {
     active: true,
     lanes,
     order: ids,
-    wave: 0,
-    phase: 'prep',
-    phaseEndsAt: Date.now() + TD_COUNTDOWN_MS + mode.firstPrepMs,
     nextTowerId: 1,
     nextEnemyId: 1,
     eliminationOrder: [],   // [{id, name, wave, hpAtDeath}] in death order
@@ -5748,7 +5750,6 @@ function tdStartMatch(room, modeKey, mapKey, botEnabled) {
     mode, modeKey, mapKey,
     path, pathLen, pathSet,
     maxHp: mode.startHp,
-    waveMod: null,
     botId: botMeta ? botMeta.id : null,
     botPersonality: botMeta ? botMeta.personality : null,
     botNextThink: 0,
@@ -5824,19 +5825,14 @@ function tdResolveLaneAmps(lane) {
   };
 }
 
-// Skip the current prep phase for a single player — queue their wave enemies immediately.
+// Skip the current prep phase — immediately start this player's next wave.
 function tdSkipPrep(room, pid) {
-  const td = room.td;
-  if (td.phase !== 'prep' || !td.nextWaveData) return; // only usable between waves
-  const lane = td.lanes[pid];
-  if (!lane || !lane.alive || lane.waveQueued) return;
-  lane.waveQueued = true;
-  const { comp, muls } = td.nextWaveData;
-  const now = Date.now();
-  lane.spawnQueue = comp.map(e => ({ type: e.type, at: now + e.at, muls }));
-  lane.gold += 20; // bonus for skipping early
+  const lane = room.td.lanes[pid];
+  if (!lane || !lane.alive || lane.phase !== 'prep') return;
+  lane.gold += 20;
   send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold });
   send(room.players.get(pid).ws, { type: 'td-skipped', bonus: 20 });
+  tdStartLaneWave(room, pid);
 }
 
 // Use an active special ability.
@@ -5878,19 +5874,21 @@ function tdUseAbility(room, pid, abilityId) {
   }
 }
 
-function tdStartWave(room) {
+// Start the next wave for a single lane.
+function tdStartLaneWave(room, pid) {
   const td = room.td;
-  // Use precomputed wave data if available (set by tdEndWave to support per-player skip).
-  let waveNum, comp, muls, twist;
-  if (td.nextWaveData) {
-    ({ wave: waveNum, comp, muls, twist } = td.nextWaveData);
-    td.nextWaveData = null;
-    td.wave = waveNum;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  let comp, muls, twist;
+  if (lane.nextWaveData) {
+    ({ comp, muls, twist } = lane.nextWaveData);
+    lane.wave = lane.nextWaveData.wave;
+    lane.nextWaveData = null;
   } else {
-    td.wave++;
+    lane.wave++;
     twist = td.mode.chaos ? TD_CHAOS_TWISTS[Math.floor(Math.random() * TD_CHAOS_TWISTS.length)] : null;
     const sizeMul = td.mode.sizeMul * (twist ? twist.sizeMul : 1);
-    comp = tdGenerateWave(td.wave, { sizeMul, everyWaveBoss: td.mode.everyWaveBoss });
+    comp = tdGenerateWave(lane.wave, { sizeMul, everyWaveBoss: td.mode.everyWaveBoss });
     muls = {
       hp: td.mode.hpMul * (twist ? twist.hpMul : 1),
       spd: td.mode.speedMul * (twist ? twist.speedMul : 1),
@@ -5898,33 +5896,26 @@ function tdStartWave(room) {
       send: td.mode.sendMul,
     };
   }
-  td.waveMod = twist;
-  td.phase = 'wave';
+  lane.phase = 'wave';
+  lane.damagedThisWave = false;
+  lane.killsThisWave = 0;
   const now = Date.now();
-  for (const pid of td.order) {
-    const lane = td.lanes[pid];
-    if (!lane.alive) continue;
-    lane.damagedThisWave = false;
-    lane.killsThisWave = 0;
-    if (!lane.waveQueued) {
-      // Player hasn't skipped — queue their enemies now.
-      lane.spawnQueue = comp.map(e => ({ type: e.type, at: now + e.at, muls }));
-      lane.waveQueued = true;
-    }
-    // War Chest upgrade: bonus gold at wave start.
-    const bonus = (lane.amps && lane.amps.waveBonus) || 0;
-    if (bonus > 0) { lane.gold += bonus; send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold }); }
-  }
-  broadcastRoom(room.id, { type: 'td-wave-start', wave: td.wave, twist: twist ? twist.label : null });
+  lane.spawnQueue = comp.map(e => ({ type: e.type, at: now + e.at, muls }));
+  // War Chest upgrade: bonus gold at wave start.
+  const bonus = (lane.amps && lane.amps.waveBonus) || 0;
+  if (bonus > 0) { lane.gold += bonus; send(room.players.get(pid).ws, { type: 'td-gold', gold: lane.gold }); }
+  send(room.players.get(pid).ws, { type: 'td-wave-start', wave: lane.wave, twist: twist ? twist.label : null });
 }
 
-function tdEndWave(room) {
+// End the current wave for a single lane, enter prep phase.
+function tdEndLaneWave(room, pid) {
   const td = room.td;
-  td.phase = 'prep';
-  td.phaseEndsAt = Date.now() + td.mode.prepMs;
-
-  // Precompute next wave composition now so players can independently skip during prep.
-  const nextWave = td.wave + 1;
+  const lane = td.lanes[pid];
+  if (!lane || !lane.alive) return;
+  lane.phase = 'prep';
+  lane.phaseEndsAt = Date.now() + td.mode.prepMs;
+  // Precompute next wave so skip-prep can fire it immediately.
+  const nextWave = lane.wave + 1;
   const twist = td.mode.chaos ? TD_CHAOS_TWISTS[Math.floor(Math.random() * TD_CHAOS_TWISTS.length)] : null;
   const sizeMul = td.mode.sizeMul * (twist ? twist.sizeMul : 1);
   const comp = tdGenerateWave(nextWave, { sizeMul, everyWaveBoss: td.mode.everyWaveBoss });
@@ -5934,25 +5925,19 @@ function tdEndWave(room) {
     reward: td.mode.rewardMul * (twist ? twist.rewardMul : 1),
     send: td.mode.sendMul,
   };
-  td.nextWaveData = { wave: nextWave, comp, muls, twist };
-
-  for (const pid of td.order) {
-    const lane = td.lanes[pid];
-    if (!lane.alive) continue;
-    lane.waveQueued = false; // reset for next wave
-    if (!lane.damagedThisWave) {
-      lane.gold += td.mode.clearBonus;
-      // Field Hospital (regen): restore 1 HP every 3 consecutive clean waves.
-      if (lane.amps && lane.amps.regen) {
-        lane.cleanWaves = (lane.cleanWaves || 0) + 1;
-        if (lane.cleanWaves % 3 === 0) lane.baseHp = Math.min(td.maxHp, lane.baseHp + 1);
-      }
-    } else if (lane.amps && lane.amps.regen) {
-      lane.cleanWaves = 0; // damage resets streak
+  lane.nextWaveData = { wave: nextWave, comp, muls, twist };
+  // Clear wave bonus + regen.
+  if (!lane.damagedThisWave) {
+    lane.gold += td.mode.clearBonus;
+    if (lane.amps && lane.amps.regen) {
+      lane.cleanWaves = (lane.cleanWaves || 0) + 1;
+      if (lane.cleanWaves % 3 === 0) lane.baseHp = Math.min(td.maxHp, lane.baseHp + 1);
     }
+  } else if (lane.amps && lane.amps.regen) {
+    lane.cleanWaves = 0;
   }
-  broadcastRoom(room.id, {
-    type: 'td-wave-end', wave: td.wave, prepMs: td.mode.prepMs,
+  send(room.players.get(pid).ws, {
+    type: 'td-wave-end', wave: lane.wave, prepMs: td.mode.prepMs,
     upcomingTwist: twist ? twist.label : null,
   });
 }
@@ -6137,15 +6122,16 @@ function tdTick(room) {
     }
   }
 
-  // ── Phase transitions ──
-  if (td.phase === 'prep') {
-    if (now >= td.phaseEndsAt) tdStartWave(room);
-  }
-
-  // ── Per-lane simulation ──
+  // ── Per-lane simulation (each lane advances independently) ──
   for (const pid of td.order) {
     const lane = td.lanes[pid];
     if (!lane.alive) continue;
+
+    // Per-lane phase transition
+    if (lane.phase === 'prep' && now >= lane.phaseEndsAt) {
+      tdStartLaneWave(room, pid);
+      if (!lane.alive) continue;
+    }
 
     // Spawn from queue
     if (lane.spawnQueue.length) {
@@ -6245,17 +6231,18 @@ function tdTick(room) {
         }
       }
     }
-  }
 
-  // End-of-wave detection
-  tdMaybeEndWave(room);
+    // Per-lane end-of-wave detection
+    if (lane.alive && lane.phase === 'wave' && lane.enemies.length === 0 && lane.spawnQueue.length === 0) {
+      tdEndLaneWave(room, pid);
+    }
+  }
 
   // Check win condition
   tdCheckGameOver(room);
   if (!td.active) return;
 
   // ── Broadcast compact state ──
-  const phaseRemainingMs = td.phase === 'prep' ? Math.max(0, td.phaseEndsAt - now) : 0;
   const laneState = {};
   for (const pid of td.order) {
     const lane = td.lanes[pid];
@@ -6264,6 +6251,8 @@ function tdTick(room) {
     laneState[pid] = {
       baseHp: lane.baseHp, gold: lane.gold, alive: lane.alive,
       sendMeter: lane.sendMeter, kills: lane.killsThisWave, sent: lane.sentCount,
+      wave: lane.wave, phase: lane.phase,
+      phaseRemainingMs: lane.phase === 'prep' ? Math.max(0, lane.phaseEndsAt - now) : 0,
       towers: lane.towers.map(tdSerializeTower),
       enemies: lane.enemies.map(e => {
         const p = tdEnemyPos(td, e.dist);
@@ -6277,13 +6266,9 @@ function tdTick(room) {
       abilityCooldownMs: cdMs,
       abilityActiveMs: actMs,
       autoSend: lane.autoSend,
-      waveQueued: lane.waveQueued,
     };
   }
-  broadcastRoom(room.id, {
-    type: 'td-state', wave: td.wave, phase: td.phase,
-    phaseRemainingMs, lanes: laneState, events,
-  });
+  broadcastRoom(room.id, { type: 'td-state', lanes: laneState, events });
 }
 
 function tdSerializeTower(t) {
@@ -6427,10 +6412,10 @@ function tdEliminatePlayer(room, pid, isDisconnect) {
   lane.alive = false;
   lane.enemies = [];
   lane.spawnQueue = [];
-  td.eliminationOrder.push({ id: pid, name: lane.name, wave: td.wave, hpAtDeath: lane.baseHp });
+  td.eliminationOrder.push({ id: pid, name: lane.name, wave: lane.wave, hpAtDeath: lane.baseHp });
   broadcastRoom(room.id, {
     type: 'td-player-eliminated', playerId: pid, name: lane.name,
-    reason: isDisconnect ? 'disconnect' : 'base-destroyed', wave: td.wave,
+    reason: isDisconnect ? 'disconnect' : 'base-destroyed', wave: lane.wave,
   });
 }
 
@@ -6462,25 +6447,14 @@ function tdCheckGameOver(room) {
     }
   }
 
-  broadcastRoom(room.id, { type: 'td-game-over', winnerId, winnerName: winnerId ? td.lanes[winnerId].name : null, ranking, wave: td.wave });
+  const maxWave = Math.max(...td.order.map(p => td.lanes[p].wave));
+  broadcastRoom(room.id, { type: 'td-game-over', winnerId, winnerName: winnerId ? td.lanes[winnerId].name : null, ranking, wave: maxWave });
   room.status = 'waiting';
   broadcastLobby();
   log('info', 'td-game-over', { roomId: room.id, winner: winnerId ? td.lanes[winnerId].name : '(none)', wave: td.wave });
 }
 
 // Detect end of wave: all alive lanes have no enemies & empty spawn queue while in wave phase.
-function tdMaybeEndWave(room) {
-  const td = room.td;
-  if (!td || td.phase !== 'wave') return;
-  for (const pid of td.order) {
-    const lane = td.lanes[pid];
-    if (!lane.alive) continue;
-    if (lane.enemies.length > 0 || lane.spawnQueue.length > 0) return;
-  }
-  tdEndWave(room);
-}
-
-
 // ── Start ───────────────────────────────────────────────────────
 ensureFirestoreDatabase().then(async dbReady => {
   if (!dbReady) {

@@ -357,6 +357,7 @@
     myAutoSend = { enabled: false, packageIdx: 0, targeting: 'random' };
     myWaveQueued = false;
     buildUpgradePanel();
+    buildAbilityBar();
     if (!rafId) loop();
   }
 
@@ -437,7 +438,14 @@
 
   // ── State / interpolation ──
   function onState(msg) {
-    wave = msg.wave; phase = msg.phase; phaseRemainingMs = msg.phaseRemainingMs; phaseStampAt = performance.now();
+    // wave/phase/phaseRemainingMs are now per-lane; read from myId's lane
+    const myLaneHdr = msg.lanes && msg.lanes[myId];
+    if (myLaneHdr) {
+      wave = myLaneHdr.wave ?? wave;
+      phase = myLaneHdr.phase ?? phase;
+      phaseRemainingMs = myLaneHdr.phaseRemainingMs ?? 0;
+    }
+    phaseStampAt = performance.now();
     lanes = msg.lanes;
     const now = performance.now();
 
@@ -469,7 +477,6 @@
       if (me.abilityCooldownMs) myAbilityCooldownMs = me.abilityCooldownMs;
       if (me.abilityActiveMs)   myAbilityActiveMs   = me.abilityActiveMs;
       if (me.autoSend)          myAutoSend          = me.autoSend;
-      if (me.waveQueued !== undefined) myWaveQueued = me.waveQueued;
       refreshUpgradePanel();
       refreshAbilityPanel();
       refreshSkipButton();
@@ -816,49 +823,39 @@
   function buildUpgradePanel() {
     const p = document.getElementById('upgradePanel');
     if (!p) return;
-    // build once
     if (p.dataset.built) return;
     p.dataset.built = '1';
 
-    // Upgrades section
+    // Header with close button
+    const hdr = document.createElement('div');
+    hdr.className = 'up-header';
+    hdr.innerHTML = '<span class="up-title">\u2699 Lane Upgrades</span>';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'up-close'; closeBtn.textContent = '\u00d7'; closeBtn.title = 'Close';
+    closeBtn.addEventListener('click', () => { p.style.display = 'none'; });
+    hdr.appendChild(closeBtn);
+    p.appendChild(hdr);
+
+    // Lane upgrades grid
     const secU = document.createElement('div');
     secU.className = 'up-section';
-    const hU = document.createElement('h4'); hU.textContent = '⚙ Lane Upgrades'; secU.appendChild(hU);
     const gridU = document.createElement('div'); gridU.className = 'up-grid'; gridU.id = 'upgGrid'; secU.appendChild(gridU);
     for (const id of LANE_UPGRADE_ORDER) {
       const u = LANE_UPGRADES[id];
       const btn = document.createElement('button');
       btn.className = 'upg-btn'; btn.dataset.upgId = id; btn.id = 'upg_' + id;
-      btn.innerHTML = `<span class="upg-icon">${u.icon}</span><span class="upg-name">${u.name}</span><span class="upg-cost">💰${u.cost}</span><span class="upg-desc">${u.desc}</span>`;
+      btn.innerHTML = `<span class="upg-icon">${u.icon}</span><span class="upg-name">${u.name}</span><span class="upg-cost">\uD83D\uDCB0${u.cost}</span><span class="upg-desc">${u.desc}</span>`;
       btn.title = u.desc;
       btn.addEventListener('click', () => { if (ws) ws.send(JSON.stringify({ type: 'td-buy-upgrade', upgradeId: id })); });
       gridU.appendChild(btn);
     }
     p.appendChild(secU);
 
-    // Abilities section
-    const secA = document.createElement('div');
-    secA.className = 'up-section';
-    const hA = document.createElement('h4'); hA.textContent = '⚡ Abilities'; secA.appendChild(hA);
-    const gridA = document.createElement('div'); gridA.className = 'up-grid'; gridA.id = 'abiGrid'; secA.appendChild(gridA);
-    for (const id of ABILITY_ORDER) {
-      const a = ABILITIES[id];
-      const wrap = document.createElement('div'); wrap.className = 'abi-wrap';
-      const btn = document.createElement('button');
-      btn.className = 'upg-btn abi-btn'; btn.dataset.abiId = id; btn.id = 'abi_' + id;
-      btn.innerHTML = `<span class="upg-icon">${a.icon}</span><span class="upg-name">${a.name}</span><span class="upg-cost">💰${a.cost}</span><span class="upg-desc">${a.desc}</span><div class="abi-cd-overlay" id="abicd_${id}"></div>`;
-      btn.title = a.desc;
-      btn.addEventListener('click', () => handleAbilityClick(id));
-      wrap.appendChild(btn);
-      gridA.appendChild(wrap);
-    }
-    p.appendChild(secA);
-
     // Auto-send config
     const secAS = document.createElement('div');
     secAS.className = 'up-section';
     secAS.id = 'autoSendSec';
-    const hAS = document.createElement('h4'); hAS.textContent = '🤖 Auto-Send'; secAS.appendChild(hAS);
+    const hAS = document.createElement('h4'); hAS.textContent = '\uD83E\uDD16 Auto-Send'; secAS.appendChild(hAS);
     secAS.innerHTML += `
       <label class="as-row"><input type="checkbox" id="asEnabled"> Enable Auto-Send</label>
       <div class="as-row"><label>Max Package:</label>
@@ -873,7 +870,6 @@
       </div>`;
     p.appendChild(secAS);
 
-    // Wire auto-send listeners after injection
     const asEn = document.getElementById('asEnabled');
     const asPkg = document.getElementById('asPkgSel');
     const asTgt = document.getElementById('asTarget');
@@ -882,6 +878,22 @@
     if (asTgt) asTgt.addEventListener('change', sendAutoSendCfg);
 
     upgradePanel = p;
+  }
+
+  function buildAbilityBar() {
+    const bar = document.getElementById('abilityBar');
+    if (!bar || bar.dataset.built) return;
+    bar.dataset.built = '1';
+    bar.innerHTML = '<span class="abi-bar-label">\u26A1 Abilities</span>';
+    for (const id of ABILITY_ORDER) {
+      const a = ABILITIES[id];
+      const btn = document.createElement('button');
+      btn.className = 'abi-bar-btn'; btn.id = 'abi_' + id; btn.title = a.desc;
+      btn.innerHTML = `<span class="abi-bar-icon">${a.icon}</span><span class="abi-bar-name">${a.name}</span><span class="abi-bar-cost" id="abicost_${id}">\uD83D\uDCB0${a.cost}</span><div class="abi-cd-overlay" id="abicd_${id}"></div>`;
+      btn.addEventListener('click', () => handleAbilityClick(id));
+      bar.appendChild(btn);
+    }
+    bar.style.display = '';
   }
 
   function sendAutoSendCfg() {
@@ -912,7 +924,6 @@
   }
 
   function refreshAbilityPanel() {
-    const now = Date.now();
     for (const id of ABILITY_ORDER) {
       const btn = document.getElementById('abi_' + id);
       if (!btn) continue;
@@ -925,6 +936,8 @@
       btn.disabled = !owned ? myGold < ABILITIES[id].cost : cdLeft > 0;
       const overlay = document.getElementById('abicd_' + id);
       if (overlay) overlay.textContent = owned && cdLeft > 0 ? `${Math.ceil(cdLeft/1000)}s` : (owned && activeLeft > 0 ? `${Math.ceil(activeLeft/1000)}s` : '');
+      const costEl = document.getElementById('abicost_' + id);
+      if (costEl) costEl.style.display = owned ? 'none' : '';
     }
   }
 
@@ -941,8 +954,8 @@
     const btn = document.getElementById('btnSkip');
     if (!btn) return;
     btn.style.display = phase === 'prep' ? '' : 'none';
-    btn.disabled = myWaveQueued;
-    btn.textContent = myWaveQueued ? '⚡ Ready!' : '⚡ Skip Wait';
+    btn.disabled = false;
+    btn.textContent = '⚡ Skip Wait';
   }
 
   function updateSidebarStats() {
@@ -1042,16 +1055,25 @@
   chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
   function sendChat() { const text = chatInput.value.trim(); if (!text) return; wsSend({ type: 'chat', text }); chatInput.value = ''; }
 
-  // Upgrade panel toggle
+  // Upgrade panel toggle + click-outside-to-close
   const _btnUpgrade = $('btnUpgrade');
   if (_btnUpgrade) {
-    _btnUpgrade.addEventListener('click', () => {
+    _btnUpgrade.addEventListener('click', (e) => {
+      e.stopPropagation();
       const p = $('upgradePanel');
       if (!p) return;
-      const vis = p.style.display === 'none' || !p.style.display;
-      p.style.display = vis ? '' : 'none';
+      const isOpen = p.style.display !== 'none' && p.style.display !== '';
+      p.style.display = isOpen ? 'none' : '';
     });
   }
+  // Close upgrade panel when clicking anywhere outside it
+  document.addEventListener('mousedown', (e) => {
+    const p = $('upgradePanel');
+    if (!p || p.style.display === 'none') return;
+    if (!p.contains(e.target) && e.target !== _btnUpgrade) {
+      p.style.display = 'none';
+    }
+  });
   // Skip button
   const _btnSkip = $('btnSkip');
   if (_btnSkip) {
