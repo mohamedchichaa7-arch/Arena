@@ -213,6 +213,7 @@
   const laneRender = {};
   const effects = [];             // {kind, ...,until}
   const damageNumbers = [];       // {x,y,val,until,color}
+  const projectiles = [];         // {towerType,level,perks,x1,y1,x2,y2,startAt,endAt,evKind}
   const miniCanvases = new Map(); // pid -> {wrap, canvas, hpFill, head, skull}
 
   function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -395,6 +396,7 @@
     myAbilityCooldownMs = {}; myAbilityActiveMs = {};
     myAutoSend = { enabled: false, packageIdx: 0, targeting: 'random' };
     myWaveQueued = false;
+    projectiles.length = 0;
     buildUpgradePanel();
     buildAbilityBar();
     if (!rafId) loop();
@@ -541,23 +543,50 @@
     if (myHp < prevHp) { hpChip.classList.add('flash'); setTimeout(() => hpChip.classList.remove('flash'), 400); }
   }
 
+  function getTowerAtGrid(gx, gy) {
+    const me = lanes[myId];
+    if (!me || !me.towers) return null;
+    return me.towers.find(t => t.x === gx && t.y === gy);
+  }
+
+  // Flight durations per tower behavior (ms)
+  const PROJ_FLIGHT = { single: 160, splash: 280, burn: 200, venom: 230, frost: 190, sniper: 75, missile: 310, laser: 55, railgun: 90 };
+
+  function spawnProjectile(ev, evKind, x1, y1, x2, y2) {
+    const tower = getTowerAtGrid(Math.round(x1), Math.round(y1));
+    const towerType = tower ? tower.type : evKind; // fallback
+    const level = tower ? tower.level : 1;
+    const perks = tower ? (tower.perks || []) : [];
+    const def = towerType && TOWER_DEFS[towerType] ? TOWER_DEFS[towerType] : null;
+    const behavior = def ? def : null; // we just need towerType
+    const flightKey = (def && def.desc && def.desc.includes('Pierces')) ? 'railgun'
+                    : (def && def.desc && def.desc.includes('chain')) ? 'single'
+                    : PROJ_FLIGHT[evKind] ? evKind : 'single';
+    const dur = PROJ_FLIGHT[flightKey] || 160;
+    const now = performance.now();
+    projectiles.push({ towerType, level, perks, x1, y1, x2, y2, startAt: now, endAt: now + dur, evKind });
+  }
+
   function handleEvent(ev) {
-    if (ev.pid !== myId) return; // only render effects in our own lane (minimaps just use state)
+    if (ev.pid !== myId) return;
     const now = performance.now();
     if (ev.ev === 'hit' || ev.ev === 'snipe') {
+      if (ev.tx !== undefined && ev.ex !== undefined) {
+        spawnProjectile(ev, ev.ev === 'snipe' ? 'sniper' : 'single', ev.tx, ev.ty, ev.ex, ev.ey);
+      }
       if (ev.dmg) damageNumbers.push({ x: ev.ex, y: ev.ey, val: ev.dmg, until: now + 700, color: '#fff' });
-      if (ev.tx !== undefined) effects.push({ kind: 'beam', x1: ev.tx, y1: ev.ty, x2: ev.ex, y2: ev.ey, until: now + 110, color: ev.ev === 'snipe' ? '#e2e8f0' : '#a3e635' });
-      effects.push({ kind: 'spark', x: ev.ex, y: ev.ey, until: now + 180 });
     } else if (ev.ev === 'splash') {
-      effects.push({ kind: 'explosion', x: ev.x, y: ev.y, r: ev.r, until: now + 320 });
+      if (ev.tx !== undefined) spawnProjectile(ev, 'splash', ev.tx, ev.ty, ev.x, ev.y);
+      else effects.push({ kind: 'explosion', x: ev.x, y: ev.y, r: ev.r, until: now + 320 });
     } else if (ev.ev === 'chain') {
       effects.push({ kind: 'chain', pts: ev.pts, until: now + 160 });
     } else if (ev.ev === 'frost') {
+      spawnProjectile(ev, 'frost', ev.tx, ev.ty, ev.tx, ev.ty + 0.01); // frost pulses from tower
       effects.push({ kind: 'frost', x: ev.tx, y: ev.ty, until: now + 220 });
     } else if (ev.ev === 'burn') {
-      effects.push({ kind: 'burn', x: ev.ex, y: ev.ey, until: now + 260 });
+      if (ev.tx !== undefined) spawnProjectile(ev, 'burn', ev.tx, ev.ty, ev.ex, ev.ey);
     } else if (ev.ev === 'venom') {
-      effects.push({ kind: 'venom', x: ev.ex, y: ev.ey, until: now + 280 });
+      if (ev.tx !== undefined) spawnProjectile(ev, 'venom', ev.tx, ev.ty, ev.ex, ev.ey);
     } else if (ev.ev === 'blink') {
       effects.push({ kind: 'blink', x: ev.ex, y: ev.ey, until: now + 350 });
     } else if (ev.ev === 'split') {
@@ -774,6 +803,9 @@
     const buf = laneRender[myId];
     if (buf) for (const [, e] of buf) drawEnemy(e, now);
 
+    // projectiles (fly above enemies, below effects)
+    drawProjectiles(now);
+
     // effects
     drawEffects(now);
     // damage numbers
@@ -863,6 +895,312 @@
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(cx - bw / 2, cy - r - 7, bw, 4);
     ctx.fillStyle = e.h > 0.5 ? '#22c55e' : e.h > 0.25 ? '#f59e0b' : '#ef4444';
     ctx.fillRect(cx - bw / 2, cy - r - 7, bw * e.h, 4);
+  }
+
+  // ── Projectile colours per level ────────────────────────────────────────────
+  // [lvl1, lvl2, lvl3, superLvl4]
+  const PROJ_COLORS = {
+    arrow:   ['#86efac','#fde047','#f97316','#fbbf24'],
+    cannon:  ['#94a3b8','#6b7280','#dc2626','#1e1b18'],
+    frost:   ['#bae6fd','#7dd3fc','#38bdf8','#e0f2fe'],
+    tesla:   ['#c4b5fd','#a78bfa','#7c3aed','#e9d5ff'],
+    inferno: ['#fb923c','#ef4444','#991b1b','#fbbf24'],
+    sniper:  ['#e2e8f0','#cbd5e1','#fbbf24','#fef3c7'],
+    missile: ['#fbbf24','#f97316','#ef4444','#dc2626'],
+    laser:   ['#fca5a5','#f87171','#ef4444','#ff00ff'],
+    venom:   ['#86efac','#4ade80','#16a34a','#15803d'],
+    railgun: ['#67e8f9','#22d3ee','#06b6d4','#f0f9ff'],
+  };
+
+  function projColor(towerType, level) {
+    const arr = PROJ_COLORS[towerType] || ['#ffffff','#ffffff','#ffffff','#fbbf24'];
+    return arr[Math.min(level - 1, arr.length - 1)];
+  }
+
+  function drawProjectiles(now) {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      if (now >= p.endAt) {
+        // Spawn landing effect when projectile arrives
+        const ex = p.x2, ey = p.y2;
+        if (p.evKind === 'splash') effects.push({ kind: 'explosion', x: ex, y: ey, r: 1.3, until: now + 320 });
+        else if (p.evKind === 'burn') effects.push({ kind: 'burn', x: ex, y: ey, until: now + 260 });
+        else if (p.evKind === 'venom') effects.push({ kind: 'venom', x: ex, y: ey, until: now + 280 });
+        else effects.push({ kind: 'spark', x: ex, y: ey, until: now + 180 });
+        projectiles.splice(i, 1);
+        continue;
+      }
+      const t = (now - p.startAt) / (p.endAt - p.startAt); // 0→1
+      const sx = (p.x1 + 0.5) * CELL, sy = (p.y1 + 0.5) * CELL;
+      const ex2 = (p.x2 + 0.5) * CELL, ey2 = (p.y2 + 0.5) * CELL;
+      const cx = sx + (ex2 - sx) * t, cy = sy + (ey2 - sy) * t;
+      const angle = Math.atan2(ey2 - sy, ex2 - sx);
+      const col = projColor(p.towerType, p.level);
+      const isSuper = p.level >= 4;
+      const sz = CELL * (0.11 + p.level * 0.04); // base size scales with level
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(angle);
+
+      switch (p.towerType) {
+        // ── Arrow / Ballista ──────────────────────────────────────────────────
+        case 'arrow': {
+          const len = CELL * (0.28 + p.level * 0.07);
+          const w = CELL * (0.055 + p.level * 0.01);
+          if (isSuper) ctx.shadowBlur = 8, ctx.shadowColor = '#fbbf24';
+          ctx.strokeStyle = col; ctx.lineWidth = w * 1.4;
+          ctx.beginPath(); ctx.moveTo(-len * 0.5, 0); ctx.lineTo(len * 0.6, 0); ctx.stroke();
+          // arrowhead
+          ctx.fillStyle = col;
+          ctx.beginPath(); ctx.moveTo(len * 0.6, 0); ctx.lineTo(len * 0.1, -w * 2); ctx.lineTo(len * 0.1, w * 2); ctx.closePath(); ctx.fill();
+          // fletching
+          ctx.strokeStyle = isSuper ? '#fef9c3' : '#fff'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(-len * 0.4, 0); ctx.lineTo(-len * 0.6, -w * 2.5); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(-len * 0.4, 0); ctx.lineTo(-len * 0.6, w * 2.5); ctx.stroke();
+          if (isSuper) {
+            // second fletching pair for Ballista
+            ctx.beginPath(); ctx.moveTo(-len * 0.25, 0); ctx.lineTo(-len * 0.45, -w * 2.5); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(-len * 0.25, 0); ctx.lineTo(-len * 0.45, w * 2.5); ctx.stroke();
+          }
+          break;
+        }
+        // ── Cannon / Siege Engine ─────────────────────────────────────────────
+        case 'cannon': {
+          const r = sz * (isSuper ? 2.2 : 1.4);
+          if (isSuper) { ctx.shadowBlur = 12; ctx.shadowColor = '#ef4444'; }
+          // smoke trail
+          const trailLen = r * 3;
+          const grad = ctx.createLinearGradient(-trailLen, 0, 0, 0);
+          grad.addColorStop(0, 'rgba(0,0,0,0)');
+          grad.addColorStop(1, col + '88');
+          ctx.fillStyle = grad; ctx.beginPath();
+          ctx.ellipse(-trailLen * 0.5, 0, trailLen * 0.5, r * 0.4, 0, 0, 7); ctx.fill();
+          // ball
+          const bGrad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.05, 0, 0, r);
+          bGrad.addColorStop(0, isSuper ? '#6b7280' : '#d1d5db');
+          bGrad.addColorStop(1, col);
+          ctx.fillStyle = bGrad; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
+          ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+          if (isSuper) {
+            // lava cracks
+            ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 0.8;
+            for (let k = 0; k < 4; k++) {
+              const ka = k / 4 * Math.PI * 2;
+              ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(ka) * r * 0.8, Math.sin(ka) * r * 0.8); ctx.stroke();
+            }
+          }
+          break;
+        }
+        // ── Frost / Blizzard ──────────────────────────────────────────────────
+        case 'frost': {
+          const spikes = isSuper ? 8 : 6;
+          const r1 = sz * (isSuper ? 2.0 : 1.3), r2 = r1 * 0.45;
+          if (isSuper) { ctx.shadowBlur = 10; ctx.shadowColor = '#bae6fd'; }
+          ctx.strokeStyle = col; ctx.lineWidth = isSuper ? 2 : 1.5;
+          for (let k = 0; k < spikes; k++) {
+            const a = k / spikes * Math.PI * 2;
+            ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); ctx.stroke();
+            // side branches
+            const bx = Math.cos(a) * r1 * 0.55, by = Math.sin(a) * r1 * 0.55;
+            ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + Math.cos(a + 1.1) * r2, by + Math.sin(a + 1.1) * r2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + Math.cos(a - 1.1) * r2, by + Math.sin(a - 1.1) * r2); ctx.stroke();
+          }
+          ctx.fillStyle = col + 'cc'; ctx.beginPath(); ctx.arc(0, 0, sz * 0.6, 0, 7); ctx.fill();
+          break;
+        }
+        // ── Tesla / Storm Spire ───────────────────────────────────────────────
+        case 'tesla': {
+          const len = CELL * (0.3 + p.level * 0.06);
+          if (isSuper) { ctx.shadowBlur = 14; ctx.shadowColor = '#a78bfa'; }
+          ctx.strokeStyle = col; ctx.lineWidth = isSuper ? 3 : 1.8;
+          // main zigzag bolt
+          ctx.beginPath();
+          const segs = isSuper ? 8 : 5;
+          ctx.moveTo(-len * 0.5, 0);
+          for (let k = 1; k <= segs; k++) {
+            const bx = -len * 0.5 + len * (k / segs);
+            const by = (k % 2 === 0 ? 1 : -1) * CELL * 0.1 * (isSuper ? 1.5 : 1);
+            ctx.lineTo(bx, by);
+          }
+          ctx.stroke();
+          // secondary bolt (super only)
+          if (isSuper) {
+            ctx.strokeStyle = '#e9d5ff'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(-len * 0.4, 0);
+            for (let k = 1; k <= 4; k++) {
+              const bx = -len * 0.4 + len * 0.8 * (k / 4);
+              const by = (k % 2 === 0 ? -1 : 1) * CELL * 0.13;
+              ctx.lineTo(bx, by);
+            }
+            ctx.stroke();
+          }
+          break;
+        }
+        // ── Inferno / Volcano ─────────────────────────────────────────────────
+        case 'inferno': {
+          const r = sz * (isSuper ? 2.5 : 1.6);
+          if (isSuper) { ctx.shadowBlur = 16; ctx.shadowColor = '#fbbf24'; }
+          // fire trail
+          const trailLen = r * 4;
+          const fGrad = ctx.createLinearGradient(-trailLen, 0, 0, 0);
+          fGrad.addColorStop(0, 'rgba(0,0,0,0)');
+          fGrad.addColorStop(0.6, isSuper ? 'rgba(251,191,36,0.3)' : 'rgba(239,68,68,0.3)');
+          fGrad.addColorStop(1, col + 'aa');
+          ctx.fillStyle = fGrad;
+          ctx.beginPath(); ctx.ellipse(-trailLen * 0.5, 0, trailLen * 0.5, r * 0.35, 0, 0, 7); ctx.fill();
+          // fireball core
+          const fbGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+          fbGrad.addColorStop(0, isSuper ? '#fef08a' : '#fde047');
+          fbGrad.addColorStop(0.5, col);
+          fbGrad.addColorStop(1, isSuper ? '#7f1d1d' : '#991b1b');
+          ctx.fillStyle = fbGrad; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
+          // lick spikes
+          const spikes = isSuper ? 6 : 4;
+          ctx.fillStyle = isSuper ? '#fef08a' : '#fde04788';
+          for (let k = 0; k < spikes; k++) {
+            const a = (k / spikes) * Math.PI * 2 - 0.4;
+            ctx.beginPath(); ctx.moveTo(Math.cos(a) * r * 0.7, Math.sin(a) * r * 0.7);
+            ctx.lineTo(Math.cos(a - 0.3) * r * 1.4, Math.sin(a - 0.3) * r * 1.4);
+            ctx.lineTo(Math.cos(a + 0.3) * r * 1.4, Math.sin(a + 0.3) * r * 1.4);
+            ctx.closePath(); ctx.fill();
+          }
+          break;
+        }
+        // ── Sniper / War Cannon ───────────────────────────────────────────────
+        case 'sniper': {
+          const len = CELL * (0.35 + p.level * 0.06);
+          const w = CELL * (0.04 + (p.level - 1) * 0.015);
+          if (isSuper) { ctx.shadowBlur = 10; ctx.shadowColor = col; }
+          // tracer streak
+          const sGrad = ctx.createLinearGradient(-len, 0, len * 0.3, 0);
+          sGrad.addColorStop(0, 'rgba(255,255,255,0)');
+          sGrad.addColorStop(0.6, col + 'aa');
+          sGrad.addColorStop(1, '#ffffff');
+          ctx.strokeStyle = sGrad; ctx.lineWidth = w * 2;
+          ctx.beginPath(); ctx.moveTo(-len, 0); ctx.lineTo(len * 0.3, 0); ctx.stroke();
+          // bullet tip
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath(); ctx.ellipse(len * 0.3, 0, w * 3, w * 1.2, 0, 0, 7); ctx.fill();
+          if (isSuper) {
+            // energy halo
+            ctx.strokeStyle = col + 'aa'; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.ellipse(0, 0, len * 0.6, w * 4, 0, 0, 7); ctx.stroke();
+          }
+          break;
+        }
+        // ── Missile / MLRS ────────────────────────────────────────────────────
+        case 'missile': {
+          const blen = CELL * (0.32 + p.level * 0.07);
+          const bw = CELL * (0.07 + p.level * 0.02);
+          if (isSuper) { ctx.shadowBlur = 12; ctx.shadowColor = '#ef4444'; }
+          // flame exhaust
+          const flen = blen * (isSuper ? 2.5 : 1.8);
+          const fGrad2 = ctx.createLinearGradient(-flen, 0, -blen * 0.4, 0);
+          fGrad2.addColorStop(0, 'rgba(0,0,0,0)');
+          fGrad2.addColorStop(0.5, isSuper ? 'rgba(239,68,68,0.5)' : 'rgba(249,115,22,0.5)');
+          fGrad2.addColorStop(1, '#fde04799');
+          ctx.fillStyle = fGrad2;
+          ctx.beginPath(); ctx.ellipse(-(flen + blen * 0.4) * 0.5, 0, flen * 0.5, bw * (isSuper ? 1.4 : 1), 0, 0, 7); ctx.fill();
+          // rocket body
+          const rGrad = ctx.createLinearGradient(0, -bw, 0, bw);
+          rGrad.addColorStop(0, '#e2e8f0'); rGrad.addColorStop(1, '#64748b');
+          ctx.fillStyle = rGrad;
+          ctx.beginPath(); ctx.roundRect(-blen * 0.45, -bw, blen * 0.7, bw * 2, bw * 0.3); ctx.fill();
+          ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 0.8; ctx.stroke();
+          // nose cone
+          ctx.fillStyle = col;
+          ctx.beginPath(); ctx.moveTo(blen * 0.25, -bw); ctx.lineTo(blen * 0.25, bw); ctx.lineTo(blen * 0.7, 0); ctx.closePath(); ctx.fill();
+          // fins
+          ctx.fillStyle = col + 'cc';
+          ctx.beginPath(); ctx.moveTo(-blen * 0.35, -bw); ctx.lineTo(-blen * 0.55, -bw * 2.5); ctx.lineTo(-blen * 0.15, -bw); ctx.closePath(); ctx.fill();
+          ctx.beginPath(); ctx.moveTo(-blen * 0.35, bw);  ctx.lineTo(-blen * 0.55, bw * 2.5);  ctx.lineTo(-blen * 0.15, bw);  ctx.closePath(); ctx.fill();
+          if (isSuper) {
+            // extra side rockets
+            ctx.fillStyle = '#f97316cc';
+            ctx.beginPath(); ctx.roundRect(-blen * 0.3, -bw * 2.8, blen * 0.5, bw * 1.0, 2); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(-blen * 0.3, bw * 1.8,  blen * 0.5, bw * 1.0, 2); ctx.fill();
+          }
+          break;
+        }
+        // ── Laser / Photon Cannon ─────────────────────────────────────────────
+        case 'laser': {
+          // laser: render as a fast bright beam (full path, fades with age)
+          ctx.rotate(-angle); // undo rotation so we can draw in screen coords
+          const totalLen = Math.hypot(ex2 - sx, ey2 - sy);
+          const drawn = totalLen * Math.min(t * 3, 1); // beam extends quickly
+          const beamAngle = Math.atan2(ey2 - sy, ex2 - sx);
+          const lGrad = ctx.createLinearGradient(0, 0, Math.cos(beamAngle) * drawn, Math.sin(beamAngle) * drawn);
+          lGrad.addColorStop(0, isSuper ? '#ff00ffcc' : '#f87171cc');
+          lGrad.addColorStop(0.5, '#ffffff');
+          lGrad.addColorStop(1, isSuper ? '#ff00ffcc' : '#f87171cc');
+          ctx.strokeStyle = lGrad;
+          ctx.lineWidth = isSuper ? 4 : (1 + p.level);
+          if (isSuper) { ctx.shadowBlur = 16; ctx.shadowColor = '#ff00ff'; }
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(beamAngle) * drawn, Math.sin(beamAngle) * drawn);
+          ctx.stroke();
+          break;
+        }
+        // ── Venom / Plague Spire ─────────────────────────────────────────────
+        case 'venom': {
+          const r = sz * (isSuper ? 2.2 : 1.5);
+          if (isSuper) { ctx.shadowBlur = 10; ctx.shadowColor = '#86efac'; }
+          // drip trail
+          const trailLen = r * 3.5;
+          const vGrad = ctx.createLinearGradient(-trailLen, 0, 0, 0);
+          vGrad.addColorStop(0, 'rgba(0,0,0,0)');
+          vGrad.addColorStop(1, col + '66');
+          ctx.fillStyle = vGrad;
+          ctx.beginPath(); ctx.ellipse(-trailLen * 0.5, 0, trailLen * 0.5, r * 0.3, 0, 0, 7); ctx.fill();
+          // main orb
+          const oGrad = ctx.createRadialGradient(-r * 0.25, -r * 0.25, r * 0.05, 0, 0, r);
+          oGrad.addColorStop(0, isSuper ? '#bbf7d0' : '#d1fae5');
+          oGrad.addColorStop(0.6, col);
+          oGrad.addColorStop(1, '#14532d');
+          ctx.fillStyle = oGrad; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill();
+          ctx.strokeStyle = '#166534'; ctx.lineWidth = 1; ctx.stroke();
+          if (isSuper) {
+            // skull cross
+            ctx.strokeStyle = '#15803d'; ctx.lineWidth = 1.2;
+            ctx.beginPath(); ctx.moveTo(-r * 0.5, 0); ctx.lineTo(r * 0.5, 0); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, -r * 0.5); ctx.lineTo(0, r * 0.5); ctx.stroke();
+          }
+          break;
+        }
+        // ── Railgun / Mass Driver ─────────────────────────────────────────────
+        case 'railgun': {
+          const len = CELL * (0.4 + p.level * 0.06);
+          const w = CELL * 0.05;
+          if (isSuper) { ctx.shadowBlur = 18; ctx.shadowColor = '#06b6d4'; }
+          // glow streak
+          const rGrad2 = ctx.createLinearGradient(-len * 0.6, 0, len * 0.5, 0);
+          rGrad2.addColorStop(0, 'rgba(0,0,0,0)');
+          rGrad2.addColorStop(0.4, col + '55');
+          rGrad2.addColorStop(1, '#ffffff');
+          ctx.strokeStyle = rGrad2; ctx.lineWidth = w * (isSuper ? 5 : 3);
+          ctx.beginPath(); ctx.moveTo(-len * 0.6, 0); ctx.lineTo(len * 0.5, 0); ctx.stroke();
+          // core slug
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath(); ctx.ellipse(0, 0, len * 0.3, w * (isSuper ? 2.5 : 1.8), 0, 0, 7); ctx.fill();
+          // cyan energy rings (super)
+          if (isSuper) {
+            ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+            for (let k = 0; k < 3; k++) {
+              ctx.beginPath(); ctx.arc(-len * 0.1 + k * w * 3, 0, w * 2 + k * 1, 0, 7); ctx.stroke();
+            }
+          }
+          break;
+        }
+        default: {
+          // fallback: simple dot
+          ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, sz, 0, 7); ctx.fill();
+          break;
+        }
+      }
+      ctx.restore();
+    }
   }
 
   function drawEffects(now) {
