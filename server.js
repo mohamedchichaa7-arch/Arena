@@ -5486,112 +5486,199 @@ const TD_MODES = {
 };
 const TD_MODE_KEYS = Object.keys(TD_MODES);
 const TD_CHAOS_TWISTS = [
-  { label:'Calm Wave',     hpMul:1,    speedMul:1,    rewardMul:1,   sizeMul:1 },
-  { label:'Swarm!',        hpMul:0.75, speedMul:1.05, rewardMul:0.9, sizeMul:1.6 },
-  { label:'Juggernauts',   hpMul:1.7,  speedMul:0.85, rewardMul:1.4, sizeMul:0.85 },
-  { label:'Frenzy',        hpMul:0.85, speedMul:1.55, rewardMul:1.1, sizeMul:1 },
-  { label:'Gilded Horde',  hpMul:1.25, speedMul:1,    rewardMul:1.9, sizeMul:1 },
-  { label:'Glass Cannons', hpMul:0.5,  speedMul:1.3,  rewardMul:0.8, sizeMul:1.3 },
+  { label:'Calm Wave',       hpMul:1,    speedMul:1,    rewardMul:1,   sizeMul:1 },
+  { label:'Swarm!',          hpMul:0.75, speedMul:1.05, rewardMul:0.9, sizeMul:1.8 },
+  { label:'Juggernauts',     hpMul:1.9,  speedMul:0.8,  rewardMul:1.5, sizeMul:0.8 },
+  { label:'Frenzy',          hpMul:0.8,  speedMul:1.7,  rewardMul:1.1, sizeMul:1 },
+  { label:'Gilded Horde',    hpMul:1.25, speedMul:1,    rewardMul:2.0, sizeMul:1 },
+  { label:'Glass Cannons',   hpMul:0.45, speedMul:1.5,  rewardMul:0.9, sizeMul:1.4 },
+  { label:'Iron Tide',       hpMul:1.5,  speedMul:1.1,  rewardMul:1.3, sizeMul:1.1 },
+  { label:'Blitz Storm',     hpMul:0.6,  speedMul:2.2,  rewardMul:0.85,sizeMul:1.3 },
+  { label:'Nightmare',       hpMul:2.5,  speedMul:1.1,  rewardMul:2.0, sizeMul:0.9 },
+  { label:'Phantom Army',    hpMul:1,    speedMul:1.2,  rewardMul:1.3, sizeMul:1,   typeOverride:'cloaker' },
+  { label:'Air Raid!',       hpMul:0.9,  speedMul:1.4,  rewardMul:1.1, sizeMul:2,   typeOverride:'flyer' },
+  { label:'Endless Tide',    hpMul:0.7,  speedMul:1,    rewardMul:0.8, sizeMul:3.0 },
+  { label:'Splitter Wave',   hpMul:1.1,  speedMul:1,    rewardMul:1.2, sizeMul:1,   typeOverride:'splitter' },
+  { label:'Regen Horde',     hpMul:1,    speedMul:0.9,  rewardMul:1.4, sizeMul:1.2, typeOverride:'regenerator' },
 ];
 
-// Enemy definitions. dmgClass on towers: 'physical' or 'magic'. armor reduces physical.
+// Enemy definitions. armor reduces physical, magicRes reduces magic (negative = weakness).
+// Special flags: flying (antiAir towers only), cloaked (reveals towers only),
+//   blink (teleports forward), regenHps (heals per sec), splitInto (spawns on death).
 const TD_ENEMIES = {
-  grunt:   { name: 'Grunt',   hp: 60,   speed: 1.7, armor: 0.0,  magicRes: 0.0, slowImmune: false, reward: 10, sendPts: 1,  baseDmg: 1 },
-  runner:  { name: 'Runner',  hp: 40,   speed: 3.4, armor: 0.0,  magicRes: 0.0, slowImmune: false, reward: 8,  sendPts: 1,  baseDmg: 1 },
-  brute:   { name: 'Brute',   hp: 240,  speed: 1.1, armor: 0.3,  magicRes: 0.0, slowImmune: false, reward: 25, sendPts: 3,  baseDmg: 1 },
-  armored: { name: 'Armored', hp: 150,  speed: 1.5, armor: 0.6,  magicRes: -0.3, slowImmune: false, reward: 20, sendPts: 3,  baseDmg: 1 },
-  phantom: { name: 'Phantom', hp: 110,  speed: 2.8, armor: 0.0,  magicRes: 0.0, slowImmune: true,  reward: 18, sendPts: 2,  baseDmg: 1 },
-  boss:    { name: 'Boss',    hp: 2600, speed: 0.85, armor: 0.4, magicRes: 0.4, slowImmune: false, reward: 100, sendPts: 10, baseDmg: 10 },
+  grunt:       { name:'Grunt',      hp:60,   speed:1.7,  armor:0.0,  magicRes:0.0,  slowImmune:false, reward:10,  sendPts:1,  baseDmg:1 },
+  runner:      { name:'Runner',     hp:40,   speed:3.4,  armor:0.0,  magicRes:0.0,  slowImmune:false, reward:8,   sendPts:1,  baseDmg:1 },
+  brute:       { name:'Brute',      hp:240,  speed:1.1,  armor:0.3,  magicRes:0.0,  slowImmune:false, reward:25,  sendPts:3,  baseDmg:1 },
+  armored:     { name:'Armored',    hp:150,  speed:1.5,  armor:0.6,  magicRes:-0.3, slowImmune:false, reward:20,  sendPts:3,  baseDmg:1 },
+  phantom:     { name:'Phantom',    hp:110,  speed:2.8,  armor:0.0,  magicRes:0.0,  slowImmune:true,  reward:18,  sendPts:2,  baseDmg:1 },
+  boss:        { name:'Boss',       hp:2600, speed:0.85, armor:0.4,  magicRes:0.4,  slowImmune:false, reward:100, sendPts:10, baseDmg:10 },
+  // New types
+  splitling:   { name:'Splitling',  hp:35,   speed:2.8,  armor:0.0,  magicRes:0.0,  slowImmune:false, reward:3,   sendPts:0,  baseDmg:1 },
+  splitter:    { name:'Splitter',   hp:280,  speed:1.3,  armor:0.2,  magicRes:0.0,  slowImmune:false, reward:30,  sendPts:4,  baseDmg:1, splitInto:['splitling','splitling','splitling'] },
+  cloaker:     { name:'Cloaker',    hp:120,  speed:2.1,  armor:0.0,  magicRes:0.2,  slowImmune:false, reward:22,  sendPts:3,  baseDmg:1, cloaked:true },
+  flyer:       { name:'Flyer',      hp:65,   speed:4.5,  armor:0.0,  magicRes:0.0,  slowImmune:true,  reward:14,  sendPts:2,  baseDmg:1, flying:true },
+  colossus:    { name:'Colossus',   hp:5500, speed:0.65, armor:0.6,  magicRes:0.4,  slowImmune:false, reward:200, sendPts:20, baseDmg:3 },
+  blinker:     { name:'Blinker',    hp:80,   speed:1.6,  armor:0.0,  magicRes:0.2,  slowImmune:true,  reward:24,  sendPts:3,  baseDmg:1, blink:true },
+  regenerator: { name:'Regen',      hp:400,  speed:1.1,  armor:0.25, magicRes:0.0,  slowImmune:false, reward:45,  sendPts:5,  baseDmg:1, regenHps:20 },
 };
 
 // Tower definitions per level (index 0 = level 1). cost = build/upgrade cost for that level.
 const TD_TOWERS = {
   arrow: {
-    name: 'Arrow', dmgClass: 'physical', behavior: 'single',
+    name: 'Arrow', dmgClass: 'physical', behavior: 'single', antiAir: true,
+    superName: 'Ballista',
     levels: [
-      { cost: 50, damage: 14, range: 3.0, fireMs: 480 },
-      { cost: 45, damage: 26, range: 3.3, fireMs: 420 },
-      { cost: 75, damage: 44, range: 3.6, fireMs: 350 },
+      { cost: 50,  damage: 14,   range: 3.0, fireMs: 480 },
+      { cost: 45,  damage: 26,   range: 3.3, fireMs: 420 },
+      { cost: 75,  damage: 44,   range: 3.6, fireMs: 350 },
+      { cost: 350, damage: 200,  range: 5.0, fireMs: 200 },
     ],
   },
   cannon: {
     name: 'Cannon', dmgClass: 'physical', behavior: 'splash',
+    superName: 'Siege Engine',
     levels: [
-      { cost: 100, damage: 45, range: 2.6, fireMs: 1300, splash: 1.3 },
-      { cost: 85,  damage: 80, range: 2.7, fireMs: 1200, splash: 1.5 },
+      { cost: 100, damage: 45,  range: 2.6, fireMs: 1300, splash: 1.3 },
+      { cost: 85,  damage: 80,  range: 2.7, fireMs: 1200, splash: 1.5 },
       { cost: 150, damage: 135, range: 2.9, fireMs: 1050, splash: 1.7 },
+      { cost: 400, damage: 420, range: 3.5, fireMs: 800,  splash: 2.8 },
     ],
   },
   frost: {
     name: 'Frost', dmgClass: 'none', behavior: 'frost',
+    superName: 'Blizzard',
     levels: [
       { cost: 80,  damage: 0, range: 2.8, fireMs: 700, slow: 0.4, slowMs: 2000 },
       { cost: 65,  damage: 0, range: 3.0, fireMs: 700, slow: 0.5, slowMs: 2000 },
       { cost: 110, damage: 0, range: 3.3, fireMs: 700, slow: 0.6, slowMs: 2500 },
+      { cost: 350, damage: 0, range: 5.0, fireMs: 500, slow: 0.8, slowMs: 4000 },
     ],
   },
   tesla: {
-    name: 'Tesla', dmgClass: 'magic', behavior: 'chain',
+    name: 'Tesla', dmgClass: 'magic', behavior: 'chain', antiAir: true,
+    superName: 'Storm Spire',
     levels: [
-      { cost: 150, damage: 24, range: 3.0, fireMs: 700, chains: 4 },
-      { cost: 115, damage: 38, range: 3.2, fireMs: 650, chains: 5 },
-      { cost: 185, damage: 58, range: 3.4, fireMs: 600, chains: 6 },
+      { cost: 150, damage: 24,  range: 3.0, fireMs: 700, chains: 4 },
+      { cost: 115, damage: 38,  range: 3.2, fireMs: 650, chains: 5 },
+      { cost: 185, damage: 58,  range: 3.4, fireMs: 600, chains: 6 },
+      { cost: 450, damage: 200, range: 4.5, fireMs: 380, chains: 16 },
     ],
   },
   inferno: {
     name: 'Inferno', dmgClass: 'magic', behavior: 'burn',
+    superName: 'Volcano',
     levels: [
       { cost: 120, damage: 0, range: 2.8, fireMs: 500, burn: 9,  burnMs: 3000 },
       { cost: 90,  damage: 0, range: 3.0, fireMs: 500, burn: 15, burnMs: 3000 },
       { cost: 150, damage: 0, range: 3.2, fireMs: 500, burn: 24, burnMs: 3000 },
+      { cost: 400, damage: 0, range: 4.2, fireMs: 300, burn: 90, burnMs: 4500 },
     ],
   },
   sniper: {
-    name: 'Sniper', dmgClass: 'physical', behavior: 'sniper',
+    name: 'Sniper', dmgClass: 'physical', behavior: 'sniper', antiAir: true, reveals: true,
+    superName: 'War Cannon',
     levels: [
-      { cost: 180, damage: 160, range: 8.0, fireMs: 3000 },
-      { cost: 140, damage: 300, range: 8.5, fireMs: 2600 },
-      { cost: 220, damage: 520, range: 9.5, fireMs: 2200 },
+      { cost: 180,  damage: 160,  range: 8.0,  fireMs: 3000 },
+      { cost: 140,  damage: 300,  range: 8.5,  fireMs: 2600 },
+      { cost: 220,  damage: 520,  range: 9.5,  fireMs: 2200 },
+      { cost: 550,  damage: 1800, range: 14.0, fireMs: 1500 },
+    ],
+  },
+  missile: {
+    name: 'Missile', dmgClass: 'physical', behavior: 'missile', antiAir: true,
+    superName: 'MLRS',
+    levels: [
+      { cost: 140, damage: 55,  range: 3.8, fireMs: 1200, splash: 0.9 },
+      { cost: 110, damage: 90,  range: 4.1, fireMs: 1050, splash: 1.1 },
+      { cost: 180, damage: 150, range: 4.4, fireMs: 900,  splash: 1.3 },
+      { cost: 450, damage: 500, range: 6.0, fireMs: 600,  splash: 2.2 },
+    ],
+  },
+  laser: {
+    name: 'Laser', dmgClass: 'true', behavior: 'laser', antiAir: true, reveals: true,
+    superName: 'Photon Cannon',
+    levels: [
+      { cost: 160, damage: 22,  range: 3.5, fireMs: 220 },
+      { cost: 130, damage: 38,  range: 3.8, fireMs: 200 },
+      { cost: 200, damage: 62,  range: 4.2, fireMs: 180 },
+      { cost: 500, damage: 180, range: 5.5, fireMs: 120 },
+    ],
+  },
+  venom: {
+    name: 'Venom', dmgClass: 'magic', behavior: 'venom',
+    superName: 'Plague Spire',
+    levels: [
+      { cost: 110, damage: 0, range: 2.7, fireMs: 600, venom: 10, venomMs: 4500 },
+      { cost: 90,  damage: 0, range: 3.0, fireMs: 550, venom: 17, venomMs: 5000 },
+      { cost: 145, damage: 0, range: 3.3, fireMs: 500, venom: 28, venomMs: 5500 },
+      { cost: 380, damage: 0, range: 5.0, fireMs: 350, venom: 100, venomMs: 8000 },
+    ],
+  },
+  railgun: {
+    name: 'Railgun', dmgClass: 'physical', behavior: 'railgun', antiAir: true,
+    superName: 'Mass Driver',
+    levels: [
+      { cost: 200, damage: 180,  range: 6.5,  fireMs: 3800 },
+      { cost: 175, damage: 340,  range: 7.5,  fireMs: 3200 },
+      { cost: 280, damage: 580,  range: 8.5,  fireMs: 2700 },
+      { cost: 600, damage: 2200, range: 12.0, fireMs: 1500 },
     ],
   },
 };
 
-// ── Per-tower perks ── purchasable modifiers that grant new abilities/stats.
-// A tower may own any/all of its three perks (each once).
 const TD_PERKS = {
   arrow: [
-    { id:'pierce', name:'Piercing Shot', icon:'➶', cost:120, desc:'Each shot strikes up to 3 enemies down the lane.' },
-    { id:'eagle',  name:'Eagle Eye',     icon:'👁', cost:140, desc:'+0.8 range · 25% chance for a triple-damage crit.' },
-    { id:'rapid',  name:'Rapid Fire',    icon:'💨', cost:130, desc:'Reload 35% faster.' },
+    { id:'pierce', name:'Piercing Shot',   icon:'➶', cost:120, desc:'Each shot strikes up to 3 enemies.' },
+    { id:'eagle',  name:'Eagle Eye',       icon:'👁', cost:140, desc:'+0.8 range · 25% chance for a triple-damage crit.' },
+    { id:'rapid',  name:'Rapid Fire',      icon:'💨', cost:130, desc:'Reload 35% faster.' },
   ],
   cannon: [
-    { id:'cluster', name:'Cluster Bombs', icon:'✸', cost:150, desc:'+0.9 splash radius · +15% damage.' },
-    { id:'siege',   name:'Siege Payload', icon:'🛠', cost:170, desc:'+60% damage to Brutes, Armored & Bosses.' },
-    { id:'napalm',  name:'Napalm',        icon:'🔥', cost:160, desc:'Blasts ignite everything they hit.' },
+    { id:'cluster', name:'Cluster Bombs',  icon:'✸',  cost:150, desc:'+0.9 splash radius · +15% damage.' },
+    { id:'siege',   name:'Siege Payload',  icon:'🛠', cost:170, desc:'+60% damage to Brutes, Armored & Bosses.' },
+    { id:'napalm',  name:'Napalm',         icon:'🔥', cost:160, desc:'Blasts ignite everything hit.' },
   ],
   frost: [
-    { id:'permafrost', name:'Permafrost', icon:'🧊', cost:120, desc:'Stronger slow that lasts far longer.' },
-    { id:'shatter',    name:'Shatter',    icon:'💔', cost:150, desc:'Slowed enemies take +25% damage from everything.' },
-    { id:'coldsnap',   name:'Cold Snap',  icon:'❄', cost:200, desc:'12% chance to freeze an enemy solid for 0.8s.' },
+    { id:'permafrost', name:'Permafrost',  icon:'🧊', cost:120, desc:'Stronger slow, lasts far longer.' },
+    { id:'shatter',    name:'Shatter',     icon:'💔', cost:150, desc:'Slowed enemies take +25% damage.' },
+    { id:'coldsnap',   name:'Cold Snap',   icon:'❄',  cost:200, desc:'12% chance to freeze for 0.8s.' },
   ],
   tesla: [
-    { id:'overload', name:'Overload',     icon:'⚡', cost:160, desc:'+2 chain jumps · +20% damage.' },
-    { id:'conduct',  name:'Conductor',    icon:'🔗', cost:170, desc:'Each chain jump deals 25% more than the last.' },
-    { id:'static',   name:'Static Field', icon:'🌀', cost:140, desc:'Struck enemies are slowed 25%.' },
+    { id:'overload', name:'Overload',      icon:'⚡', cost:160, desc:'+2 chain jumps · +20% damage.' },
+    { id:'conduct',  name:'Conductor',     icon:'🔗', cost:170, desc:'Each chain jump deals 25% more.' },
+    { id:'static',   name:'Static Field',  icon:'🌀', cost:140, desc:'Struck enemies are slowed 25%.' },
   ],
   inferno: [
-    { id:'incinerate', name:'Incinerate', icon:'☄', cost:180, desc:'+60% burn damage.' },
-    { id:'pyro',       name:'Pyromaniac', icon:'🎇', cost:130, desc:'Burn stacks to 5 and ignites two targets.' },
-    { id:'wildfire',   name:'Wildfire',   icon:'🌋', cost:160, desc:'Burns spread to a nearby enemy.' },
+    { id:'incinerate', name:'Incinerate',  icon:'☄',  cost:180, desc:'+60% burn damage.' },
+    { id:'pyro',       name:'Pyromaniac',  icon:'🎇', cost:130, desc:'Burn stacks to 5, ignites two targets.' },
+    { id:'wildfire',   name:'Wildfire',    icon:'🌋', cost:160, desc:'Burns spread to a nearby enemy.' },
   ],
   sniper: [
-    { id:'armorpierce', name:'Armor Piercing', icon:'🗡', cost:150, desc:'Shots ignore all armor.' },
-    { id:'execute',     name:'Executioner',    icon:'☠', cost:220, desc:'Instakill non-bosses under 18% HP · +40% vs bosses.' },
-    { id:'doubletap',   name:'Double Tap',     icon:'⏩', cost:200, desc:'Fires twice per shot.' },
+    { id:'armorpierce', name:'Armor Pierce', icon:'🗡', cost:150, desc:'Shots ignore all armor.' },
+    { id:'execute',     name:'Executioner',  icon:'☠',  cost:220, desc:'Instakill non-bosses under 18% HP · +40% vs bosses.' },
+    { id:'doubletap',   name:'Double Tap',   icon:'⏩', cost:200, desc:'Fires twice per shot.' },
+  ],
+  missile: [
+    { id:'warhead',  name:'Warhead',   icon:'💥', cost:160, desc:'+0.6 splash radius · +40% damage vs flying.' },
+    { id:'tracker',  name:'Tracker',   icon:'🔍', cost:140, desc:'+0.8 range · Missiles reveal & target cloakers.' },
+    { id:'barrage',  name:'Barrage',   icon:'🚀', cost:180, desc:'Fires 2 missiles simultaneously.' },
+  ],
+  laser: [
+    { id:'prismatic',  name:'Prismatic',   icon:'🌈', cost:180, desc:'Beam chains to 3 total enemies.' },
+    { id:'overcharge', name:'Overcharge',  icon:'🔴', cost:160, desc:'Every 5th shot deals triple damage.' },
+    { id:'blind',      name:'Blind',       icon:'🕶',  cost:150, desc:'Struck enemies are slowed 40% for 1.5s.' },
+  ],
+  venom: [
+    { id:'corrosive',  name:'Corrosive',   icon:'🧪', cost:150, desc:'Poisoned enemies take +30% physical damage.' },
+    { id:'plague',     name:'Plague',      icon:'☣',  cost:170, desc:'Venom spreads to 2 additional enemies.' },
+    { id:'neurotoxin', name:'Neurotoxin',  icon:'🧠', cost:140, desc:'Venom slows enemies to 20% movement speed.' },
+  ],
+  railgun: [
+    { id:'penetrator', name:'Penetrator',  icon:'⚫', cost:200, desc:'Shots ignore all armor.' },
+    { id:'charged',    name:'Charged',     icon:'⚡', cost:220, desc:'+80% damage · -30% fire rate.' },
+    { id:'emp',        name:'EMP Slug',    icon:'📡', cost:180, desc:'Hit enemies are stunned for 1.5s.' },
   ],
 };
 
-// Resolve a tower's effective stats + ability flags from its level and owned perks.
 function tdTowerStats(tower) {
   const def = TD_TOWERS[tower.type];
   const base = def.levels[tower.level - 1];
@@ -5599,44 +5686,63 @@ function tdTowerStats(tower) {
     damage: base.damage || 0, range: base.range, fireMs: base.fireMs,
     splash: base.splash || 0, slow: base.slow || 0, slowMs: base.slowMs || 0,
     chains: base.chains || 0, burn: base.burn || 0, burnMs: base.burnMs || 0,
+    venom: base.venom || 0, venomMs: base.venomMs || 0,
     pierce: 1, crit: 0, critMul: 3, vsBig: 1, napalm: false,
     shatter: false, freezeChance: 0, amplify: 1, staticSlow: 0,
     burnSpread: false, burnStacks: 3, burnTargets: 1,
     armorPierce: false, executeFrac: 0, bossBonus: 1, multishot: 1,
+    vsFlying: 1, reveal: !!(def.reveals),
+    laserChains: 1, overcharge: false, laserSlow: 0,
+    venomTargets: 1, venomStacks: 3, venomCorrosive: false, venomSpread: false, venomSlow: 0,
+    emp: false,
   };
   const perks = tower.perks || [];
   for (const id of perks) {
     switch (id) {
       case 'pierce': s.pierce = 3; break;
-      case 'eagle': s.range += 0.8; s.crit = 0.25; break;
-      case 'rapid': s.fireMs = Math.round(s.fireMs * 0.65); break;
+      case 'eagle':  s.range += 0.8; s.crit = 0.25; break;
+      case 'rapid':  s.fireMs = Math.round(s.fireMs * 0.65); break;
       case 'cluster': s.splash += 0.9; s.damage = Math.round(s.damage * 1.15); break;
-      case 'siege': s.vsBig = 1.6; break;
-      case 'napalm': s.napalm = true; break;
+      case 'siege':   s.vsBig = 1.6; break;
+      case 'napalm':  s.napalm = true; break;
       case 'permafrost': s.slow = Math.min(0.85, s.slow + 0.12); s.slowMs = Math.round(s.slowMs * 1.6); break;
-      case 'shatter': s.shatter = true; break;
-      case 'coldsnap': s.freezeChance = 0.12; break;
+      case 'shatter':    s.shatter = true; break;
+      case 'coldsnap':   s.freezeChance = 0.12; break;
       case 'overload': s.chains += 2; s.damage = Math.round(s.damage * 1.2); break;
-      case 'conduct': s.amplify = 1.25; break;
-      case 'static': s.staticSlow = 0.25; break;
+      case 'conduct':  s.amplify = 1.25; break;
+      case 'static':   s.staticSlow = 0.25; break;
       case 'incinerate': s.burn = Math.round(s.burn * 1.6); break;
-      case 'pyro': s.burnStacks = 5; s.burnTargets = 2; break;
-      case 'wildfire': s.burnSpread = true; break;
+      case 'pyro':       s.burnStacks = 5; s.burnTargets = 2; break;
+      case 'wildfire':   s.burnSpread = true; break;
       case 'armorpierce': s.armorPierce = true; break;
-      case 'execute': s.executeFrac = 0.18; s.bossBonus = 1.4; break;
-      case 'doubletap': s.multishot = 2; break;
+      case 'execute':     s.executeFrac = 0.18; s.bossBonus = 1.4; break;
+      case 'doubletap':   s.multishot = 2; break;
+      case 'warhead':  s.splash += 0.6; s.vsFlying = 1.4; break;
+      case 'tracker':  s.range += 0.8; s.fireMs = Math.round(s.fireMs * 0.85); s.reveal = true; break;
+      case 'barrage':  s.multishot = 2; break;
+      case 'prismatic':  s.laserChains = 3; break;
+      case 'overcharge': s.overcharge = true; break;
+      case 'blind':      s.laserSlow = 0.4; break;
+      case 'corrosive':  s.venomCorrosive = true; break;
+      case 'plague':     s.venomSpread = true; s.venomTargets = Math.max(s.venomTargets, 2); break;
+      case 'neurotoxin': s.venomSlow = 0.8; break;
+      case 'penetrator': s.armorPierce = true; break;
+      case 'charged':    s.damage = Math.round(s.damage * 1.8); s.fireMs = Math.round(s.fireMs * 1.3); break;
+      case 'emp':        s.emp = true; break;
     }
   }
   return s;
 }
 
-// Send-meter packages. Player must have >= pts; meter resets to 0 after a send.
 const TD_SEND_PACKAGES = [
-  { pts: 10, label: '5 Grunts',              enemies: ['grunt','grunt','grunt','grunt','grunt'] },
-  { pts: 20, label: '3 Runners',             enemies: ['runner','runner','runner'] },
-  { pts: 35, label: '2 Brutes',              enemies: ['brute','brute'] },
-  { pts: 50, label: '1 Armored + 3 Runners', enemies: ['armored','runner','runner','runner'] },
-  { pts: 75, label: '1 Boss',                enemies: ['boss'] },
+  { pts: 10,  label: '5 Grunts',               enemies: ['grunt','grunt','grunt','grunt','grunt'] },
+  { pts: 20,  label: '3 Runners + Flyer',       enemies: ['runner','runner','runner','flyer'] },
+  { pts: 30,  label: '2 Brutes',                enemies: ['brute','brute'] },
+  { pts: 40,  label: '3 Blinkers',              enemies: ['blinker','blinker','blinker'] },
+  { pts: 55,  label: '2 Cloakers + Armored',    enemies: ['cloaker','cloaker','armored'] },
+  { pts: 75,  label: 'Splitter + 2 Runners',    enemies: ['splitter','runner','runner'] },
+  { pts: 100, label: '1 Boss',                  enemies: ['boss'] },
+  { pts: 140, label: '1 Colossus',              enemies: ['colossus'] },
 ];
 
 // ── Lane-wide permanent upgrades (bought once each) ──────────────────────────
@@ -5781,30 +5887,65 @@ function tdGenerateWave(waveNum, opts) {
   const sc = n => Math.max(0, Math.round(n * sizeMul));
   const out = [];
   let t = 0;
-  const spawnGap = Math.max(300, 900 - waveNum * 45); // ms between spawns, faster over time
-  const grunts = sc(4 + Math.floor(waveNum * 1.5));
+  const spawnGap = Math.max(200, 850 - waveNum * 50); // scales harder; min 200ms
+
+  // Themed wave override (chaos mode twists)
+  if (opts.typeOverride) {
+    const count = sc(5 + Math.floor(waveNum * 1.8));
+    for (let i = 0; i < count; i++) { out.push({ type: opts.typeOverride, at: t }); t += spawnGap; }
+    if (opts.everyWaveBoss) { out.push({ type: 'boss', at: t + 500 }); }
+    else if (waveNum % 5 === 0) { out.push({ type: 'boss', at: t + 500 }); }
+    if (waveNum % 15 === 0 && waveNum > 0) out.push({ type: 'colossus', at: t + 1500 });
+    return out;
+  }
+
+  // Standard escalating composition
+  const grunts = sc(3 + Math.floor(waveNum * 1.2));
   for (let i = 0; i < grunts; i++) { out.push({ type: 'grunt', at: t }); t += spawnGap; }
   if (waveNum >= 2) {
-    const runners = sc(2 + Math.floor(waveNum * 0.8));
-    for (let i = 0; i < runners; i++) { out.push({ type: 'runner', at: t }); t += spawnGap * 0.7; }
+    const runners = sc(2 + Math.floor(waveNum * 0.7));
+    for (let i = 0; i < runners; i++) { out.push({ type: 'runner', at: t }); t += Math.round(spawnGap * 0.65); }
   }
   if (waveNum >= 3) {
     const brutes = sc(Math.floor(waveNum / 2));
-    for (let i = 0; i < brutes; i++) { out.push({ type: 'brute', at: t }); t += spawnGap * 1.4; }
+    for (let i = 0; i < brutes; i++) { out.push({ type: 'brute', at: t }); t += Math.round(spawnGap * 1.3); }
   }
   if (waveNum >= 4) {
     const armored = sc(Math.floor(waveNum / 3));
-    for (let i = 0; i < armored; i++) { out.push({ type: 'armored', at: t }); t += spawnGap * 1.2; }
+    for (let i = 0; i < armored; i++) { out.push({ type: 'armored', at: t }); t += Math.round(spawnGap * 1.1); }
   }
   if (waveNum >= 5) {
     const phantoms = sc(Math.floor(waveNum / 3));
     for (let i = 0; i < phantoms; i++) { out.push({ type: 'phantom', at: t }); t += spawnGap; }
+  }
+  if (waveNum >= 6) {
+    const flyers = sc(1 + Math.floor((waveNum - 6) * 0.6));
+    for (let i = 0; i < flyers; i++) { out.push({ type: 'flyer', at: t }); t += Math.round(spawnGap * 0.7); }
+  }
+  if (waveNum >= 7) {
+    const blinkers = sc(Math.floor((waveNum - 7) * 0.5 + 1));
+    for (let i = 0; i < blinkers; i++) { out.push({ type: 'blinker', at: t }); t += Math.round(spawnGap * 0.9); }
+  }
+  if (waveNum >= 8) {
+    const splitters = sc(Math.floor((waveNum - 8) * 0.4 + 1));
+    for (let i = 0; i < splitters; i++) { out.push({ type: 'splitter', at: t }); t += Math.round(spawnGap * 1.5); }
+  }
+  if (waveNum >= 9) {
+    const cloakers = sc(Math.floor((waveNum - 9) * 0.5 + 1));
+    for (let i = 0; i < cloakers; i++) { out.push({ type: 'cloaker', at: t }); t += spawnGap; }
+  }
+  if (waveNum >= 10) {
+    const regens = sc(Math.floor((waveNum - 10) * 0.4 + 1));
+    for (let i = 0; i < regens; i++) { out.push({ type: 'regenerator', at: t }); t += Math.round(spawnGap * 1.4); }
   }
   if (opts.everyWaveBoss) {
     const bosses = 1 + Math.floor(waveNum / 6);
     for (let i = 0; i < bosses; i++) { out.push({ type: 'boss', at: t + 500 + i * 1200 }); }
   } else if (waveNum % 5 === 0) {
     out.push({ type: 'boss', at: t + 500 });
+  }
+  if (waveNum % 15 === 0 && waveNum > 0) {
+    out.push({ type: 'colossus', at: t + 1500 });
   }
   return out;
 }
@@ -5888,7 +6029,7 @@ function tdStartLaneWave(room, pid) {
     lane.wave++;
     twist = td.mode.chaos ? TD_CHAOS_TWISTS[Math.floor(Math.random() * TD_CHAOS_TWISTS.length)] : null;
     const sizeMul = td.mode.sizeMul * (twist ? twist.sizeMul : 1);
-    comp = tdGenerateWave(lane.wave, { sizeMul, everyWaveBoss: td.mode.everyWaveBoss });
+    comp = tdGenerateWave(lane.wave, { sizeMul, everyWaveBoss: td.mode.everyWaveBoss, typeOverride: twist && twist.typeOverride });
     muls = {
       hp: td.mode.hpMul * (twist ? twist.hpMul : 1),
       spd: td.mode.speedMul * (twist ? twist.speedMul : 1),
@@ -5918,7 +6059,7 @@ function tdEndLaneWave(room, pid) {
   const nextWave = lane.wave + 1;
   const twist = td.mode.chaos ? TD_CHAOS_TWISTS[Math.floor(Math.random() * TD_CHAOS_TWISTS.length)] : null;
   const sizeMul = td.mode.sizeMul * (twist ? twist.sizeMul : 1);
-  const comp = tdGenerateWave(nextWave, { sizeMul, everyWaveBoss: td.mode.everyWaveBoss });
+  const comp = tdGenerateWave(nextWave, { sizeMul, everyWaveBoss: td.mode.everyWaveBoss, typeOverride: twist && twist.typeOverride });
   const muls = {
     hp: td.mode.hpMul * (twist ? twist.hpMul : 1),
     spd: td.mode.speedMul * (twist ? twist.speedMul : 1),
@@ -6067,13 +6208,18 @@ function tdSendEnemies(room, pid, packageIdx, targetId) {
 function tdSpawnEnemy(td, lane, type, sentBy, muls) {
   const def = TD_ENEMIES[type];
   const m = muls || {};
+  const now = Date.now();
   const hp = Math.max(1, Math.round(def.hp * (m.hp || 1)));
-  lane.enemies.push({
+  const e = {
     id: td.nextEnemyId++, type, hp, maxHp: hp,
     dist: 0, slowUntil: 0, slowFactor: 1, freezeUntil: 0, shatterUntil: 0,
     burns: [], sentBy: sentBy || null,
     spdMul: m.spd || 1, rewardMul: m.reward || 1, sendMul: m.send || 1,
-  });
+  };
+  if (def.blink) e.blinkNext = now + 1500 + Math.random() * 1000;
+  if (def.cloaked) e.cloaked = true;
+  if (def.flying) e.flying = true;
+  lane.enemies.push(e);
 }
 
 // Compute enemy world position (cell coords, floats) from path distance.
@@ -6090,8 +6236,12 @@ function tdEnemyPos(td, dist) {
 function tdDamageEnemy(enemy, amount, dmgClass) {
   const def = TD_ENEMIES[enemy.type];
   let mult = 1;
-  if (dmgClass === 'physical') mult = 1 - def.armor;
-  else if (dmgClass === 'magic') mult = 1 - def.magicRes; // magicRes can be negative (weakness)
+  if (dmgClass === 'physical') {
+    let eff = def.armor;
+    if (enemy.venomCorrosiveUntil && Date.now() < enemy.venomCorrosiveUntil) eff = Math.max(0, eff - 0.3);
+    mult = 1 - eff;
+  }
+  else if (dmgClass === 'magic') mult = 1 - def.magicRes;
   else if (dmgClass === 'true') mult = 1;
   let dealt = Math.max(0, amount * mult);
   if (enemy.shatterUntil && Date.now() < enemy.shatterUntil) dealt *= 1.25; // Shatter perk vulnerability
@@ -6143,28 +6293,33 @@ function tdTick(room) {
       lane.spawnQueue = remain;
     }
 
-    // Move enemies + burn DoT
+    // Move enemies + burn/venom DoT
+    const burnSpawns = [];
     const survivors = [];
     for (const e of lane.enemies) {
-      // burn stacks
+      const eDef = TD_ENEMIES[e.type];
+      // Burn / venom DoT ticks
       if (e.burns.length) {
         e.burns = e.burns.filter(b => now < b.until);
-        for (const b of e.burns) {
-          const dealt = tdDamageEnemy(e, b.dps * dt, 'magic');
-          if (dealt > 0) { /* burn damage, no event spam */ }
-        }
+        for (const b of e.burns) tdDamageEnemy(e, b.dps * dt, b.dmgClass || 'magic');
       }
-      if (e.hp <= 0) { tdOnKill(room, lane, e, events, pid); continue; }
-
-      const def = TD_ENEMIES[e.type];
+      // Regenerator heals
+      if (eDef.regenHps && e.hp > 0 && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + eDef.regenHps * dt);
+      if (e.hp <= 0) { tdOnKill(room, lane, e, events, pid, burnSpawns); continue; }
       const frozen = now < e.freezeUntil;
-      const slowed = now < e.slowUntil && !def.slowImmune;
+      const slowed = now < e.slowUntil && !eDef.slowImmune;
       const factor = frozen ? 0 : (slowed ? e.slowFactor : 1);
-      e.dist += def.speed * (e.spdMul || 1) * factor * dt;
-
+      e.dist += eDef.speed * (e.spdMul || 1) * factor * dt;
+      // Blinker teleport
+      if (eDef.blink && !frozen && e.hp > 0 && now >= (e.blinkNext || 0)) {
+        e.dist += 10 + Math.random() * 10;
+        e.blinkNext = now + 3000 + Math.random() * 2000;
+        const bp = tdEnemyPos(td, e.dist);
+        events.push({ ev: 'blink', pid, ex: bp.x, ey: bp.y });
+      }
       if (e.dist >= td.pathLen - 1) {
         // Reached base
-        lane.baseHp -= def.baseDmg;
+        lane.baseHp -= eDef.baseDmg;
         lane.damagedThisWave = true;
         events.push({ ev: 'reached', pid, etype: e.type });
         // Send rebate to whoever sent this enemy
@@ -6180,7 +6335,7 @@ function tdTick(room) {
       }
       survivors.push(e);
     }
-    lane.enemies = survivors;
+    lane.enemies = [...survivors, ...burnSpawns];
     if (!lane.alive) continue;
 
     // Towers fire
@@ -6205,20 +6360,21 @@ function tdTick(room) {
     }
 
     // Clean up enemies killed by towers
+    const towerSpawns = [];
     const after = [];
     for (const e of lane.enemies) {
-      if (e.hp <= 0) tdOnKill(room, lane, e, events, pid);
+      if (e.hp <= 0) tdOnKill(room, lane, e, events, pid, towerSpawns);
       else after.push(e);
     }
-    lane.enemies = after;
+    lane.enemies = [...after, ...towerSpawns];
 
     // Auto-send: fire automatically when meter threshold is reached
     const pws = room.players.get(pid);
     if (!pws || !pws._bot) { // human players only
       const as = lane.autoSend;
       if (as && as.enabled) {
-        let bestPkg = -1;
-        for (let i = 0; i < TD_SEND_PACKAGES.length; i++) if (lane.sendMeter >= TD_SEND_PACKAGES[i].pts && i <= as.packageIdx) bestPkg = i;
+        // Only fire when the meter reaches the exact configured package threshold
+        const bestPkg = (TD_SEND_PACKAGES[as.packageIdx] && lane.sendMeter >= TD_SEND_PACKAGES[as.packageIdx].pts) ? as.packageIdx : -1;
         if (bestPkg >= 0) {
           const targets = td.order.filter(q => q !== pid && td.lanes[q] && td.lanes[q].alive);
           if (targets.length) {
@@ -6259,7 +6415,8 @@ function tdTick(room) {
         return { i: e.id, t: e.type, x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100,
                  h: Math.max(0, Math.round(e.hp / e.maxHp * 100) / 100),
                  sl: now < e.slowUntil ? 1 : 0, bn: e.burns.length ? 1 : 0,
-                 fz: now < e.freezeUntil ? 1 : 0 };
+                 fz: now < e.freezeUntil ? 1 : 0,
+                 fl: e.flying ? 1 : 0, cl: e.cloaked ? 1 : 0 };
       }),
       upgrades: [...(lane.upgrades||[])],
       abilityOwned: [...(lane.abilityOwned||[])],
@@ -6280,19 +6437,22 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
   const inRange = [];
   for (const e of lane.enemies) {
     if (e.hp <= 0) continue;
+    if (e.flying && !def.antiAir) continue;    // only antiAir towers hit flyers
+    if (e.cloaked && !s.reveal) continue;      // only reveal towers hit cloakers
     const p = tdEnemyPos(td, e.dist);
     const d = Math.hypot(p.x - tower.x, p.y - tower.y);
     if (d <= s.range) inRange.push({ e, d, p });
   }
   if (!inRange.length) return false;
 
-  // Shared damage resolver applying big-target / armor-pierce / boss / execute / crit perks.
+  // Shared damage resolver
   const resolve = (e, amount, cls) => {
     let amt = amount;
-    if (s.vsBig > 1 && (e.type === 'brute' || e.type === 'armored' || e.type === 'boss')) amt *= s.vsBig;
-    if (e.type === 'boss' && s.bossBonus > 1) amt *= s.bossBonus;
+    if (s.vsBig > 1 && (e.type === 'brute' || e.type === 'armored' || e.type === 'boss' || e.type === 'colossus')) amt *= s.vsBig;
+    if ((e.type === 'boss' || e.type === 'colossus') && s.bossBonus > 1) amt *= s.bossBonus;
+    if (e.flying && s.vsFlying > 1) amt *= s.vsFlying;
     const useCls = (s.armorPierce && cls === 'physical') ? 'true' : cls;
-    if (s.executeFrac > 0 && e.type !== 'boss' && e.maxHp > 0 && (e.hp / e.maxHp) <= s.executeFrac) {
+    if (s.executeFrac > 0 && e.type !== 'boss' && e.type !== 'colossus' && e.maxHp > 0 && (e.hp / e.maxHp) <= s.executeFrac) {
       const d = e.hp; e.hp = 0; return d;
     }
     let dealt = tdDamageEnemy(e, amt, useCls);
@@ -6301,7 +6461,6 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
   };
 
   if (def.behavior === 'frost') {
-    // Slow everything in range, deal no damage
     for (const { e } of inRange) {
       if (s.freezeChance > 0 && Math.random() < s.freezeChance && !TD_ENEMIES[e.type].slowImmune) e.freezeUntil = now + 800;
       e.slowUntil = now + s.slowMs;
@@ -6313,7 +6472,6 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
   }
 
   if (def.behavior === 'burn') {
-    // Apply burn stacks to the furthest-along enemy/enemies
     const ordered = inRange.slice().sort((a, b) => b.e.dist - a.e.dist);
     const targets = ordered.slice(0, s.burnTargets);
     for (const c of targets) {
@@ -6327,10 +6485,7 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
       let near = null, nd = 1.8;
       for (const c of inRange) {
         if (tset.has(c.e.id)) continue;
-        for (const tg of targets) {
-          const dd = Math.hypot(c.p.x - tg.p.x, c.p.y - tg.p.y);
-          if (dd < nd) { nd = dd; near = c; }
-        }
+        for (const tg of targets) { const dd = Math.hypot(c.p.x - tg.p.x, c.p.y - tg.p.y); if (dd < nd) { nd = dd; near = c; } }
       }
       if (near && near.e.burns.length < s.burnStacks) near.e.burns.push({ dps: s.burn, until: now + s.burnMs });
     }
@@ -6338,7 +6493,6 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
   }
 
   if (def.behavior === 'chain') {
-    // Hit up to `chains` enemies, closest first; each jump amplified by Conductor perk
     inRange.sort((a, b) => a.d - b.d);
     const hits = inRange.slice(0, s.chains);
     const chainPts = [{ x: tower.x, y: tower.y }];
@@ -6358,7 +6512,6 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
   }
 
   if (def.behavior === 'splash') {
-    // Target furthest-along, splash around impact
     let target = inRange[0];
     for (const c of inRange) if (c.e.dist > target.e.dist) target = c;
     const cx = target.p.x, cy = target.p.y;
@@ -6376,7 +6529,6 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
   }
 
   if (def.behavior === 'sniper') {
-    // Highest-HP enemy in range; Double Tap fires twice
     let target = inRange[0];
     for (const c of inRange) if (c.e.hp > target.e.hp) target = c;
     let total = 0;
@@ -6385,7 +6537,89 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
     return true;
   }
 
-  // single (arrow): furthest-along enemy/enemies (Piercing hits several)
+  // ── New tower behaviors ──
+  if (def.behavior === 'missile') {
+    for (let k = 0; k < (s.multishot || 1); k++) {
+      // Prioritize flying targets (furthest first), fallback to any furthest enemy
+      let target = null;
+      for (const c of inRange) if (c.e.flying && c.e.hp > 0 && (!target || c.e.dist > target.e.dist)) target = c;
+      if (!target) { target = inRange[0]; for (const c of inRange) if (c.e.dist > target.e.dist) target = c; }
+      const cx = target.p.x, cy = target.p.y;
+      for (const e of lane.enemies) {
+        if (e.hp <= 0) continue;
+        const p = tdEnemyPos(td, e.dist);
+        if (Math.hypot(p.x - cx, p.y - cy) <= s.splash) {
+          events.push({ ev: 'hit', pid, ex: p.x, ey: p.y, dmg: Math.round(resolve(e, s.damage, def.dmgClass)) });
+        }
+      }
+      events.push({ ev: 'splash', pid, x: cx, y: cy, r: s.splash, tx: tower.x, ty: tower.y });
+    }
+    return true;
+  }
+
+  if (def.behavior === 'laser') {
+    inRange.sort((a, b) => a.d - b.d);
+    const targets = inRange.slice(0, s.laserChains);
+    let dmgMul = 1;
+    if (s.overcharge) { tower.shotCount = (tower.shotCount || 0) + 1; if (tower.shotCount % 5 === 0) dmgMul = 3; }
+    for (const c of targets) {
+      const dealt = tdDamageEnemy(c.e, s.damage * dmgMul, 'true');
+      if (s.laserSlow > 0 && !TD_ENEMIES[c.e.type].slowImmune) {
+        c.e.slowUntil = Math.max(c.e.slowUntil, now + 1500);
+        c.e.slowFactor = Math.min(c.e.slowFactor || 1, 1 - s.laserSlow);
+      }
+      events.push({ ev: 'snipe', pid, tx: tower.x, ty: tower.y, ex: c.p.x, ey: c.p.y, dmg: Math.round(dealt) });
+    }
+    return true;
+  }
+
+  if (def.behavior === 'venom') {
+    const ordered = inRange.slice().sort((a, b) => b.e.dist - a.e.dist);
+    const targets = ordered.slice(0, s.venomTargets);
+    for (const c of targets) {
+      const e = c.e;
+      const venomStacks = e.burns.filter(b => b.isVenom);
+      if (venomStacks.length < s.venomStacks) {
+        e.burns.push({ dps: s.venom, until: now + s.venomMs, isVenom: true });
+      } else {
+        venomStacks.sort((a, b) => a.until - b.until);
+        venomStacks[0].until = now + s.venomMs; venomStacks[0].dps = s.venom;
+      }
+      if (s.venomSlow > 0 && !TD_ENEMIES[e.type].slowImmune) {
+        e.slowUntil = Math.max(e.slowUntil, now + s.venomMs);
+        e.slowFactor = Math.min(e.slowFactor || 1, 1 - s.venomSlow);
+      }
+      if (s.venomCorrosive) e.venomCorrosiveUntil = now + s.venomMs;
+      events.push({ ev: 'venom', pid, tx: tower.x, ty: tower.y, ex: c.p.x, ey: c.p.y });
+    }
+    if (s.venomSpread) {
+      const tset = new Set(targets.map(c => c.e.id));
+      let spread = 0;
+      for (const c of inRange) {
+        if (tset.has(c.e.id) || spread >= 2) continue;
+        const vs = c.e.burns.filter(b => b.isVenom);
+        if (vs.length < s.venomStacks) { c.e.burns.push({ dps: s.venom, until: now + s.venomMs, isVenom: true }); spread++; }
+      }
+    }
+    return true;
+  }
+
+  if (def.behavior === 'railgun') {
+    // Fires through ALL enemies in range (furthest first); reuses chain visual
+    const ordered = inRange.slice().sort((a, b) => b.e.dist - a.e.dist);
+    const pts = [{ x: tower.x, y: tower.y }];
+    for (const c of ordered) {
+      if (c.e.hp <= 0) continue;
+      const dealt = resolve(c.e, s.damage, def.dmgClass);
+      if (s.emp && !TD_ENEMIES[c.e.type].slowImmune) c.e.freezeUntil = Math.max(c.e.freezeUntil, now + 1500);
+      pts.push({ x: c.p.x, y: c.p.y });
+      events.push({ ev: 'hit', pid, ex: c.p.x, ey: c.p.y, dmg: Math.round(dealt), tx: tower.x, ty: tower.y });
+    }
+    events.push({ ev: 'chain', pid, pts });
+    return true;
+  }
+
+  // single (arrow): furthest-along enemies (Piercing hits several)
   const ordered = inRange.slice().sort((a, b) => b.e.dist - a.e.dist).slice(0, s.pierce);
   for (const c of ordered) {
     const dealt = resolve(c.e, s.damage, def.dmgClass);
@@ -6394,15 +6628,35 @@ function tdTowerFire(td, lane, tower, def, s, now, events, pid) {
   return true;
 }
 
-function tdOnKill(room, lane, enemy, events, pid) {
+function tdOnKill(room, lane, enemy, events, pid, spawned) {
   const def = TD_ENEMIES[enemy.type];
   const reward = Math.round(def.reward * (enemy.rewardMul || 1));
   lane.gold += reward + ((lane.amps && lane.amps.killGold) || 0);
   lane.killsThisWave++;
-  const sendPts = Math.max(1, Math.round(def.sendPts * (enemy.sendMul || 1) * ((lane.amps && lane.amps.sendAmp) || 1)));
-  lane.sendMeter += sendPts;
+  const rawPts = def.sendPts * (enemy.sendMul || 1) * ((lane.amps && lane.amps.sendAmp) || 1);
+  if (rawPts > 0) lane.sendMeter += Math.max(1, Math.round(rawPts));
   const p = tdEnemyPos(room.td, enemy.dist);
   events.push({ ev: 'kill', pid, etype: enemy.type, ex: p.x, ey: p.y, reward });
+  // Split on death
+  if (def.splitInto && spawned) {
+    for (const stype of def.splitInto) {
+      const sdef = TD_ENEMIES[stype];
+      if (!sdef) continue;
+      const hp = Math.max(1, Math.round(sdef.hp));
+      const ne = {
+        id: room.td.nextEnemyId++, type: stype, hp, maxHp: hp,
+        dist: Math.max(0, enemy.dist - 0.5), slowUntil: 0, slowFactor: 1,
+        freezeUntil: 0, shatterUntil: 0, burns: [],
+        sentBy: enemy.sentBy, spdMul: enemy.spdMul || 1,
+        rewardMul: enemy.rewardMul || 1, sendMul: 0,
+      };
+      if (sdef.blink) ne.blinkNext = Date.now() + 1500;
+      if (sdef.cloaked) ne.cloaked = true;
+      if (sdef.flying) ne.flying = true;
+      spawned.push(ne);
+    }
+    events.push({ ev: 'split', pid, ex: p.x, ey: p.y });
+  }
 }
 
 function tdEliminatePlayer(room, pid, isDisconnect) {

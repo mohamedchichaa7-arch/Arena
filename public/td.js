@@ -34,38 +34,56 @@
   const COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b'];
 
   const TOWER_DEFS = {
-    arrow:   { name: 'Arrow',   icon: '🏹', color: '#22c55e', dmgClass: 'physical', desc: 'Fast · single',
-      levels: [{ cost: 50, damage: 14, range: 3.0, fireMs: 480 }, { cost: 45, damage: 26, range: 3.3, fireMs: 420 }, { cost: 75, damage: 44, range: 3.6, fireMs: 350 }] },
-    cannon:  { name: 'Cannon',  icon: '💣', color: '#f97316', dmgClass: 'physical', desc: 'AoE splash',
-      levels: [{ cost: 100, damage: 45, range: 2.6, fireMs: 1300, splash: 1.3 }, { cost: 85, damage: 80, range: 2.7, fireMs: 1200, splash: 1.5 }, { cost: 150, damage: 135, range: 2.9, fireMs: 1050, splash: 1.7 }] },
-    frost:   { name: 'Frost',   icon: '❄️', color: '#38bdf8', dmgClass: 'none', desc: 'Slows enemies',
-      levels: [{ cost: 80, damage: 0, range: 2.8, fireMs: 700, slow: 0.4, slowMs: 2000 }, { cost: 65, damage: 0, range: 3.0, fireMs: 700, slow: 0.5, slowMs: 2000 }, { cost: 110, damage: 0, range: 3.3, fireMs: 700, slow: 0.6, slowMs: 2500 }] },
-    tesla:   { name: 'Tesla',   icon: '⚡', color: '#a78bfa', dmgClass: 'magic', desc: 'Chain lightning',
-      levels: [{ cost: 150, damage: 24, range: 3.0, fireMs: 700, chains: 4 }, { cost: 115, damage: 38, range: 3.2, fireMs: 650, chains: 5 }, { cost: 185, damage: 58, range: 3.4, fireMs: 600, chains: 6 }] },
-    inferno: { name: 'Inferno', icon: '🔥', color: '#ef4444', dmgClass: 'magic', desc: 'Burn (stacks 3)',
-      levels: [{ cost: 120, damage: 0, range: 2.8, fireMs: 500, burn: 9, burnMs: 3000 }, { cost: 90, damage: 0, range: 3.0, fireMs: 500, burn: 15, burnMs: 3000 }, { cost: 150, damage: 0, range: 3.2, fireMs: 500, burn: 24, burnMs: 3000 }] },
-    sniper:  { name: 'Sniper',  icon: '🎯', color: '#e2e8f0', dmgClass: 'physical', desc: 'Huge range',
-      levels: [{ cost: 180, damage: 160, range: 8.0, fireMs: 3000 }, { cost: 140, damage: 300, range: 8.5, fireMs: 2600 }, { cost: 220, damage: 520, range: 9.5, fireMs: 2200 }] },
+    arrow:   { name: 'Arrow',   superName: 'Ballista',      icon: '🏹', color: '#22c55e', dmgClass: 'physical', antiAir: true,  desc: 'Fast · single · hits flyers',
+      levels: [{ cost: 50, damage: 14, range: 3.0, fireMs: 480 }, { cost: 45, damage: 26, range: 3.3, fireMs: 420 }, { cost: 75, damage: 44, range: 3.6, fireMs: 350 }, { cost: 350, damage: 200, range: 5.0, fireMs: 200 }] },
+    cannon:  { name: 'Cannon',  superName: 'Siege Engine',  icon: '💣', color: '#f97316', dmgClass: 'physical',               desc: 'AoE splash',
+      levels: [{ cost: 100, damage: 45, range: 2.6, fireMs: 1300, splash: 1.3 }, { cost: 85, damage: 80, range: 2.7, fireMs: 1200, splash: 1.5 }, { cost: 150, damage: 135, range: 2.9, fireMs: 1050, splash: 1.7 }, { cost: 400, damage: 420, range: 3.5, fireMs: 800, splash: 2.8 }] },
+    frost:   { name: 'Frost',   superName: 'Blizzard',      icon: '❄️', color: '#38bdf8', dmgClass: 'none',                   desc: 'Slows enemies',
+      levels: [{ cost: 80, damage: 0, range: 2.8, fireMs: 700, slow: 0.4, slowMs: 2000 }, { cost: 65, damage: 0, range: 3.0, fireMs: 700, slow: 0.5, slowMs: 2000 }, { cost: 110, damage: 0, range: 3.3, fireMs: 700, slow: 0.6, slowMs: 2500 }, { cost: 350, damage: 0, range: 5.0, fireMs: 500, slow: 0.8, slowMs: 4000 }] },
+    tesla:   { name: 'Tesla',   superName: 'Storm Spire',   icon: '⚡', color: '#a78bfa', dmgClass: 'magic',   antiAir: true,  desc: 'Chain lightning · hits flyers',
+      levels: [{ cost: 150, damage: 24, range: 3.0, fireMs: 700, chains: 4 }, { cost: 115, damage: 38, range: 3.2, fireMs: 650, chains: 5 }, { cost: 185, damage: 58, range: 3.4, fireMs: 600, chains: 6 }, { cost: 450, damage: 200, range: 4.5, fireMs: 380, chains: 16 }] },
+    inferno: { name: 'Inferno', superName: 'Volcano',       icon: '🔥', color: '#ef4444', dmgClass: 'magic',                  desc: 'Burn (stacks 3)',
+      levels: [{ cost: 120, damage: 0, range: 2.8, fireMs: 500, burn: 9, burnMs: 3000 }, { cost: 90, damage: 0, range: 3.0, fireMs: 500, burn: 15, burnMs: 3000 }, { cost: 150, damage: 0, range: 3.2, fireMs: 500, burn: 24, burnMs: 3000 }, { cost: 400, damage: 0, range: 4.2, fireMs: 300, burn: 90, burnMs: 4500 }] },
+    sniper:  { name: 'Sniper',  superName: 'War Cannon',    icon: '🎯', color: '#e2e8f0', dmgClass: 'physical', antiAir: true, reveals: true, desc: 'Huge range · reveals cloakers',
+      levels: [{ cost: 180, damage: 160, range: 8.0, fireMs: 3000 }, { cost: 140, damage: 300, range: 8.5, fireMs: 2600 }, { cost: 220, damage: 520, range: 9.5, fireMs: 2200 }, { cost: 550, damage: 1800, range: 14.0, fireMs: 1500 }] },
+    missile: { name: 'Missile', superName: 'MLRS',          icon: '🚀', color: '#f59e0b', dmgClass: 'physical', antiAir: true, desc: 'Splash · anti-air',
+      levels: [{ cost: 140, damage: 55, range: 3.8, fireMs: 1200, splash: 0.9 }, { cost: 110, damage: 90, range: 4.1, fireMs: 1050, splash: 1.1 }, { cost: 180, damage: 150, range: 4.4, fireMs: 900, splash: 1.3 }, { cost: 450, damage: 500, range: 6.0, fireMs: 600, splash: 2.2 }] },
+    laser:   { name: 'Laser',   superName: 'Photon Cannon', icon: '🔴', color: '#f43f5e', dmgClass: 'true',     antiAir: true, reveals: true, desc: 'True dmg · fast · reveals',
+      levels: [{ cost: 160, damage: 22, range: 3.5, fireMs: 220 }, { cost: 130, damage: 38, range: 3.8, fireMs: 200 }, { cost: 200, damage: 62, range: 4.2, fireMs: 180 }, { cost: 500, damage: 180, range: 5.5, fireMs: 120 }] },
+    venom:   { name: 'Venom',   superName: 'Plague Spire',  icon: '🧪', color: '#84cc16', dmgClass: 'magic',                  desc: 'Poison DoT stack',
+      levels: [{ cost: 110, damage: 0, range: 2.7, fireMs: 600, venom: 10, venomMs: 4500 }, { cost: 90, damage: 0, range: 3.0, fireMs: 550, venom: 17, venomMs: 5000 }, { cost: 145, damage: 0, range: 3.3, fireMs: 500, venom: 28, venomMs: 5500 }, { cost: 380, damage: 0, range: 5.0, fireMs: 350, venom: 100, venomMs: 8000 }] },
+    railgun: { name: 'Railgun', superName: 'Mass Driver',   icon: '🔫', color: '#06b6d4', dmgClass: 'physical', antiAir: true, desc: 'Pierces all · huge range',
+      levels: [{ cost: 200, damage: 180, range: 6.5, fireMs: 3800 }, { cost: 175, damage: 340, range: 7.5, fireMs: 3200 }, { cost: 280, damage: 580, range: 8.5, fireMs: 2700 }, { cost: 600, damage: 2200, range: 12.0, fireMs: 1500 }] },
   };
-  const TOWER_ORDER = ['arrow', 'cannon', 'frost', 'tesla', 'inferno', 'sniper'];
+  const TOWER_ORDER = ['arrow','cannon','frost','tesla','inferno','sniper','missile','laser','venom','railgun'];
 
   const ENEMY_DEFS = {
-    grunt:   { name: 'Grunt',   color: '#9ca3af', r: 0.30, shape: 'circle' },
-    runner:  { name: 'Runner',  color: '#fde047', r: 0.24, shape: 'tri' },
-    brute:   { name: 'Brute',   color: '#b45309', r: 0.40, shape: 'square' },
-    armored: { name: 'Armored', color: '#64748b', r: 0.36, shape: 'hex' },
-    phantom: { name: 'Phantom', color: '#c084fc', r: 0.32, shape: 'diamond' },
-    boss:    { name: 'Boss',    color: '#dc2626', r: 0.52, shape: 'circle' },
+    grunt:       { name: 'Grunt',      color: '#9ca3af', r: 0.30, shape: 'circle' },
+    runner:      { name: 'Runner',     color: '#fde047', r: 0.24, shape: 'tri' },
+    brute:       { name: 'Brute',      color: '#b45309', r: 0.40, shape: 'square' },
+    armored:     { name: 'Armored',    color: '#64748b', r: 0.36, shape: 'hex' },
+    phantom:     { name: 'Phantom',    color: '#c084fc', r: 0.32, shape: 'diamond' },
+    boss:        { name: 'Boss',       color: '#dc2626', r: 0.52, shape: 'circle' },
+    splitter:    { name: 'Splitter',   color: '#f97316', r: 0.44, shape: 'star' },
+    splitling:   { name: 'Splitling',  color: '#fb923c', r: 0.22, shape: 'circle' },
+    cloaker:     { name: 'Cloaker',    color: '#818cf8', r: 0.30, shape: 'diamond', cloaked: true },
+    flyer:       { name: 'Flyer',      color: '#67e8f9', r: 0.26, shape: 'tri',    flying: true },
+    colossus:    { name: 'Colossus',   color: '#b91c1c', r: 0.60, shape: 'hex' },
+    blinker:     { name: 'Blinker',    color: '#a3e635', r: 0.28, shape: 'diamond' },
+    regenerator: { name: 'Regen',      color: '#4ade80', r: 0.42, shape: 'square' },
   };
 
   const SEND_PACKAGES = [
-    { pts: 10, label: '5 Grunts' },
-    { pts: 20, label: '3 Runners' },
-    { pts: 35, label: '2 Brutes' },
-    { pts: 50, label: '1 Armored + 3 Runners' },
-    { pts: 75, label: '1 Boss' },
+    { pts: 10,  label: '5 Grunts' },
+    { pts: 20,  label: '3 Runners + Flyer' },
+    { pts: 30,  label: '2 Brutes' },
+    { pts: 40,  label: '3 Blinkers' },
+    { pts: 55,  label: '2 Cloakers + Armored' },
+    { pts: 75,  label: 'Splitter + 2 Runners' },
+    { pts: 100, label: '1 Boss' },
+    { pts: 140, label: '1 Colossus' },
   ];
-  const SEND_MAX = 75;
+  const SEND_MAX = 140;
 
   // ── Game modes (mirror server) ──
   const MODES = {
@@ -118,34 +136,54 @@
   // ── Per-tower perks (mirror server) ──
   const PERKS = {
     arrow: [
-      { id: 'pierce', name: 'Piercing Shot', icon: '➶', cost: 120, desc: 'Each shot strikes up to 3 enemies down the lane.' },
-      { id: 'eagle',  name: 'Eagle Eye',     icon: '👁', cost: 140, desc: '+0.8 range · 25% chance for a triple-damage crit.' },
-      { id: 'rapid',  name: 'Rapid Fire',    icon: '💨', cost: 130, desc: 'Reload 35% faster.' },
+      { id: 'pierce', name: 'Piercing Shot',   icon: '➶', cost: 120, desc: 'Each shot strikes up to 3 enemies.' },
+      { id: 'eagle',  name: 'Eagle Eye',        icon: '👁', cost: 140, desc: '+0.8 range · 25% chance for a triple-damage crit.' },
+      { id: 'rapid',  name: 'Rapid Fire',       icon: '💨', cost: 130, desc: 'Reload 35% faster.' },
     ],
     cannon: [
-      { id: 'cluster', name: 'Cluster Bombs', icon: '✸', cost: 150, desc: '+0.9 splash radius · +15% damage.' },
-      { id: 'siege',   name: 'Siege Payload', icon: '🛠', cost: 170, desc: '+60% damage to Brutes, Armored & Bosses.' },
-      { id: 'napalm',  name: 'Napalm',        icon: '🔥', cost: 160, desc: 'Blasts ignite everything they hit.' },
+      { id: 'cluster', name: 'Cluster Bombs',   icon: '✸', cost: 150, desc: '+0.9 splash radius · +15% damage.' },
+      { id: 'siege',   name: 'Siege Payload',   icon: '🛠', cost: 170, desc: '+60% damage to Brutes, Armored & Bosses.' },
+      { id: 'napalm',  name: 'Napalm',          icon: '🔥', cost: 160, desc: 'Blasts ignite everything hit.' },
     ],
     frost: [
-      { id: 'permafrost', name: 'Permafrost', icon: '🧊', cost: 120, desc: 'Stronger slow that lasts far longer.' },
-      { id: 'shatter',    name: 'Shatter',    icon: '💔', cost: 150, desc: 'Slowed enemies take +25% damage from everything.' },
-      { id: 'coldsnap',   name: 'Cold Snap',  icon: '❄', cost: 200, desc: '12% chance to freeze an enemy solid for 0.8s.' },
+      { id: 'permafrost', name: 'Permafrost',   icon: '🧊', cost: 120, desc: 'Stronger slow, lasts far longer.' },
+      { id: 'shatter',    name: 'Shatter',       icon: '💔', cost: 150, desc: 'Slowed enemies take +25% damage.' },
+      { id: 'coldsnap',   name: 'Cold Snap',     icon: '❄', cost: 200, desc: '12% chance to freeze for 0.8s.' },
     ],
     tesla: [
-      { id: 'overload', name: 'Overload',     icon: '⚡', cost: 160, desc: '+2 chain jumps · +20% damage.' },
-      { id: 'conduct',  name: 'Conductor',    icon: '🔗', cost: 170, desc: 'Each chain jump deals 25% more than the last.' },
-      { id: 'static',   name: 'Static Field', icon: '🌀', cost: 140, desc: 'Struck enemies are slowed 25%.' },
+      { id: 'overload', name: 'Overload',        icon: '⚡', cost: 160, desc: '+2 chain jumps · +20% damage.' },
+      { id: 'conduct',  name: 'Conductor',       icon: '🔗', cost: 170, desc: 'Each chain jump deals 25% more.' },
+      { id: 'static',   name: 'Static Field',    icon: '🌀', cost: 140, desc: 'Struck enemies are slowed 25%.' },
     ],
     inferno: [
-      { id: 'incinerate', name: 'Incinerate', icon: '☄', cost: 180, desc: '+60% burn damage.' },
-      { id: 'pyro',       name: 'Pyromaniac', icon: '🎇', cost: 130, desc: 'Burn stacks to 5 and ignites two targets.' },
-      { id: 'wildfire',   name: 'Wildfire',   icon: '🌋', cost: 160, desc: 'Burns spread to a nearby enemy.' },
+      { id: 'incinerate', name: 'Incinerate',    icon: '☄', cost: 180, desc: '+60% burn damage.' },
+      { id: 'pyro',       name: 'Pyromaniac',    icon: '🎇', cost: 130, desc: 'Burn stacks to 5, ignites two targets.' },
+      { id: 'wildfire',   name: 'Wildfire',      icon: '🌋', cost: 160, desc: 'Burns spread to a nearby enemy.' },
     ],
     sniper: [
-      { id: 'armorpierce', name: 'Armor Piercing', icon: '🗡', cost: 150, desc: 'Shots ignore all armor.' },
-      { id: 'execute',     name: 'Executioner',    icon: '☠', cost: 220, desc: 'Instakill non-bosses under 18% HP · +40% vs bosses.' },
-      { id: 'doubletap',   name: 'Double Tap',     icon: '⏩', cost: 200, desc: 'Fires twice per shot.' },
+      { id: 'armorpierce', name: 'Armor Pierce', icon: '🗡', cost: 150, desc: 'Shots ignore all armor.' },
+      { id: 'execute',     name: 'Executioner',  icon: '☠', cost: 220, desc: 'Instakill non-bosses under 18% HP · +40% vs bosses.' },
+      { id: 'doubletap',   name: 'Double Tap',   icon: '⏩', cost: 200, desc: 'Fires twice per shot.' },
+    ],
+    missile: [
+      { id: 'warhead',  name: 'Warhead',          icon: '💥', cost: 160, desc: '+0.6 splash · +40% damage vs flying.' },
+      { id: 'tracker',  name: 'Tracker',          icon: '🔍', cost: 140, desc: '+0.8 range · reveals & targets cloakers.' },
+      { id: 'barrage',  name: 'Barrage',          icon: '🚀', cost: 180, desc: 'Fires 2 missiles simultaneously.' },
+    ],
+    laser: [
+      { id: 'prismatic',  name: 'Prismatic',      icon: '🌈', cost: 180, desc: 'Beam chains to 3 total enemies.' },
+      { id: 'overcharge', name: 'Overcharge',     icon: '🔴', cost: 160, desc: 'Every 5th shot deals triple damage.' },
+      { id: 'blind',      name: 'Blind',          icon: '🕶',  cost: 150, desc: 'Struck enemies are slowed 40% for 1.5s.' },
+    ],
+    venom: [
+      { id: 'corrosive',  name: 'Corrosive',      icon: '🧪', cost: 150, desc: 'Poisoned enemies take +30% physical damage.' },
+      { id: 'plague',     name: 'Plague',         icon: '☣', cost: 170, desc: 'Venom spreads to 2 additional enemies.' },
+      { id: 'neurotoxin', name: 'Neurotoxin',     icon: '🧠', cost: 140, desc: 'Venom slows enemies to 20% movement speed.' },
+    ],
+    railgun: [
+      { id: 'penetrator', name: 'Penetrator',     icon: '⚫', cost: 200, desc: 'Shots ignore all armor.' },
+      { id: 'charged',    name: 'Charged',        icon: '⚡', cost: 220, desc: '+80% damage · -30% fire rate.' },
+      { id: 'emp',        name: 'EMP Slug',       icon: '📡', cost: 180, desc: 'Hit enemies are stunned for 1.5s.' },
     ],
   };
 
@@ -165,6 +203,7 @@
   let upgradePanel = null; // will be set after DOM build
 
   let selectedShopTower = null;   // tower type to place
+  let myReveals = false;          // true if local player has a sniper/laser/tracker tower
   let selectedTowerId = null;     // placed tower selected for panel
   let hoverCell = null;
   let prevHp = 20;
@@ -461,6 +500,11 @@
         else buf.set(e.i, { fx: e.x, fy: e.y, tx: e.x, ty: e.y, at: now, h: e.h, sl: e.sl, bn: e.bn, fz: e.fz, t: e.t });
       }
       for (const id of [...buf.keys()]) if (!seen.has(id)) buf.delete(id);
+      // copy fl/cl into interpolation buffer
+      for (const e of lane.enemies) {
+        const cur = buf.get(e.i);
+        if (cur) { cur.fl = e.fl; cur.cl = e.cl; }
+      }
     }
 
     // My HUD
@@ -477,6 +521,8 @@
       if (me.abilityCooldownMs) myAbilityCooldownMs = me.abilityCooldownMs;
       if (me.abilityActiveMs)   myAbilityActiveMs   = me.abilityActiveMs;
       if (me.autoSend)          myAutoSend          = me.autoSend;
+      // Update myReveals: true if any tower has antiAir reveals flag
+      myReveals = (me.towers || []).some(t => TOWER_DEFS[t.type] && TOWER_DEFS[t.type].reveals);
       refreshUpgradePanel();
       refreshAbilityPanel();
       refreshSkipButton();
@@ -510,6 +556,12 @@
       effects.push({ kind: 'frost', x: ev.tx, y: ev.ty, until: now + 220 });
     } else if (ev.ev === 'burn') {
       effects.push({ kind: 'burn', x: ev.ex, y: ev.ey, until: now + 260 });
+    } else if (ev.ev === 'venom') {
+      effects.push({ kind: 'venom', x: ev.ex, y: ev.ey, until: now + 280 });
+    } else if (ev.ev === 'blink') {
+      effects.push({ kind: 'blink', x: ev.ex, y: ev.ey, until: now + 350 });
+    } else if (ev.ev === 'split') {
+      effects.push({ kind: 'split', x: ev.ex, y: ev.ey, until: now + 400 });
     } else if (ev.ev === 'kill') {
       const d = ENEMY_DEFS[ev.etype];
       effects.push({ kind: 'death', x: ev.ex, y: ev.ey, color: d ? d.color : '#fff', until: now + 300 });
@@ -745,14 +797,24 @@
 
   function drawTower(t) {
     const def = TOWER_DEFS[t.type];
+    const isSuper = t.level >= 4;
     const cx = (t.x + 0.5) * CELL, cy = (t.y + 0.5) * CELL;
+    // Super glow ring
+    if (isSuper) {
+      ctx.save();
+      ctx.shadowBlur = 14; ctx.shadowColor = '#fbbf24';
+      ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(cx, cy, CELL * 0.48, 0, 7); ctx.stroke();
+      ctx.restore();
+    }
     ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.arc(cx, cy + 2, CELL * 0.42, 0, 7); ctx.fill();
-    ctx.fillStyle = def.color; ctx.beginPath(); ctx.arc(cx, cy, CELL * 0.40, 0, 7); ctx.fill();
+    ctx.fillStyle = isSuper ? '#fef08a' : def.color; ctx.beginPath(); ctx.arc(cx, cy, CELL * 0.40, 0, 7); ctx.fill();
     ctx.fillStyle = '#0a0a1a'; ctx.beginPath(); ctx.arc(cx, cy, CELL * 0.30, 0, 7); ctx.fill();
     ctx.font = `${CELL * 0.42}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(def.icon, cx, cy + 1);
-    // level pips
-    for (let i = 0; i < t.level; i++) { ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(cx - CELL * 0.25 + i * 6, cy - CELL * 0.35, 2.2, 0, 7); ctx.fill(); }
+    // level pips (gold for super)
+    const pipColor = isSuper ? '#f59e0b' : '#fbbf24';
+    for (let i = 0; i < Math.min(t.level, 4); i++) { ctx.fillStyle = pipColor; ctx.beginPath(); ctx.arc(cx - CELL * 0.25 + i * 6, cy - CELL * 0.35, 2.2, 0, 7); ctx.fill(); }
     // perk markers (purple ring + count)
     const pk = (t.perks || []).length;
     if (pk) {
@@ -763,8 +825,17 @@
 
   function drawEnemy(e, now) {
     const d = ENEMY_DEFS[e.t]; if (!d) return;
+    // Cloaked enemies only render for the local player who has a reveal tower
+    // (server still sends them; we just show them faintly so the cloaked player can see)
+    const isCloaked = e.cl && !myReveals;
+    if (isCloaked && !myReveals) {
+      // Draw as very faint ghost so it's not invisible to the attacker
+      // (the server only sends cloaked enemies to the lane owner)
+    }
     const x = lerpX(e), y = lerpY(e);
     const cx = (x + 0.5) * CELL, cy = (y + 0.5) * CELL, r = d.r * CELL;
+    ctx.save();
+    if (e.cl) ctx.globalAlpha = 0.3;  // cloaked: semi-transparent
     // body
     ctx.fillStyle = d.color;
     ctx.beginPath();
@@ -773,13 +844,21 @@
     else if (d.shape === 'tri') { ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy + r); ctx.lineTo(cx - r, cy + r); ctx.closePath(); }
     else if (d.shape === 'diamond') { ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy); ctx.closePath(); }
     else if (d.shape === 'hex') { for (let i = 0; i < 6; i++) { const a = Math.PI / 3 * i - Math.PI / 6; const px = cx + r * Math.cos(a), py = cy + r * Math.sin(a); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } ctx.closePath(); }
+    else if (d.shape === 'star') {
+      // 4-point star (splitter)
+      for (let i = 0; i < 8; i++) { const a = Math.PI / 4 * i - Math.PI / 2; const rad = (i % 2 === 0) ? r : r * 0.45; const px = cx + rad * Math.cos(a), py = cy + rad * Math.sin(a); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+      ctx.closePath();
+    }
     ctx.fill();
     ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1.5; ctx.stroke();
+    // Flying halo
+    if (e.fl) { ctx.strokeStyle = '#67e8f9'; ctx.lineWidth = 1.5; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.arc(cx, cy - r * 0.15, r * 1.35, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
     // status tints
     if (e.fz) { ctx.fillStyle = 'rgba(125,211,252,0.55)'; ctx.beginPath(); ctx.arc(cx, cy, r + 3, 0, 7); ctx.fill(); ctx.strokeStyle = '#e0f2fe'; ctx.lineWidth = 1.5; ctx.stroke(); }
     else if (e.sl) { ctx.fillStyle = 'rgba(56,189,248,0.35)'; ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, 7); ctx.fill(); }
     if (e.bn) { ctx.fillStyle = 'rgba(239,68,68,0.3)'; ctx.beginPath(); ctx.arc(cx, cy - r, 2.5, 0, 7); ctx.fill(); }
-    // hp bar
+    ctx.restore();
+    // hp bar (always opaque)
     const bw = r * 2;
     ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(cx - bw / 2, cy - r - 7, bw, 4);
     ctx.fillStyle = e.h > 0.5 ? '#22c55e' : e.h > 0.25 ? '#f59e0b' : '#ef4444';
@@ -797,6 +876,9 @@
       else if (f.kind === 'chain') { ctx.strokeStyle = '#a78bfa'; ctx.lineWidth = 2; ctx.globalAlpha = life / 160; ctx.beginPath(); for (let j = 0; j < f.pts.length; j++) { const px = (f.pts[j].x + 0.5) * CELL, py = (f.pts[j].y + 0.5) * CELL; j ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } ctx.stroke(); ctx.globalAlpha = 1; }
       else if (f.kind === 'frost') { ctx.strokeStyle = `rgba(56,189,248,${life / 220})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc((f.x + 0.5) * CELL, (f.y + 0.5) * CELL, CELL * 2.8 * (1 - life / 220), 0, 7); ctx.stroke(); }
       else if (f.kind === 'burn') { ctx.fillStyle = `rgba(239,68,68,${life / 260})`; ctx.font = `${CELL * 0.5}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🔥', (f.x + 0.5) * CELL, (f.y + 0.5) * CELL); }
+      else if (f.kind === 'venom') { ctx.fillStyle = `rgba(132,204,22,${life / 280})`; ctx.font = `${CELL * 0.45}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('☣', (f.x + 0.5) * CELL, (f.y + 0.5) * CELL); }
+      else if (f.kind === 'blink') { const p = 1 - life / 350; ctx.strokeStyle = `rgba(163,230,53,${1 - p})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc((f.x + 0.5) * CELL, (f.y + 0.5) * CELL, CELL * (0.5 + p * 0.8), 0, 7); ctx.stroke(); }
+      else if (f.kind === 'split') { const p = 1 - life / 400; for (let k = 0; k < 3; k++) { const a = k / 3 * Math.PI * 2; ctx.fillStyle = `rgba(249,115,22,${1 - p})`; ctx.beginPath(); ctx.arc((f.x + 0.5) * CELL + Math.cos(a) * p * CELL * 0.8, (f.y + 0.5) * CELL + Math.sin(a) * p * CELL * 0.8, 4, 0, 7); ctx.fill(); } }
       else if (f.kind === 'death') { const p = 1 - life / 300; ctx.fillStyle = f.color; ctx.globalAlpha = 1 - p; for (let k = 0; k < 6; k++) { const a = k / 6 * 7; ctx.beginPath(); ctx.arc((f.x + 0.5) * CELL + Math.cos(a) * p * 14, (f.y + 0.5) * CELL + Math.sin(a) * p * 14, 3, 0, 7); ctx.fill(); } ctx.globalAlpha = 1; }
       else if (f.kind === 'breach') { ctx.fillStyle = `rgba(239,68,68,${life / 400 * 0.4})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
     }
@@ -998,21 +1080,25 @@
 
   function openTowerPanel(t) {
     const def = TOWER_DEFS[t.type];
+    const maxLevel = def.levels.length; // 4 with super
+    const isSuper = t.level >= maxLevel;
     const lvl = def.levels[t.level - 1];
-    const next = def.levels[t.level]; // may be undefined
+    const next = def.levels[t.level]; // may be undefined at max
+    const displayName = isSuper ? `⭐ ${def.superName || def.name}` : def.name;
     const refund = Math.floor(t.invested * 0.6);
     const owned = t.perks || [];
-    let statsHtml = `<div>Damage: ${lvl.damage || (lvl.burn ? lvl.burn + '/s burn' : lvl.slow ? (lvl.slow * 100) + '% slow' : '—')}</div>`;
+    let statsHtml = `<div>Damage: ${lvl.damage || (lvl.burn ? lvl.burn + '/s burn' : lvl.venom ? lvl.venom + '/s venom' : lvl.slow ? (lvl.slow * 100) + '% slow' : '—')}</div>`;
     statsHtml += `<div>Range: ${lvl.range.toFixed(1)} · Rate: ${(1000 / lvl.fireMs).toFixed(2)}/s</div>`;
     statsHtml += `<div>Type: ${def.dmgClass}</div>`;
     if (next) {
-      const dmgFrom = lvl.damage || lvl.burn || (lvl.slow ? lvl.slow * 100 : 0);
-      const dmgTo = next.damage || next.burn || (next.slow ? next.slow * 100 : 0);
-      statsHtml += `<div class="up">⬆ Lvl ${t.level + 1}: dmg ${dmgFrom}→${dmgTo}, range ${lvl.range.toFixed(1)}→${next.range.toFixed(1)}</div>`;
+      const dmgFrom = lvl.damage || lvl.burn || lvl.venom || (lvl.slow ? lvl.slow * 100 : 0);
+      const dmgTo   = next.damage || next.burn || next.venom || (next.slow ? next.slow * 100 : 0);
+      const upgradeLabel = t.level === maxLevel - 1 ? `★ SUPER (${def.superName || 'Max'})` : `Lv ${t.level + 1}`;
+      statsHtml += `<div class="up">⬆ ${upgradeLabel}: dmg ${dmgFrom}→${dmgTo}, range ${lvl.range.toFixed(1)}→${next.range.toFixed(1)}</div>`;
     }
     let actions = '';
-    if (next) actions += `<button class="btn btn-sm btn-upgrade" id="tpUpgrade">⬆ ${next.cost}g</button>`;
-    else actions += `<button class="btn btn-sm" disabled>MAX</button>`;
+    if (next) actions += `<button class="btn btn-sm btn-upgrade" id="tpUpgrade">⬆ ${next.cost}g${t.level === maxLevel - 1 ? ' ★' : ''}</button>`;
+    else actions += `<button class="btn btn-sm" disabled>⭐ SUPER</button>`;
     actions += `<button class="btn btn-sm btn-sell" id="tpSell">Sell ${refund}g</button>`;
     // Perk shop
     const perks = PERKS[t.type] || [];
@@ -1023,7 +1109,8 @@
       perkHtml += `<button class="perk${have ? ' owned' : ''}${(!have && !afford) ? ' cant' : ''}" data-perk="${pk.id}" ${have ? 'disabled' : ''} title="${escapeHtml(pk.name)} — ${escapeHtml(pk.desc)}"><span class="pk-ic">${pk.icon}</span><span class="pk-nm">${escapeHtml(pk.name)}</span><span class="pk-cost">${have ? '✓ owned' : pk.cost + 'g'}</span></button>`;
     }
     perkHtml += '</div>';
-    towerPanel.innerHTML = `<div class="tp-head">${def.icon} ${def.name}<span class="tp-lvl">Lv ${t.level}/3</span></div><div class="tp-stats">${statsHtml}</div><div class="tp-actions">${actions}<button class="btn btn-sm btn-close-tp" id="tpClose">✕</button></div>${perkHtml}`;
+    const lvlLabel = isSuper ? `<span class="tp-lvl super">⭐ SUPER</span>` : `<span class="tp-lvl">Lv ${t.level}/${maxLevel}</span>`;
+    towerPanel.innerHTML = `<div class="tp-head">${def.icon} ${displayName}${lvlLabel}</div><div class="tp-stats">${statsHtml}</div><div class="tp-actions">${actions}<button class="btn btn-sm btn-close-tp" id="tpClose">✕</button></div>${perkHtml}`;
     // position near tower
     const rect = canvas.getBoundingClientRect();
     const wrapRect = canvas.parentElement.getBoundingClientRect();

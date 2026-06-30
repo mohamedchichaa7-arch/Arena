@@ -74,6 +74,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .tower-panel{position:absolute;z-index:10;width:228px;background:var(--surface);border:1px solid rgba(124,58,237,.3);border-radius:12px;padding:.7rem;box-shadow:0 10px 40px rgba(0,0,0,.6)}
 .tp-head{display:flex;align-items:center;gap:.4rem;font-family:'Orbitron',sans-serif;font-size:.8rem;margin-bottom:.4rem}
 .tp-lvl{font-size:.55rem;color:var(--accent2);margin-left:auto}
+.tp-lvl.super{color:#fbbf24;font-weight:700;font-size:.6rem;text-shadow:0 0 6px #fbbf24}
 .tp-stats{font-size:.68rem;color:var(--text-dim);display:flex;flex-direction:column;gap:.15rem;margin-bottom:.5rem}
 .tp-stats .up{color:var(--success)}
 .tp-actions{display:flex;gap:.4rem}
