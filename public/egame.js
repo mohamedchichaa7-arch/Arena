@@ -378,7 +378,7 @@
 
   function updateInfoBar() {
     infoRound.textContent = round + '/2';
-    infoTurn.textContent  = turn + '/4';
+    infoTurn.textContent  = turn + '/5';
     const sideEl = infoSide;
     sideEl.textContent = mySide ? mySide.toUpperCase() : '—';
     sideEl.className   = 'info-value ' + (mySide || '');

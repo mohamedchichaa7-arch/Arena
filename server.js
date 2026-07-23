@@ -2571,11 +2571,10 @@ function resolveEGameTurn(room) {
   const played = eg.cardsPlayed.get(p1);
   eg.turn++;
 
-  // Round ends if: a special card was played OR 4 cards played each (1 left per player)
-  const specialPlayed = c1 === 'emperor' || c1 === 'slave' || c2 === 'emperor' || c2 === 'slave';
-  const isRoundOver   = specialPlayed || played >= 4;
+  // Round ends only after ALL 5 cards have been played (last pair always gets matched)
+  const isRoundOver = played >= 5;
   // Game = 2 rounds total (each player plays both sides once)
-  const isGameOver    = isRoundOver && eg.round >= 2;
+  const isGameOver  = isRoundOver && eg.round >= 2;
 
   // Send eg-reveal to both players
   for (const pid of eg.players) {
