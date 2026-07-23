@@ -431,6 +431,16 @@ body::before {
 .sudoku-cell.selected   { background-color: rgba(124,58,237,.22) !important; box-shadow: inset 0 0 0 2px var(--accent-g); transform: scale(1.02); z-index: 2; }
 .sudoku-cell.conflict   { background-color: var(--conflict-bg) !important; box-shadow: inset 0 0 0 1.5px rgba(239,68,68,.6); }
 .sudoku-cell.locked     { pointer-events: none; opacity: .7; }
+.sudoku-cell.line-complete {
+  pointer-events: none;
+  background-color: rgba(6,182,212,.08) !important;
+  box-shadow: inset 0 0 0 1.5px rgba(6,182,212,.35);
+  cursor: default;
+}
+.sudoku-cell.line-complete .cell-digit {
+  color: var(--accent2-g) !important;
+  text-shadow: 0 0 8px rgba(6,182,212,.5);
+}
 
 .cell-digit {
   font-family: 'Inter', sans-serif;

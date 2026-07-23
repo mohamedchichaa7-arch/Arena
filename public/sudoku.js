@@ -275,7 +275,7 @@ function updateConflicts() {
 // ─── DIGIT INPUT ──────────────────────────────────────────────────────────────
 function enterDigit(digit) {
   if (selectedCell<0||gamePhase!=='playing') return;
-  if (given[selectedCell]) return;
+  if (given[selectedCell]||completedCells.has(selectedCell)) return;
   if (notesMode) { enterNote(digit); return; }
   if (grid[selectedCell]===digit) return;
   pushUndo();
@@ -301,7 +301,7 @@ function enterDigit(digit) {
 
 function eraseCell() {
   if (selectedCell<0||gamePhase!=='playing') return;
-  if (given[selectedCell]) return;
+  if (given[selectedCell]||completedCells.has(selectedCell)) return;
   if (!grid[selectedCell]&&!notes[selectedCell].size) return;
   pushUndo();
   const cell=getCellEl(selectedCell);
@@ -312,7 +312,7 @@ function eraseCell() {
 
 // ─── NOTES ────────────────────────────────────────────────────────────────────
 function enterNote(digit) {
-  if (selectedCell<0||given[selectedCell]||grid[selectedCell]!==0) return;
+  if (selectedCell<0||given[selectedCell]||completedCells.has(selectedCell)||grid[selectedCell]!==0) return;
   if (!timerStarted) startTimer();
   pushUndo();
   const ns=notes[selectedCell];
@@ -340,21 +340,29 @@ function autoRemoveNotes(idx, digit) {
 }
 
 // ─── COMPLETION CHECKS ────────────────────────────────────────────────────────
+function lockCells(cells) {
+  cells.forEach(i => {
+    completedCells.add(i);
+    const c = getCellEl(i); if (c) { c.classList.add('line-complete'); c.classList.remove('selected','highlight','same-digit'); }
+  });
+  if (selectedCell >= 0 && completedCells.has(selectedCell)) { selectedCell = -1; updateHighlights(); }
+}
+
 function checkCompletions(idx) {
   const row=Math.floor(idx/9), col=idx%9;
   const br=Math.floor(row/3)*3, bc=Math.floor(col/3)*3;
   const boxKey=`${br},${bc}`;
   if (!completedBoxes.has(boxKey)) {
     const cells=[]; for (let r=br;r<br+3;r++) for (let c=bc;c<bc+3;c++) cells.push(r*9+c);
-    if (cells.every(i=>grid[i]&&grid[i]===solution[i])) { completedBoxes.add(boxKey); animateBoxComplete(cells); }
+    if (cells.every(i=>grid[i]&&grid[i]===solution[i])) { completedBoxes.add(boxKey); animateBoxComplete(cells); setTimeout(()=>lockCells(cells), 800); }
   }
   if (!completedRows.has(row)) {
     const cells=Array.from({length:9},(_,c)=>row*9+c);
-    if (cells.every(i=>grid[i]&&grid[i]===solution[i])) { completedRows.add(row); animateRowComplete(row); }
+    if (cells.every(i=>grid[i]&&grid[i]===solution[i])) { completedRows.add(row); animateRowComplete(row); setTimeout(()=>lockCells(cells), 500); }
   }
   if (!completedCols.has(col)) {
     const cells=Array.from({length:9},(_,r)=>r*9+col);
-    if (cells.every(i=>grid[i]&&grid[i]===solution[i])) { completedCols.add(col); animateColComplete(col); }
+    if (cells.every(i=>grid[i]&&grid[i]===solution[i])) { completedCols.add(col); animateColComplete(col); setTimeout(()=>lockCells(cells), 500); }
   }
 }
 
@@ -709,7 +717,7 @@ function handleMsg(msg) {
       hintsRemaining=cfg.hints; hintsUsed=0; errorCount=0; isAssisted=false;
       elapsedSeconds=0; timerStarted=false; timerInterval=null;
       undoStack=[]; redoStack=[]; selectedCell=-1; notesMode=false;
-      prevConflicts=new Set(); completedBoxes=new Set(); completedRows=new Set(); completedCols=new Set();
+      prevConflicts=new Set(); completedBoxes=new Set(); completedRows=new Set(); completedCols=new Set(); completedCells=new Set();
       lastReportedFilled=-1;
 
       updateDiffBadge(); updateHintUI();
