@@ -84,6 +84,7 @@ let prevConflicts  = new Set();
 let completedBoxes = new Set();
 let completedRows  = new Set();
 let completedCols  = new Set();
+let completedCells = new Set();   // cells that belong to a fully-solved row/col/box
 
 // ─── SEEDED PRNG (mulberry32 — same as maze.js) ───────────────────────────────
 function mulberry32(seed) {
