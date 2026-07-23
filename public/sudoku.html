@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Sudoku — Game Arena</title>
+  <link rel="stylesheet" href="sudoku.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ── SIDEBAR ─────────────────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h3>Players</h3>
+      <span class="player-count" id="playerCount">0</span>
+    </div>
+    <div class="player-grid" id="playerList"></div>
+
+    <div class="sidebar-config" id="sidebarConfig" style="display:none">
+      <div class="config-label">Difficulty</div>
+      <div class="diff-pills" id="diffPills">
+        <button class="diff-pill active" data-diff="easy">🟢 Easy</button>
+        <button class="diff-pill" data-diff="medium">🟡 Medium</button>
+        <button class="diff-pill" data-diff="hard">🔴 Hard</button>
+        <button class="diff-pill" data-diff="expert">💀 Expert</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN CONTENT ────────────────────────────────────────────────────── -->
+  <main class="main-content">
+    <header class="game-header">
+      <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+      <button class="btn btn-mobile-toggle" id="btnToggleSidebar" title="Players">👥</button>
+      <h1 class="logo logo-sm">🔢 SUDOKU</h1>
+      <span class="room-badge" id="roomBadge"></span>
+      <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+    </header>
+
+    <!-- Lobby controls (host: Start button; guest: waiting) -->
+    <div class="controls" id="controls">
+      <button class="btn btn-primary" id="btnStart" style="display:none">▶ Start Game</button>
+      <span class="waiting-text" id="waitingText" style="display:none">Waiting for host to start…</span>
+    </div>
+
+    <div class="status" id="status">Connecting…</div>
+
+    <!-- Countdown overlay (shown over game area during countdown) -->
+    <div class="countdown-overlay" id="countdownOverlay" style="display:none">
+      <div class="countdown-number" id="countdownNumber">3</div>
+      <div class="countdown-diff" id="countdownDiff"></div>
+    </div>
+
+    <!-- Game area (hidden until puzzle is delivered) -->
+    <div id="gameArea" style="display:none">
+      <div class="game-info-bar">
+        <span class="diff-badge" id="diffBadge"></span>
+        <div class="timer-wrap">
+          <span class="timer-display" id="timerDisplay">0:00</span>
+          <button class="timer-toggle" id="btnTimerToggle" title="Toggle timer">👁</button>
+        </div>
+        <div class="hint-counter">💡 <span id="hintsLeft">2</span></div>
+      </div>
+
+      <div class="game-body">
+        <div class="grid-wrap">
+          <div class="sudoku-grid" id="sudokuGrid"></div>
+          <canvas class="confetti-canvas" id="confettiCanvas"></canvas>
+          <!-- Generating spinner (inside grid area) -->
+          <div class="grid-generating" id="gridGenerating" style="display:none">
+            <div class="sk-spinner"></div>
+            <p>Generating puzzle…</p>
+          </div>
+        </div>
+
+        <div class="game-controls">
+          <div class="action-bar">
+            <button class="action-btn" id="btnUndo" title="Undo (Ctrl+Z)">↩ Undo</button>
+            <button class="action-btn" id="btnRedo" title="Redo (Ctrl+Y)">↪ Redo</button>
+            <button class="action-btn" id="btnHint" title="Hint (H)">💡 Hint</button>
+          </div>
+          <div class="numpad" id="numpad"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ── RESULT OVERLAY ──────────────────────────────────────────────────────── -->
+<div class="sk-overlay" id="resultOverlay" style="display:none">
+  <div class="result-card">
+    <div class="result-icon" id="resultIcon"></div>
+    <h2 class="result-title" id="resultTitle"></h2>
+    <div class="result-body" id="resultBody"></div>
+    <div class="result-actions">
+      <button class="btn btn-back-lobby" id="btnBackToLobby">← Back to Lobby</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── RULES OVERLAY ───────────────────────────────────────────────────────── -->
+<div class="sk-overlay rules-overlay" id="rulesOverlay" style="display:none">
+  <div class="rules-card">
+    <h2>📜 Competitive Sudoku</h2>
+    <ul>
+      <li>All players solve the <strong>same puzzle</strong> — generated from a shared seed</li>
+      <li>Fill every row, column, and 3×3 box with <strong>1–9</strong> (no repeats)</li>
+      <li><strong>First to complete</strong> wins — others are cut off immediately</li>
+      <li>Click a cell, then press <strong>1–9</strong> or use the on-screen numpad</li>
+      <li>Press <strong>N</strong> or the Notes button to toggle pencil-mark mode</li>
+      <li>Press <strong>H</strong> or the Hint button for a reveal (limited per game)</li>
+      <li><strong>Ctrl+Z / Ctrl+Y</strong> — Undo / Redo</li>
+      <li><strong>Arrow keys</strong> move cell selection</li>
+    </ul>
+    <button class="btn btn-primary" id="btnCloseRules">Close</button>
+  </div>
+</div>
+
+<script src="sudoku.js"></script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Ball Escape — Game Arena</title>
+  <link rel="stylesheet" href="ballescape.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+  <div class="be-layout">
+    <header class="game-header">
+      <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+      <h1 class="logo logo-sm">⚫ BALL ESCAPE</h1>
+      <div class="be-header-right">
+        <div class="be-currency-bar">
+          <span class="be-gold-hdr">🪙 <span id="goldHdr">0</span></span>
+          <span class="be-gem-hdr">💎 <span id="gemHdr">0</span></span>
+        </div>
+        <span class="be-saved-flash" id="savedFlash"></span>
+      </div>
+    </header>
+
+    <div class="be-main" id="beMain">
+      <!-- Always-on canvas (background + gameplay) -->
+      <canvas id="beCanvas"></canvas>
+
+      <!-- ── HUD (active during play) ────────────────────────── -->
+      <div class="be-hud" id="beHud" style="display:none">
+        <div class="be-hud-top">
+          <div class="be-hud-chip" id="hudLevel">Lv 1</div>
+          <div class="be-hud-chip" id="hudRings">Ring 1/3</div>
+          <div class="be-hud-chip" id="hudTimer">0:00</div>
+          <div class="be-hud-chip be-hud-par" id="hudPar"></div>
+          <button class="btn btn-sm be-pause-btn" id="btnPause">⏸</button>
+        </div>
+        <div class="be-combo-wrap" id="comboWrap" style="opacity:0">
+          <div class="be-combo-text" id="comboText">×1</div>
+        </div>
+        <div class="be-ability-bar" id="abilityBar"></div>
+        <!-- XP bar -->
+        <div class="be-xp-row">
+          <span class="be-xp-level-label" id="xpLabel">LVL 0</span>
+          <div class="be-xp-track"><div class="be-xp-fill" id="xpBar"></div></div>
+        </div>
+        <!-- Level-scoped coin upgrades panel -->
+        <div class="be-lvlupg-panel" id="lvlUpgPanel">
+          <div class="be-lvlupg-header">🪙 <span id="lvlCoinsDisplay">0</span></div>
+          <div class="be-lvlupg-row">
+            <span class="be-lvlupg-icon">💥</span>
+            <div class="be-lvlupg-info">
+              <span class="be-lvlupg-name">Damage</span>
+              <span class="be-lvlupg-stat" id="lvlUpgDmgStat">×1.0</span>
+            </div>
+            <div class="be-lvlupg-bar-wrap"><div class="be-lvlupg-bar" id="lvlUpgDmgBar"></div></div>
+            <button class="be-lvlupg-btn" id="btnLvlUpgDmg">Buy <span id="lvlUpgDmgCost">15</span>🪙</button>
+          </div>
+          <div class="be-lvlupg-row">
+            <span class="be-lvlupg-icon">🪙</span>
+            <div class="be-lvlupg-info">
+              <span class="be-lvlupg-name">Coins/Hit</span>
+              <span class="be-lvlupg-stat" id="lvlUpgCoinsStat">5/hit</span>
+            </div>
+            <div class="be-lvlupg-bar-wrap"><div class="be-lvlupg-bar" id="lvlUpgCoinsBar"></div></div>
+            <button class="be-lvlupg-btn" id="btnLvlUpgCoins">Buy <span id="lvlUpgCoinsCost">15</span>🪙</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Screen: Hub ─────────────────────────────────────── -->
+      <div class="be-screen" id="screenHub">
+        <div class="be-hub-card">
+          <h2 class="be-title-glow">⚫ BALL ESCAPE</h2>
+          <p class="be-hub-sub">Infinite procedurally generated levels · Solo</p>
+          <div class="be-hub-level-num" id="hubLevelNum">LEVEL 1</div>
+          <div class="be-title-badge" id="hubTitleBadge" style="display:none"></div>
+          <div class="be-hub-currency">
+            <span class="be-gold-big">🪙 <span id="hubGold">0</span></span>
+            <span class="be-gem-big">💎 <span id="hubGems">0</span></span>
+          </div>
+          <div class="be-hub-btns">
+            <button class="btn btn-primary be-btn-xl" id="btnPlay">▶ Play Level</button>
+            <button class="btn be-btn-sec be-btn-xl" id="btnInfinite">∞ Infinite Mode</button>
+            <div class="be-hub-row2">
+              <button class="btn be-btn-sec" id="btnUpgradesHub">⚙ Upgrades</button>
+              <button class="btn be-btn-sec" id="btnStatsHub">📊 Stats</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Screen: Level Intro ─────────────────────────────── -->
+      <div class="be-screen" id="screenIntro" style="display:none">
+        <div class="be-intro-card" id="introCard"></div>
+      </div>
+
+      <!-- ── XP Level-Up Picker (overlay on canvas) ─────────── -->
+      <div class="be-xpp-overlay" id="xpPickerOverlay" style="display:none">
+        <div class="be-xpp-panel" id="xpPickerContent"></div>
+      </div>
+
+      <!-- ── Screen: Level End ──────────────────────────────── -->
+      <div class="be-screen" id="screenLevelEnd" style="display:none">
+        <div class="be-result-card" id="resultCard"></div>
+      </div>
+
+      <!-- ── Screen: Chest Opening ───────────────────────────── -->
+      <div class="be-screen" id="screenChest" style="display:none">
+        <div class="be-chest-scene" id="chestScene"></div>
+      </div>
+
+      <!-- ── Screen: Upgrade Menu ───────────────────────────── -->
+      <div class="be-screen be-screen-full" id="screenUpgrade" style="display:none">
+        <div class="be-upgrade-panel">
+          <div class="be-upg-header">
+            <h2 class="be-upg-panel-title">⚙ UPGRADES</h2>
+            <div class="be-currency-bar be-upg-currency">
+              <span class="be-gold-hdr">🪙 <span id="goldUpg">0</span></span>
+              <span class="be-gem-hdr">💎 <span id="gemUpg">0</span></span>
+            </div>
+            <button class="btn btn-sm btn-back" id="btnCloseUpgrade">✕ Close</button>
+          </div>
+          <div class="be-upg-tabs" id="upgTabs">
+            <button class="be-upg-tab active" data-tab="ball">⚡ Ball</button>
+            <button class="be-upg-tab" data-tab="rings">💣 Rings</button>
+            <button class="be-upg-tab" data-tab="economy">💰 Economy</button>
+            <button class="be-upg-tab" data-tab="abilities">✨ Abilities</button>
+            <button class="be-upg-tab" data-tab="chests">🎁 Chests (<span id="chestCount">0</span>)</button>
+          </div>
+          <div class="be-upg-body" id="upgBody"></div>
+        </div>
+      </div>
+
+      <!-- ── Screen: Stats ──────────────────────────────────── -->
+      <div class="be-screen" id="screenStats" style="display:none">
+        <div class="be-stats-card" id="statsCard"></div>
+      </div>
+
+      <!-- ── Pause Overlay ──────────────────────────────────── -->
+      <div class="be-pause-overlay" id="pauseOverlay" style="display:none">
+        <div class="be-pause-card">
+          <div class="be-pause-title">⏸ PAUSED</div>
+          <button class="btn btn-primary be-btn-xl" id="btnResume">▶ Resume</button>
+          <button class="btn be-btn-sec" id="btnAbandon">🚪 Abandon (partial gold)</button>
+          <button class="btn be-btn-sec" id="btnViewUpgradesFromPause">⚙ View Upgrades</button>
+        </div>
+      </div>
+
+      <!-- ── Milestone Popup ────────────────────────────────── -->
+      <div class="be-milestone-pop" id="milestonePop" style="display:none">
+        <div class="be-milestone-card" id="milestoneCard"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="ballescape.js"></script>
+</body>
+</html>

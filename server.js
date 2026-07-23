@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -577,6 +577,22 @@ function removeFromRoom(conn) {
       room.td = null;
     }
   }
+  if (room.sudoku && room.sudoku.active) {
+    if (room.players.size === 0) {
+      room.sudoku = null;
+    } else if (!room.sudoku.winner) {
+      if (room.players.size === 1) {
+        const [[winId, winP]] = [...room.players.entries()];
+        room.sudoku.winner = winId;
+        room.sudoku.active = false;
+        room.status = 'waiting';
+        broadcastRoom(room.id, { type: 'sudoku-winner', winnerId: winId, winnerName: winP.name, time: 0 });
+        broadcastLobby();
+      } else {
+        broadcastRoom(room.id, { type: 'sudoku-player-left', id: conn.id });
+      }
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -584,7 +600,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -680,9 +696,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -790,6 +806,10 @@ wss.on('connection', (ws, req) => {
         }
         // Lock tower-defense rooms while game is running
         if (room.status === 'playing' && room.type === 'td') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
+        // Lock sudoku rooms while game is running
+        if (room.status === 'playing' && room.type === 'sudoku') {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
 
@@ -958,6 +978,59 @@ wss.on('connection', (ws, req) => {
         if (!text) return;
         broadcastRoom(conn.roomId, { type: 'chat', id, name: conn.name, text, ts: Date.now() }, id);
         log('info', 'chat', { id, name: conn.name, roomId: conn.roomId });
+        break;
+      }
+
+      // ── Sudoku ────────────────────────────────────────────
+      case 'sudoku-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'sudoku') break;
+        if (room.players.keys().next().value !== id) break; // host only
+        if (room.sudoku?.active) break;
+        if (room.countdown) { clearInterval(room.countdown); room.countdown = null; }
+        const difficulty = ['easy','medium','hard','expert'].includes(msg.difficulty) ? msg.difficulty : 'medium';
+        const seed = Math.floor(Math.random() * 2147483647) + 1;
+        room.sudoku = { seed, difficulty, started: false, active: false, winner: null, startedAt: Date.now() };
+        room.status = 'playing';
+        broadcastLobby();
+        log('info', 'sudoku-start', { startedBy: conn.name, ip: conn.ip, roomId: room.id, difficulty, players: room.players.size });
+        let sudokuCount = 3;
+        broadcastRoom(room.id, { type: 'sudoku-countdown', count: sudokuCount, difficulty });
+        room.countdown = setInterval(() => {
+          sudokuCount--;
+          if (sudokuCount > 0) {
+            broadcastRoom(room.id, { type: 'sudoku-countdown', count: sudokuCount });
+          } else {
+            clearInterval(room.countdown); room.countdown = null;
+            room.sudoku.started = true;
+            room.sudoku.active = true;
+            broadcastRoom(room.id, { type: 'sudoku-go', seed, difficulty });
+          }
+        }, 1000);
+        break;
+      }
+      case 'sudoku-progress': {
+        if (conn.mode !== 'room') break;
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.sudoku?.active) break;
+        const p = room.players.get(id);
+        const filled = Math.min(81, Math.max(0, parseInt(msg.filled) || 0));
+        broadcastRoom(room.id, { type: 'sudoku-player-progress', id, name: p?.name || '?', filled }, id);
+        break;
+      }
+      case 'sudoku-complete': {
+        if (conn.mode !== 'room') break;
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.sudoku?.active) break;
+        if (room.sudoku.winner) break;
+        const p = room.players.get(id);
+        const time = Math.max(0, parseInt(msg.time) || 0);
+        room.sudoku.winner = id;
+        room.sudoku.active = false;
+        room.status = 'waiting';
+        broadcastRoom(room.id, { type: 'sudoku-winner', winnerId: id, winnerName: p?.name || '?', time });
+        broadcastLobby();
+        log('info', 'sudoku-complete', { id, name: p?.name || '?', ip: conn.ip, roomId: room.id, time });
         break;
       }
 

@@ -279,6 +279,8 @@
     minesweeper: 'Highest score',
     barricade: 'Total wins',
     td: 'Total match wins',
+    ballescape: 'Highest level reached',
+    sudoku: 'Highest puzzle score',
   };
 
   // ── Game Picker ──
@@ -287,6 +289,10 @@
     gamePicker.addEventListener('click', (e) => {
       const card = e.target.closest('.game-pick-card');
       if (!card) return;
+      if (card.dataset.solo === 'true') {
+        window.location.href = '/' + card.dataset.game;
+        return;
+      }
       gamePicker.querySelectorAll('.game-pick-card').forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
       gameTypeSelect.value = card.dataset.game;
