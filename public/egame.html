@@ -116,6 +116,16 @@
     </aside>
   </div>
 
+  <!-- Round-end overlay (shown between rounds / before final result) -->
+  <div class="round-end-overlay" id="roundEndOverlay">
+    <div class="round-end-card">
+      <div class="round-end-icon" id="roundEndIcon">⚔️</div>
+      <div class="round-end-title" id="roundEndTitle">ROUND 1 COMPLETE</div>
+      <div class="round-end-scores" id="roundEndScoresEl"></div>
+      <div class="round-end-sub" id="roundEndSub">Sides swapping…</div>
+    </div>
+  </div>
+
   <!-- OVERLAYS -->
   <div class="overlay" id="resultOverlay">
     <h2 class="result-title" id="resultTitle">YOU WIN!</h2>
@@ -129,20 +139,19 @@
       <button class="rules-close" id="rulesClose">✕</button>
       <h2>E-Game Rules</h2>
       <ul>
-        <li><strong>Players:</strong> 2 players, each with 5 cards per round.</li>
-        <li><strong>Cards:</strong> Emperor side gets <span class="card-emperor">1 Emperor</span> + 4 Citizens. Slave side gets <span class="card-slave">1 Slave</span> + 4 Citizens.</li>
+        <li><strong>Players:</strong> 2 players, 5 cards each per round.</li>
+        <li><strong>Cards:</strong> Emperor side: <span class="card-emperor">1 Emperor</span> + 4 Citizens. Slave side: <span class="card-slave">1 Slave</span> + 4 Citizens.</li>
         <li><strong>Hierarchy:</strong>
           <ul>
-            <li><span class="card-emperor">Emperor</span> beats <span class="card-citizen">Citizen</span></li>
-            <li><span class="card-citizen">Citizen</span> beats <span class="card-slave">Slave</span></li>
-            <li><span class="card-slave">Slave</span> beats <span class="card-emperor">Emperor</span></li>
+            <li><span class="card-slave">Slave</span> beats <span class="card-emperor">Emperor</span> → <strong>4 pts</strong> to slave</li>
+            <li><span class="card-emperor">Emperor</span> beats <span class="card-citizen">Citizen</span> → <strong>2 pts</strong> to emperor</li>
+            <li><span class="card-citizen">Citizen</span> beats <span class="card-slave">Slave</span> → <strong>1 pt</strong> to citizen</li>
             <li><span class="card-citizen">Citizen</span> vs <span class="card-citizen">Citizen</span> = Draw</li>
           </ul>
         </li>
-        <li><strong>Gameplay:</strong> Both players pick a card simultaneously. Cards are revealed once both have chosen.</li>
-        <li><strong>Rounds:</strong> After every 3 turns, sides swap. 4 rounds × 3 turns = 12 turns total.</li>
-        <li><strong>Scoring:</strong> Win as Emperor = 1 point. Win as Slave = 3 points.</li>
-        <li><strong>Winner:</strong> Highest score after 12 turns wins.</li>
+        <li><strong>End of Round:</strong> A round ends when either player plays their special card (Emperor or Slave), OR when each player has only 1 card remaining.</li>
+        <li><strong>Game:</strong> 2 rounds total — sides swap after Round 1. Highest total score wins!</li>
+        <li><strong>Strategy:</strong> Playing your special card ends the round immediately. Time it wisely!</li>
       </ul>
     </div>
   </div>

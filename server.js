@@ -2495,7 +2495,6 @@ function buildEGameHand(side) {
 
 function startEGame(room) {
   const playerIds = [...room.players.keys()];
-  // Random assignment of sides
   const shuffle = Math.random() < 0.5;
   const sides = new Map();
   sides.set(playerIds[0], shuffle ? 'emperor' : 'slave');
@@ -2513,14 +2512,13 @@ function startEGame(room) {
     picks: new Map(),
     round: 1,
     turn: 1,
-    totalTurn: 1,
     scores: new Map(playerIds.map(pid => [pid, 0])),
+    cardsPlayed: new Map(playerIds.map(pid => [pid, 0])),
     active: true,
   };
   room.status = 'playing';
   broadcastLobby();
 
-  // Send start to each player
   for (const [pid, p] of room.players) {
     const oppId = playerIds.find(x => x !== pid);
     send(p.ws, {
@@ -2542,96 +2540,94 @@ function resolveEGameTurn(room) {
   const c1 = eg.picks.get(p1);
   const c2 = eg.picks.get(p2);
 
-  // Determine winner of this turn
+  // Win/lose triangle
   function getResult(a, b) {
     if (a === b) return 'draw';
     if (a === 'emperor' && b === 'citizen') return 'win';
-    if (a === 'citizen' && b === 'slave') return 'win';
-    if (a === 'slave' && b === 'emperor') return 'win';
+    if (a === 'citizen'  && b === 'slave')   return 'win';
+    if (a === 'slave'    && b === 'emperor') return 'win';
     return 'lose';
+  }
+
+  // Points depend on WHICH cards clashed, not just who won
+  function getMatchupPoints(winner, loser) {
+    if (winner === 'slave'   && loser === 'emperor') return 4; // slave beats king
+    if (winner === 'emperor' && loser === 'citizen') return 2; // king beats citizen
+    if (winner === 'citizen' && loser === 'slave')   return 1; // citizen beats slave
+    return 0;
   }
 
   const r1 = getResult(c1, c2);
   const r2 = getResult(c2, c1);
+  const pts1 = r1 === 'win' ? getMatchupPoints(c1, c2) : 0;
+  const pts2 = r2 === 'win' ? getMatchupPoints(c2, c1) : 0;
 
-  // Award points
-  if (r1 === 'win') {
-    const pts = eg.sides.get(p1) === 'slave' ? 3 : 1;
-    eg.scores.set(p1, eg.scores.get(p1) + pts);
-  }
-  if (r2 === 'win') {
-    const pts = eg.sides.get(p2) === 'slave' ? 3 : 1;
-    eg.scores.set(p2, eg.scores.get(p2) + pts);
-  }
+  eg.scores.set(p1, eg.scores.get(p1) + pts1);
+  eg.scores.set(p2, eg.scores.get(p2) + pts2);
 
-  // Advance turn/round
-  const nextTotalTurn = eg.totalTurn + 1;
-  const isGameOver = nextTotalTurn > 12;
-  const isRoundOver = eg.turn >= 3 && !isGameOver;
+  // Track cards played this round (both play simultaneously so counts stay equal)
+  eg.cardsPlayed.set(p1, (eg.cardsPlayed.get(p1) || 0) + 1);
+  eg.cardsPlayed.set(p2, (eg.cardsPlayed.get(p2) || 0) + 1);
+  const played = eg.cardsPlayed.get(p1);
+  eg.turn++;
 
-  const nextTurn = isRoundOver ? 1 : eg.turn + 1;
-  const nextRound = isRoundOver ? eg.round + 1 : eg.round;
+  // Round ends if: a special card was played OR 4 cards played each (1 left per player)
+  const specialPlayed = c1 === 'emperor' || c1 === 'slave' || c2 === 'emperor' || c2 === 'slave';
+  const isRoundOver   = specialPlayed || played >= 4;
+  // Game = 2 rounds total (each player plays both sides once)
+  const isGameOver    = isRoundOver && eg.round >= 2;
 
-  // Send reveal to both players
+  // Send eg-reveal to both players
   for (const pid of eg.players) {
-    const oppId = eg.players.find(x => x !== pid);
+    const oppId    = eg.players.find(x => x !== pid);
     const yourCard = eg.picks.get(pid);
-    const oppCard = eg.picks.get(oppId);
-    const result = pid === p1 ? r1 : r2;
-
-    const pConn = room.players.get(pid);
+    const oppCard  = eg.picks.get(oppId);
+    const result   = pid === p1 ? r1 : r2;
+    const pts      = pid === p1 ? pts1 : pts2;
+    const pConn    = room.players.get(pid);
     if (pConn) {
       send(pConn.ws, {
         type: 'eg-reveal',
-        yourCard,
-        oppCard,
-        result,
-        points: result === 'win' ? (eg.sides.get(pid) === 'slave' ? 3 : 1) : 0,
+        yourCard, oppCard, result,
+        points: pts,
         scores: { you: eg.scores.get(pid), opp: eg.scores.get(oppId) },
-        round: isGameOver ? eg.round : nextRound,
-        turn: isGameOver ? eg.turn : nextTurn,
+        round: eg.round,
+        turn: played,
+        roundOver: isRoundOver,
+        gameOver: isGameOver,
       });
     }
   }
 
-  log('info', 'eg-reveal', {
-    roomId: room.id, turn: eg.totalTurn,
-    p1card: c1, p2card: c2, r1, r2,
-  });
-
+  log('info', 'eg-reveal', { roomId: room.id, round: eg.round, turn: played, c1, c2, r1, r2 });
   eg.picks.clear();
-  eg.totalTurn = nextTotalTurn;
-  eg.turn = nextTurn;
-  eg.round = nextRound;
 
   if (isGameOver) {
-    // End the game
     eg.active = false;
     room.status = 'waiting';
     broadcastLobby();
-
-    for (const pid of eg.players) {
-      const oppId = eg.players.find(x => x !== pid);
-      const myScore = eg.scores.get(pid);
-      const oppScore = eg.scores.get(oppId);
-      const winner = myScore > oppScore ? 'you' : myScore < oppScore ? 'opp' : 'tie';
-      const pConn = room.players.get(pid);
-      if (pConn) {
-        send(pConn.ws, {
-          type: 'eg-end',
-          scores: { you: myScore, opp: oppScore },
-          winner,
-        });
+    // Delay so clients can animate the round-end overlay before showing final result
+    setTimeout(() => {
+      for (const pid of eg.players) {
+        const oppId    = eg.players.find(x => x !== pid);
+        const myScore  = eg.scores.get(pid);
+        const oppScore = eg.scores.get(oppId);
+        const winner   = myScore > oppScore ? 'you' : myScore < oppScore ? 'opp' : 'tie';
+        const pConn    = room.players.get(pid);
+        if (pConn) send(pConn.ws, { type: 'eg-end', scores: { you: myScore, opp: oppScore }, winner });
       }
-    }
-    log('info', 'eg-end', { roomId: room.id, s1: eg.scores.get(p1), s2: eg.scores.get(p2) });
+      log('info', 'eg-end', { roomId: room.id, s1: eg.scores.get(p1), s2: eg.scores.get(p2) });
+    }, 4000);
   } else if (isRoundOver) {
-    // Swap sides and deal new hands after a short delay
+    eg.round++;
+    // Delay so clients can animate the round-end overlay before side swap
     setTimeout(() => {
       for (const pid of eg.players) {
         eg.sides.set(pid, eg.sides.get(pid) === 'emperor' ? 'slave' : 'emperor');
         eg.hands.set(pid, buildEGameHand(eg.sides.get(pid)));
+        eg.cardsPlayed.set(pid, 0);
       }
+      eg.turn = 1;
       for (const pid of eg.players) {
         const pConn = room.players.get(pid);
         if (pConn) {
@@ -2640,12 +2636,12 @@ function resolveEGameTurn(room) {
             side: eg.sides.get(pid),
             hand: eg.hands.get(pid),
             round: eg.round,
-            turn: eg.turn,
+            turn: 1,
           });
         }
       }
       log('info', 'eg-swap', { roomId: room.id, round: eg.round });
-    }, 2000);
+    }, 4000);
   }
 }
 

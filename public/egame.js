@@ -34,6 +34,10 @@
   const scoreboard = $('scoreboard');
   const btnRules = $('btnRules'), rulesPanel = $('rulesPanel'), rulesClose = $('rulesClose');
   const btnToggleSidebar = $('btnToggleSidebar'), btnToggleChat = $('btnToggleChat');
+  const roundEndOverlay = $('roundEndOverlay');
+  const roundEndTitle   = $('roundEndTitle');
+  const roundEndScoresEl = $('roundEndScoresEl');
+  const roundEndSub     = $('roundEndSub');
 
   roomBadge.textContent = 'Room ' + roomId;
 
@@ -117,7 +121,13 @@
         break;
 
       case 'eg-waiting':
-        statusEl.textContent = 'Waiting for opponent to pick…';
+        if (!picked) {
+          // Opponent has chosen — highlight cards and urge player to act
+          statusEl.textContent = '⚡ Opponent has chosen! Pick your card!';
+          opponentHand.classList.add('opp-ready');
+        } else {
+          statusEl.textContent = 'Waiting for opponent to pick…';
+        }
         break;
 
       case 'eg-reveal':
@@ -150,6 +160,7 @@
     gameActive = true;
     picked = false;
     resultOverlay.classList.remove('show');
+    hideRoundEndOverlay();
     clashArea.style.display = 'none';
     turnResult.style.display = 'none';
 
@@ -157,27 +168,26 @@
     myHand = msg.hand.slice();
     oppCardCount = 5;
     round = msg.round;
-    turn = msg.turn;
-    myScore = msg.scores.you;
+    turn  = msg.turn;
+    myScore  = msg.scores.you;
     oppScore = msg.scores.opp;
-    oppName = msg.oppName || 'Opponent';
+    oppName  = msg.oppName || 'Opponent';
 
-    // Update display
-    gameInfo.style.display = 'flex';
+    gameInfo.style.display   = 'flex';
     opponentArea.style.display = 'flex';
-    playerArea.style.display = 'flex';
-    scoreboard.style.display = 'flex';
+    playerArea.style.display   = 'flex';
+    scoreboard.style.display   = 'flex';
 
-    opponentLabel.textContent = oppName;
-    scoreYourName.textContent = 'You';
-    scoreOppName.textContent = oppName;
+    opponentLabel.textContent  = oppName;
+    scoreYourName.textContent  = 'You';
+    scoreOppName.textContent   = oppName;
 
     updateInfoBar();
-    updateScores();
-    renderMyHand();
+    updateScores(false, false);
+    renderMyHandAnimated();
     renderOppHand();
     updateSideBadges();
-    statusEl.textContent = 'Pick a card to play!';
+    statusEl.textContent = '🎴 Pick a card to play!';
   }
 
   function onCardClick(el) {
@@ -194,92 +204,128 @@
 
   function onReveal(msg) {
     const yourCard = msg.yourCard;
-    const oppCard = msg.oppCard;
-    const result = msg.result;     // 'win', 'lose', 'draw'
-    const points = msg.points;
+    const oppCard  = msg.oppCard;
+    const result   = msg.result;
+    const points   = msg.points; // server-computed matchup points
 
-    // Update scores
-    myScore = msg.scores.you;
+    // Animate score change if points were awarded
+    const prevMyScore  = myScore;
+    const prevOppScore = oppScore;
+    myScore  = msg.scores.you;
     oppScore = msg.scores.opp;
-    updateScores();
+    updateScores(prevMyScore !== myScore, prevOppScore !== oppScore);
 
-    // Remove the played card from hand
+    // Remove the played card from local hand
     const idx = myHand.indexOf(yourCard);
     if (idx !== -1) myHand.splice(idx, 1);
     oppCardCount--;
 
+    // Clear opponent-ready indicator
+    opponentHand.classList.remove('opp-ready');
+
     // Show clash animation
     clashArea.style.display = 'flex';
     clashArea.classList.remove('animate');
-    void clashArea.offsetWidth; // force reflow
+    void clashArea.offsetWidth;
     clashArea.classList.add('animate');
 
     setClashCard(clashYour, yourCard);
     setClashCard(clashOpp, oppCard);
 
-    // Show result text
+    // Show result text with correct points
     turnResult.style.display = 'block';
     turnResult.className = 'turn-result ' + result;
     if (result === 'win') {
-      const pts = mySide === 'slave' ? 3 : 1;
-      turnResult.textContent = 'YOU WIN! +' + pts + (pts > 1 ? ' pts' : ' pt');
+      turnResult.textContent = `YOU WIN! +${points} ${points === 1 ? 'pt' : 'pts'}`;
     } else if (result === 'lose') {
       turnResult.textContent = 'YOU LOSE';
     } else {
       turnResult.textContent = 'DRAW';
     }
 
-    // Re-render hands (with used cards removed)
+    // Re-render hands
     renderMyHand();
     renderOppHand();
 
-    // Advance turn display
-    turn = msg.turn;
+    // Update info bar
+    turn  = msg.turn;
     round = msg.round;
     updateInfoBar();
 
-    statusEl.textContent = result === 'win' ? 'You won this turn!' : result === 'lose' ? 'You lost this turn.' : 'Draw — no points.';
+    statusEl.textContent = result === 'win'
+      ? `You won this turn! (+${points} ${points === 1 ? 'pt' : 'pts'})`
+      : result === 'lose' ? 'You lost this turn.' : 'Draw — no points.';
     picked = false;
+
+    // Show round-end overlay after clash settles
+    if (msg.roundOver) {
+      setTimeout(() => showRoundEndOverlay(msg.round, msg.gameOver, myScore, oppScore), 1500);
+    }
   }
 
   function onRoundSwap(msg) {
+    hideRoundEndOverlay();
     mySide = msg.side;
     myHand = msg.hand.slice();
     oppCardCount = 5;
     round = msg.round;
-    turn = msg.turn;
+    turn  = msg.turn;
 
     updateInfoBar();
-    renderMyHand();
+    renderMyHandAnimated();
     renderOppHand();
     updateSideBadges();
 
     clashArea.style.display = 'none';
     turnResult.style.display = 'none';
     picked = false;
-    statusEl.textContent = 'Sides swapped! You are now ' + mySide.toUpperCase() + '. Pick a card!';
+    statusEl.textContent = `⚔️ Round 2! You are now ${mySide.toUpperCase()}. Pick a card!`;
   }
 
   function onGameEnd(msg) {
     gameActive = false;
-    myScore = msg.scores.you;
+    myScore  = msg.scores.you;
     oppScore = msg.scores.opp;
-    updateScores();
+    updateScores(false, false);
+    hideRoundEndOverlay();
 
-    const won = msg.winner === 'you';
+    const won  = msg.winner === 'you';
     const tied = msg.winner === 'tie';
 
-    resultTitle.textContent = tied ? 'TIE GAME!' : (won ? 'YOU WIN!' : 'YOU LOSE');
+    resultTitle.textContent = tied ? 'TIE GAME!' : (won ? '🏆 YOU WIN!' : 'YOU LOSE');
     resultScores.innerHTML =
       `<span class="rs-you">You: ${myScore}</span>` +
       `<span class="rs-opp">${escapeHtml(oppName)}: ${oppScore}</span>`;
 
-    setTimeout(() => resultOverlay.classList.add('show'), 1000);
+    setTimeout(() => resultOverlay.classList.add('show'), 600);
 
     if (won) {
       launchConfetti();
       if (typeof reportScore === 'function') reportScore('egame', 1);
     }
+  }
+
+  // ── Round-end overlay ────────────────────────────────────────────
+
+  function showRoundEndOverlay(roundNum, isGame, myS, oppS) {
+    const roundEndIcon = $('roundEndIcon');
+    if (isGame) {
+      if (roundEndIcon) roundEndIcon.textContent = '🏁';
+      roundEndTitle.textContent = 'BATTLE COMPLETE';
+      roundEndSub.textContent   = 'Tallying final scores…';
+    } else {
+      if (roundEndIcon) roundEndIcon.textContent = '⚔️';
+      roundEndTitle.textContent = `ROUND ${roundNum} COMPLETE`;
+      roundEndSub.textContent   = 'Sides swapping…';
+    }
+    roundEndScoresEl.innerHTML =
+      `<span class="round-end-you">You: ${myS}</span>` +
+      `<span class="round-end-opp">${escapeHtml(oppName)}: ${oppS}</span>`;
+    roundEndOverlay.classList.add('show');
+  }
+
+  function hideRoundEndOverlay() {
+    roundEndOverlay.classList.remove('show');
   }
 
   // ── Rendering ────────────────────────────────────────────────────
@@ -289,11 +335,38 @@
     el.innerHTML = `<div class="card-icon">${CARD_ICONS[type]}</div><div class="card-label">${CARD_LABELS[type]}</div>`;
   }
 
+  function updateScores(myChanged, oppChanged) {
+    scoreYouEl.textContent = myScore;
+    scoreOppEl.textContent = oppScore;
+    if (myChanged) {
+      scoreYouEl.classList.remove('bump');
+      void scoreYouEl.offsetWidth;
+      scoreYouEl.classList.add('bump');
+      setTimeout(() => scoreYouEl.classList.remove('bump'), 650);
+    }
+    if (oppChanged) {
+      scoreOppEl.classList.remove('bump');
+      void scoreOppEl.offsetWidth;
+      scoreOppEl.classList.add('bump');
+      setTimeout(() => scoreOppEl.classList.remove('bump'), 650);
+    }
+  }
+
   function renderMyHand() {
     playerHand.innerHTML = '';
     for (const type of myHand) {
       playerHand.appendChild(makeCardEl(type, true));
     }
+  }
+
+  function renderMyHandAnimated() {
+    playerHand.innerHTML = '';
+    myHand.forEach((type, i) => {
+      const el = makeCardEl(type, true);
+      el.classList.add('fly-in');
+      el.style.animationDelay = `${i * 90}ms`;
+      playerHand.appendChild(el);
+    });
   }
 
   function renderOppHand() {
@@ -304,11 +377,11 @@
   }
 
   function updateInfoBar() {
-    infoRound.textContent = round + '/4';
-    infoTurn.textContent = turn + '/3';
+    infoRound.textContent = round + '/2';
+    infoTurn.textContent  = turn + '/4';
     const sideEl = infoSide;
     sideEl.textContent = mySide ? mySide.toUpperCase() : '—';
-    sideEl.className = 'info-value ' + (mySide || '');
+    sideEl.className   = 'info-value ' + (mySide || '');
   }
 
   function updateScores() {
@@ -455,7 +528,7 @@
   //  EVENT LISTENERS
   // ══════════════════════════════════════════════════════════════════
 
-  btnNewGame.addEventListener('click', () => wsSend({ type: 'eg-new' }));
+  btnNewGame.addEventListener('click', () => { if (!gameActive) wsSend({ type: 'eg-new' }); });
   btnRematch.addEventListener('click', () => { resultOverlay.classList.remove('show'); wsSend({ type: 'eg-new' }); });
   btnBack.addEventListener('click', () => { wsSend({ type: 'leave-room' }); location.href = '/'; });
 

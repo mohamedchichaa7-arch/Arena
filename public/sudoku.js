@@ -149,37 +149,79 @@ function generateSolvedGrid(rng) {
 function countSolutions(puzzle, limit=2) {
   const g = [...puzzle]; let count = 0;
   function solve() {
-    if (count>=limit) return;
-    let minCell=-1, minCnt=10;
-    for (let i=0; i<81; i++) {
-      if (g[i]!==0) continue;
-      let cnt=0;
-      for (let d=1; d<=9; d++) if (isValidAt(g,i,d)) cnt++;
-      if (cnt===0) return;
-      if (cnt<minCnt) { minCnt=cnt; minCell=i; if (minCnt===1) break; }
+    if (count >= limit) return;
+    // ── Phase 1: propagate naked singles (forced cells — no branching needed) ──
+    const forced = [];
+    let contradiction = false;
+    let progress = true;
+    while (progress && !contradiction) {
+      progress = false;
+      for (let i = 0; i < 81; i++) {
+        if (g[i] !== 0) continue;
+        let cnt = 0, lastD = 0;
+        for (let d = 1; d <= 9; d++) { if (isValidAt(g,i,d)) { cnt++; lastD = d; } }
+        if (cnt === 0) { contradiction = true; break; }
+        if (cnt === 1) { g[i] = lastD; forced.push(i); progress = true; }
+      }
     }
-    if (minCell===-1) { count++; return; }
-    for (let d=1; d<=9; d++) {
-      if (count>=limit) return;
-      if (isValidAt(g,minCell,d)) { g[minCell]=d; solve(); g[minCell]=0; }
+    if (!contradiction) {
+      // ── Phase 2: pick branching cell with fewest candidates (MRV) ──
+      let minCell = -1, minCnt = 10;
+      for (let i = 0; i < 81; i++) {
+        if (g[i] !== 0) continue;
+        let cnt = 0;
+        for (let d = 1; d <= 9; d++) if (isValidAt(g,i,d)) cnt++;
+        if (cnt === 0) { contradiction = true; break; }
+        if (cnt < minCnt) { minCnt = cnt; minCell = i; if (minCnt === 2) break; }
+      }
+      if (!contradiction) {
+        if (minCell === -1) { count++; }
+        else {
+          for (let d = 1; d <= 9; d++) {
+            if (count >= limit) break;
+            if (isValidAt(g, minCell, d)) { g[minCell] = d; solve(); g[minCell] = 0; }
+          }
+        }
+      }
     }
+    for (const i of forced) g[i] = 0; // undo propagated assignments
   }
   solve(); return count;
 }
 
 function generatePuzzle(diff, seed) {
-  const rng    = mulberry32(seed);
-  const sol    = generateSolvedGrid(rng);
-  const puzzle = [...sol];
-  const cfg    = DIFF_CFG[diff];
-  const target = cfg.clues[0] + Math.floor(rng() * (cfg.clues[1]-cfg.clues[0]+1));
-  let clues    = 81;
-  for (const pos of shuffleWith([...Array(81).keys()], rng)) {
-    if (clues<=target) break;
-    const bak = puzzle[pos]; puzzle[pos]=0;
-    if (countSolutions([...puzzle],2)!==1) puzzle[pos]=bak; else clues--;
+  const cfg = DIFF_CFG[diff];
+  let lastResult = null;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    // Deterministically derive a different seed each attempt so both clients agree
+    const rng    = mulberry32(seed + attempt * 1000003);
+    const sol    = generateSolvedGrid(rng);
+    const puzzle = [...sol];
+    const target = cfg.clues[0] + Math.floor(rng() * (cfg.clues[1]-cfg.clues[0]+1));
+    let clues    = 81;
+    const t0     = performance.now();
+    let timedOut = false;
+
+    for (const pos of shuffleWith([...Array(81).keys()], rng)) {
+      if (clues <= target) break;
+      if (performance.now() - t0 > 2000) { timedOut = true; break; }
+      const bak = puzzle[pos]; puzzle[pos] = 0;
+      // Check uniqueness after EVERY removal — never skip this step
+      if (countSolutions([...puzzle], 2) !== 1) puzzle[pos] = bak; else clues--;
+    }
+
+    lastResult = { puzzle, solution: sol };
+
+    if (timedOut) {
+      console.warn(`[Sudoku] generation timed out on attempt ${attempt+1}, retrying…`);
+      continue;
+    }
+    // Final sanity check: assert exactly one solution before handing off
+    if (countSolutions([...puzzle], 2) === 1) return lastResult;
+    console.warn(`[Sudoku] sanity check failed on attempt ${attempt+1}, retrying…`);
   }
-  return { puzzle, solution: sol };
+  console.error('[Sudoku] could not generate a valid unique puzzle in 10 attempts');
+  return lastResult; // return last attempt rather than crashing the game
 }
 
 // ─── GRID BUILDER ────────────────────────────────────────────────────────────
