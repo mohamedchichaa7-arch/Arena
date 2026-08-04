@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>GeoGuessr Duel — Game Arena</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="geoguessr.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+  <div class="layout">
+    <!-- Sidebar: player list + live scores -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">0</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+      <div class="score-panel" id="scorePanel" style="display:none">
+        <div class="score-panel-title">Scores</div>
+        <div id="scoreList"></div>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar">👥</button>
+        <h1 class="logo logo-sm">🌍 GEO DUEL</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+
+      <!-- ── Lobby phase ──────────────────────────────────────── -->
+      <div id="phaselobby" class="phase-panel phase-lobby">
+        <div id="status" class="status-text">Waiting for players…</div>
+        <div id="hostControls" style="display:none">
+          <div class="config-section">
+            <div class="config-label">Difficulty</div>
+            <div class="difficulty-picker" id="difficultyPicker">
+              <button class="diff-btn" data-diff="easy">🟢 Easy</button>
+              <button class="diff-btn active" data-diff="normal">🟡 Normal</button>
+              <button class="diff-btn" data-diff="hard">🔴 Hard</button>
+              <button class="diff-btn" data-diff="nohints">💀 No Hints</button>
+            </div>
+          </div>
+          <div class="config-section">
+            <div class="config-label">Rounds</div>
+            <div class="rounds-picker" id="roundsPicker">
+              <button class="rounds-btn" data-rounds="5">5</button>
+              <button class="rounds-btn active" data-rounds="10">10</button>
+              <button class="rounds-btn" data-rounds="15">15</button>
+            </div>
+          </div>
+
+          <details class="custom-photos-panel">
+            <summary>📸 Add Custom Photos <span class="cp-count" id="cpCount"></span></summary>
+            <div class="custom-photo-form">
+              <input type="url" id="cpUrl" placeholder="Photo URL (https://…)" maxlength="500">
+              <img id="cpPreview" alt="Preview" style="display:none">
+              <p class="cp-map-hint">Click the map to pin the photo's location:</p>
+              <div id="cpMap"></div>
+              <div class="cp-fields">
+                <input type="text" id="cpCountry" placeholder="Country" maxlength="50">
+                <input type="text" id="cpCity" placeholder="City / Place" maxlength="50">
+              </div>
+              <button class="btn btn-accent btn-sm" id="btnAddPhoto">＋ Add Photo</button>
+            </div>
+            <div id="customPhotoList"></div>
+          </details>
+
+          <button class="btn btn-primary btn-lg" id="btnStart">🌍 Start Game</button>
+        </div>
+      </div>
+
+      <!-- ── Loading phase ────────────────────────────────────── -->
+      <div id="phaseloading" class="phase-panel phase-loading" style="display:none">
+        <div class="spinner"></div>
+        <p>Fetching world photos…</p>
+        <p class="loading-sub">Querying Wikimedia Commons geotag database</p>
+      </div>
+
+      <!-- ── Viewing phase ────────────────────────────────────── -->
+      <div id="phaseviewing" class="phase-panel phase-viewing" style="display:none">
+        <div class="view-top-bar">
+          <span class="round-indicator" id="roundIndicator">Round 1 / 10</span>
+          <div class="timer-badge" id="viewTimer">30</div>
+        </div>
+        <div class="photo-frame" id="photoFrame">
+          <img id="roundPhoto" alt="Where in the world is this?" draggable="false">
+          <div class="photo-zoom-tip">🔍 Click to zoom</div>
+        </div>
+        <div class="view-bottom">
+          <div class="ready-status" id="readyStatus"></div>
+          <button class="btn btn-primary btn-lg" id="btnReady" disabled>⏳ Please wait…</button>
+        </div>
+      </div>
+
+      <!-- ── Guessing phase ───────────────────────────────────── -->
+      <div id="phaseguessing" class="phase-panel phase-guessing" style="display:none">
+        <div class="guess-top-bar">
+          <span class="round-indicator" id="guessRoundInd">Round 1 / 10</span>
+          <div class="timer-badge" id="guessTimer">45</div>
+        </div>
+        <div id="map"></div>
+        <div class="photo-corner" id="photoCorner">
+          <img id="cornerPhoto" alt="">
+          <button class="corner-toggle" id="btnToggleCorner" title="Toggle photo">−</button>
+        </div>
+        <div class="guess-bottom-bar">
+          <span class="guess-status" id="guessStatus">Click the map to place your pin</span>
+          <button class="btn btn-primary" id="btnConfirm" disabled>Confirm Guess ✓</button>
+        </div>
+      </div>
+
+      <!-- ── Reveal phase ─────────────────────────────────────── -->
+      <div id="phasereveal" class="phase-panel phase-reveal" style="display:none">
+        <div class="reveal-top-bar">
+          <span class="round-indicator" id="revealRoundInd">Round 1 / 10</span>
+          <span class="reveal-countdown-text">Next round in <span id="revealCountdown">8</span>s</span>
+        </div>
+        <div class="reveal-body">
+          <div class="reveal-photo-side">
+            <img id="revealPhoto" alt="">
+            <div class="reveal-location" id="revealLocation"></div>
+          </div>
+          <div id="revealMap"></div>
+        </div>
+        <div class="reveal-scores" id="revealScores"></div>
+      </div>
+
+      <!-- ── Ended phase ──────────────────────────────────────── -->
+      <div id="phaseended" class="phase-panel phase-ended" style="display:none">
+        <div class="end-header">
+          <h2 class="end-winner" id="endWinner"></h2>
+          <div class="end-scores" id="endScores"></div>
+        </div>
+        <div id="recapMap"></div>
+        <div class="recap-section">
+          <h3 class="recap-title">Round Breakdown</h3>
+          <div class="recap-table-wrap">
+            <table class="recap-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Location</th>
+                  <th id="rh1">You · Distance</th>
+                  <th id="rh2">Opp · Distance</th>
+                  <th id="rs1">Your Score</th>
+                  <th id="rs2">Opp Score</th>
+                </tr>
+              </thead>
+              <tbody id="recapBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="end-buttons">
+          <button class="btn btn-primary" id="btnRematch">🔄 Rematch</button>
+          <button class="btn btn-back" id="btnLobby">← Back to Lobby</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Photo zoom lightbox -->
+  <div id="lightbox" style="display:none">
+    <div class="lightbox-overlay" id="lightboxOverlay"></div>
+    <img id="lightboxImg" alt="">
+    <button class="lightbox-close" id="btnCloseLightbox">✕</button>
+  </div>
+
+  <!-- Rules modal -->
+  <div class="modal-overlay" id="rulesModal" style="display:none">
+    <div class="modal-box rules-box">
+      <button class="modal-close" id="btnCloseRules">✕</button>
+      <h2>🌍 GeoGuessr Duel Rules</h2>
+      <ul>
+        <li><strong>View phase (30s):</strong> Study the photo. Click "Ready" when you know where to look.</li>
+        <li><strong>Guess phase (45s):</strong> Click the world map to place your pin, then confirm.</li>
+        <li><strong>Reveal:</strong> See both pins vs. the correct location. Closest guess wins the round.</li>
+        <li><strong>Scoring:</strong> Up to 1000 pts based on distance. Speed bonus up to +100 for guessing early.</li>
+        <li><strong>Win:</strong> Most points after all rounds wins the match.</li>
+        <li>Difficulty affects which locations appear. <em>No Hints</em> hides country names until reveal.</li>
+      </ul>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="geoguessr.js"></script>
+</body>
+</html>

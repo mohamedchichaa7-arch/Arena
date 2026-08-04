@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -593,6 +593,18 @@ function removeFromRoom(conn) {
       }
     }
   }
+  if (room.geo && room.geo.active) {
+    if (room.geo.phaseTimer) { clearTimeout(room.geo.phaseTimer); room.geo.phaseTimer = null; }
+    if (room.players.size === 0) {
+      room.geo = null;
+    } else {
+      const [[winId, winP]] = [...room.players.entries()];
+      room.geo.active = false;
+      room.status = 'waiting';
+      broadcastRoom(room.id, { type: 'geo-opponent-left', winnerId: winId, winnerName: winP.name });
+      broadcastLobby();
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -600,7 +612,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -696,9 +708,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -812,6 +824,10 @@ wss.on('connection', (ws, req) => {
         if (room.status === 'playing' && room.type === 'sudoku') {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
+        // Lock geoguessr rooms while game is running
+        if (room.status === 'playing' && room.type === 'geoguessr') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
 
         removeFromRoom(conn); // leave any existing room
         conn.mode = 'room';
@@ -830,6 +846,10 @@ wss.on('connection', (ws, req) => {
         // Send current TD lobby config to the joiner so they see the host's mode/map pick
         if (room.type === 'td' && room.tdConfig) {
           send(ws, { type: 'td-config', mode: room.tdConfig.mode, map: room.tdConfig.map });
+        }
+        // Send current GeoGuessr lobby config to the joiner
+        if (room.type === 'geoguessr' && room.geoConfig) {
+          send(ws, { type: 'geo-config', difficulty: room.geoConfig.difficulty, totalRounds: room.geoConfig.totalRounds });
         }
 
         // Restore BR hand on reconnect
@@ -2440,6 +2460,88 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(conn.roomId);
         if (!room || !room.td?.active) break;
         tdSendEnemies(room, id, parseInt(msg.packageIdx), msg.targetId);
+        break;
+      }
+
+      // ── GeoGuessr ──────────────────────────────────────────────
+      case 'geo-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'geoguessr') break;
+        if (room.players.keys().next().value !== id) break;
+        if (room.geo?.active) break;
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2 players to start' }); break; }
+        const difficulty = ['easy', 'normal', 'hard', 'nohints'].includes(msg.difficulty) ? msg.difficulty : 'normal';
+        const totalRounds = [5, 10, 15].includes(parseInt(msg.rounds)) ? parseInt(msg.rounds) : 10;
+        const customPhotos = Array.isArray(msg.customPhotos) ? msg.customPhotos.slice(0, 5) : [];
+        room.geo = {
+          active: true, difficulty, totalRounds, currentRound: 0, rounds: [],
+          phase: 'loading', phaseTimer: null, viewStart: null, guessStart: null,
+          ready: new Set(), guesses: {},
+          scores: Object.fromEntries([...room.players.keys()].map(pid => [pid, 0])),
+          roundHistory: [],
+        };
+        room.status = 'playing';
+        broadcastLobby();
+        broadcastRoom(room.id, { type: 'geo-preparing', difficulty, totalRounds });
+        const geoRoomId = room.id;
+        selectGeoRounds(difficulty, totalRounds, customPhotos).then(rounds => {
+          const r = rooms.get(geoRoomId);
+          if (!r || !r.geo?.active || r.geo.phase !== 'loading') return;
+          if (rounds.length === 0) {
+            r.geo.active = false; r.status = 'waiting';
+            broadcastRoom(geoRoomId, { type: 'error', msg: 'No photos found. Check internet and try again.' });
+            broadcastLobby(); return;
+          }
+          r.geo.rounds = rounds;
+          r.geo.totalRounds = Math.min(r.geo.totalRounds, rounds.length);
+          broadcastRoom(geoRoomId, { type: 'geo-game-start', difficulty: r.geo.difficulty, totalRounds: r.geo.totalRounds });
+          geoStartViewPhase(r);
+          log('info', 'geo-rounds-ready', { roomId: geoRoomId, count: rounds.length });
+        }).catch(err => {
+          const r = rooms.get(geoRoomId);
+          if (!r?.geo) return;
+          r.geo.active = false; r.status = 'waiting';
+          broadcastRoom(geoRoomId, { type: 'error', msg: 'Failed to load photos. Please try again.' });
+          broadcastLobby();
+          log('error', 'geo-start-fail', { roomId: geoRoomId, err: String(err) });
+        });
+        log('info', 'geo-start', { by: conn.name, roomId: room.id, difficulty, totalRounds });
+        break;
+      }
+      case 'geo-ready': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.geo?.active || room.geo.phase !== 'viewing') break;
+        room.geo.ready.add(id);
+        broadcastRoom(room.id, { type: 'geo-player-ready', id, readyCount: room.geo.ready.size, total: room.players.size });
+        if (room.geo.ready.size >= room.players.size) {
+          if (room.geo.phaseTimer) { clearTimeout(room.geo.phaseTimer); room.geo.phaseTimer = null; }
+          geoStartGuessPhase(room);
+        }
+        break;
+      }
+      case 'geo-guess': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.geo?.active || room.geo.phase !== 'guessing') break;
+        if (room.geo.guesses[id]) break;
+        const gLat = parseFloat(msg.lat), gLng = parseFloat(msg.lng);
+        if (!isFinite(gLat) || !isFinite(gLng) || gLat < -90 || gLat > 90 || gLng < -180 || gLng > 180) break;
+        room.geo.guesses[id] = { lat: gLat, lng: gLng, confirmedAt: Date.now() };
+        broadcastRoom(room.id, { type: 'geo-opponent-guessed', id }, id);
+        send(ws, { type: 'geo-guess-confirmed' });
+        if (Object.keys(room.geo.guesses).length >= room.players.size) {
+          if (room.geo.phaseTimer) { clearTimeout(room.geo.phaseTimer); room.geo.phaseTimer = null; }
+          geoResolveRound(room);
+        }
+        break;
+      }
+      case 'geo-lobby-config': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'geoguessr') break;
+        if (room.players.keys().next().value !== id) break;
+        const cfgDiff = ['easy', 'normal', 'hard', 'nohints'].includes(msg.difficulty) ? msg.difficulty : 'normal';
+        const cfgRounds = [5, 10, 15].includes(parseInt(msg.rounds)) ? parseInt(msg.rounds) : 10;
+        room.geoConfig = { difficulty: cfgDiff, totalRounds: cfgRounds };
+        broadcastRoom(room.id, { type: 'geo-config', difficulty: cfgDiff, totalRounds: cfgRounds }, id);
         break;
       }
 
@@ -6777,6 +6879,398 @@ function tdCheckGameOver(room) {
 }
 
 // Detect end of wave: all alive lanes have no enemies & empty spawn queue while in wave phase.
+// ── GeoGuessr helpers ────────────────────────────────────────────
+
+function geoHaversine(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function geoCalcScore(distKm) {
+  return Math.max(0, Math.floor(1000 * Math.exp(-distKm / 2000)));
+}
+
+function geoStartViewPhase(room) {
+  const g = room.geo;
+  if (!g || !g.active) return;
+  const effectiveTotal = Math.min(g.totalRounds, g.rounds.length);
+  if (g.currentRound >= effectiveTotal) { geoEndGame(room); return; }
+  g.phase = 'viewing';
+  g.viewStart = Date.now();
+  g.ready = new Set();
+  g.guesses = {};
+  const round = g.rounds[g.currentRound];
+  broadcastRoom(room.id, {
+    type: 'geo-round-start',
+    round: g.currentRound + 1, total: effectiveTotal,
+    photoUrl: round.photoUrl, title: round.title || '',
+    country: g.difficulty !== 'nohints' ? (round.country || '') : '',
+    city: g.difficulty !== 'nohints' ? (round.city || '') : '',
+  });
+  g.phaseTimer = setTimeout(() => {
+    const r = rooms.get(room.id);
+    if (r?.geo?.phase === 'viewing') geoStartGuessPhase(r);
+  }, 30000);
+}
+
+function geoStartGuessPhase(room) {
+  const g = room.geo;
+  if (!g || !g.active) return;
+  g.phase = 'guessing';
+  g.guessStart = Date.now();
+  broadcastRoom(room.id, { type: 'geo-guess-phase', timeLimit: 45 });
+  g.phaseTimer = setTimeout(() => {
+    const r = rooms.get(room.id);
+    if (r?.geo?.phase === 'guessing') geoResolveRound(r);
+  }, 45000);
+}
+
+function geoResolveRound(room) {
+  const g = room.geo;
+  if (!g || !g.active) return;
+  g.phase = 'reveal';
+  const round = g.rounds[g.currentRound];
+  const effectiveTotal = Math.min(g.totalRounds, g.rounds.length);
+  const results = [];
+  let winnerId = null, bestDist = Infinity;
+  for (const [pid, p] of room.players) {
+    const guess = g.guesses[pid];
+    let distKm = 20000, roundScore = 0, speedBonus = 0;
+    let guessLat = null, guessLng = null;
+    if (guess) {
+      guessLat = guess.lat; guessLng = guess.lng;
+      distKm = geoHaversine(round.lat, round.lng, guess.lat, guess.lng);
+      roundScore = geoCalcScore(distKm);
+      const elapsedS = (guess.confirmedAt - g.guessStart) / 1000;
+      const remaining = 45 - elapsedS;
+      if (remaining > 20) speedBonus = Math.floor(100 * (remaining - 20) / 25);
+      if (distKm < bestDist) { bestDist = distKm; winnerId = pid; }
+    }
+    const total = roundScore + speedBonus;
+    g.scores[pid] = (g.scores[pid] || 0) + total;
+    results.push({ id: pid, name: p.name, lat: guessLat, lng: guessLng,
+      distKm: Math.round(distKm), roundScore, speedBonus, totalRoundScore: total,
+      cumulativeScore: g.scores[pid] });
+  }
+  g.roundHistory.push({ round: g.currentRound + 1, photoUrl: round.photoUrl,
+    correctLat: round.lat, correctLng: round.lng,
+    country: round.country || '', city: round.city || '', title: round.title || '', results });
+  broadcastRoom(room.id, {
+    type: 'geo-round-reveal',
+    round: g.currentRound + 1, total: effectiveTotal,
+    correctLat: round.lat, correctLng: round.lng,
+    country: round.country || '', city: round.city || '', title: round.title || '',
+    results, winnerId,
+  });
+  g.currentRound++;
+  const nextRound = g.currentRound;
+  const geoRoomId = room.id;
+  g.phaseTimer = setTimeout(() => {
+    const r = rooms.get(geoRoomId);
+    if (!r?.geo?.active) return;
+    if (nextRound >= Math.min(r.geo.totalRounds, r.geo.rounds.length)) geoEndGame(r);
+    else geoStartViewPhase(r);
+  }, 8000);
+}
+
+function geoEndGame(room) {
+  const g = room.geo;
+  if (!g) return;
+  if (g.phaseTimer) { clearTimeout(g.phaseTimer); g.phaseTimer = null; }
+  g.active = false; g.phase = 'done';
+  room.status = 'waiting';
+  let winnerId = null, winnerScore = -1;
+  const finalScores = [];
+  for (const [pid] of room.players) {
+    const score = g.scores[pid] || 0;
+    finalScores.push({ id: pid, name: room.players.get(pid)?.name || '?', score });
+    if (score > winnerScore) { winnerScore = score; winnerId = pid; }
+  }
+  broadcastRoom(room.id, {
+    type: 'geo-game-over', winnerId,
+    winnerName: room.players.get(winnerId)?.name || '?',
+    finalScores, roundHistory: g.roundHistory,
+  });
+  broadcastLobby();
+  log('info', 'geo-game-over', { roomId: room.id, winnerId, score: winnerScore });
+}
+
+async function resolveWikimediaThumb(filename) {
+  try {
+    const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent('File:' + filename)}&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*`;
+    const resp = await fetch(apiUrl, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) { log('warn', 'geo-thumb-http', { file: filename.slice(0, 60), status: resp.status }); return null; }
+    const data = await resp.json();
+    const pages = data.query?.pages || {};
+    const page = Object.values(pages)[0];
+    const info = page?.imageinfo?.[0];
+    if (!info) { log('warn', 'geo-thumb-noinfo', { file: filename.slice(0, 60) }); return null; }
+    const url = info.thumburl || info.url;
+    // Accept any image URL including SVG-rendered-as-PNG
+    if (url && /\.(jpg|jpeg|png|webp|gif)/i.test(url)) return url;
+    log('warn', 'geo-thumb-badext', { file: filename.slice(0, 60), url: String(url).slice(0, 80) });
+    return null;
+  } catch (e) { log('warn', 'geo-thumb-err', { file: filename.slice(0, 60), err: String(e).slice(0, 80) }); return null; }
+}
+
+// Fetch a photo using the Wikipedia article thumbnail (most reliable for famous places)
+async function fetchWikipediaPhoto(wikiTitle, lat, lng, meta) {
+  try {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(wikiTitle)}&prop=pageimages&pithumbsize=1200&format=json&origin=*`;
+    log('debug', 'geo-wp-fetch', { title: wikiTitle });
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) { log('warn', 'geo-wp-http', { title: wikiTitle, status: resp.status }); return null; }
+    const data = await resp.json();
+    const pages = Object.values(data.query?.pages || {});
+    for (const page of pages) {
+      const thumbUrl = page.thumbnail?.source;
+      if (thumbUrl) {
+        log('info', 'geo-wp-ok', { title: wikiTitle, url: thumbUrl.slice(0, 80) });
+        return { photoUrl: thumbUrl, lat, lng,
+          country: meta.country || '?', city: meta.city || '?',
+          difficulty: meta.difficulty || 'medium', title: meta.title || wikiTitle.replace(/_/g, ' ') };
+      }
+    }
+    log('warn', 'geo-wp-nothumb', { title: wikiTitle, pageIds: pages.map(p => p.pageid).join(',') });
+    return null;
+  } catch (e) { log('warn', 'geo-wp-err', { title: wikiTitle, err: String(e).slice(0, 80) }); return null; }
+}
+
+// Fall back to Wikimedia text search when geosearch finds nothing
+async function fetchWikimediaTextSearch(searchTerm, lat, lng, meta) {
+  try {
+    const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsnamespace=6&gsrsearch=${encodeURIComponent(searchTerm)}&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*&gslimit=5`;
+    log('debug', 'geo-textsearch', { term: searchTerm });
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) { log('warn', 'geo-textsearch-http', { term: searchTerm, status: resp.status }); return null; }
+    const data = await resp.json();
+    const pages = Object.values(data.query?.pages || {});
+    for (const page of pages) {
+      const info = page.imageinfo?.[0];
+      const photoUrl = info?.thumburl || info?.url;
+      if (photoUrl && /\.(jpg|jpeg|png|webp)/i.test(photoUrl)) {
+        log('info', 'geo-textsearch-ok', { term: searchTerm });
+        return { photoUrl, lat, lng,
+          country: meta.country || '?', city: meta.city || '?',
+          difficulty: meta.difficulty || 'medium', title: meta.title || searchTerm };
+      }
+    }
+    log('warn', 'geo-textsearch-none', { term: searchTerm, hits: pages.length });
+    return null;
+  } catch (e) { log('warn', 'geo-textsearch-err', { term: searchTerm, err: String(e).slice(0, 80) }); return null; }
+}
+
+async function fetchGeoPhoto(lat, lng, meta) {
+  const label = (meta.title || 'unknown').slice(0, 40);
+  // Layer 1: Wikimedia Commons geosearch (try 50km then 200km radius)
+  for (const radius of [50000, 200000]) {
+    try {
+      const url = `https://commons.wikimedia.org/w/api.php?action=query&list=geosearch&gsradius=${radius}&gscoord=${lat}|${lng}&gslimit=10&gsnamespace=6&format=json&origin=*`;
+      log('debug', 'geo-geosearch', { label, lat: lat.toFixed(4), lng: lng.toFixed(4), radius });
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!resp.ok) { log('warn', 'geo-geosearch-http', { label, status: resp.status, radius }); break; }
+      const data = await resp.json();
+      const allHits = data.query?.geosearch || [];
+      const hits = allHits
+        .filter(h => !/\.(pdf|ogg|ogv|webm|mp4|mp3|wav|flac|midi|djvu)$/i.test(h.title))
+        .slice(0, 5);
+      log('debug', 'geo-geosearch-hits', { label, radius, total: allHits.length, usable: hits.length, titles: hits.map(h => h.title.slice(0,30)).join('|') });
+      for (const hit of hits) {
+        const imgName = hit.title.replace(/^File:/i, '');
+        const thumbUrl = await resolveWikimediaThumb(imgName);
+        if (thumbUrl) {
+          log('info', 'geo-photo-found', { label, layer: 'geosearch', radius });
+          return { photoUrl: thumbUrl, lat: hit.lat, lng: hit.lon,
+            country: meta.country || '?', city: meta.city || '?',
+            difficulty: meta.difficulty || 'medium',
+            title: imgName.replace(/_/g, ' ').replace(/\.[^.]+$/, '').slice(0, 80) };
+        }
+      }
+    } catch (e) { log('warn', 'geo-geosearch-err', { label, radius, err: String(e).slice(0, 80) }); }
+  }
+  // Layer 2: Wikipedia article thumbnail (guaranteed for famous places)
+  if (meta.wikiTitle) {
+    const wp = await fetchWikipediaPhoto(meta.wikiTitle, lat, lng, meta);
+    if (wp) { log('info', 'geo-photo-found', { label, layer: 'wikipedia' }); return wp; }
+  }
+  // Layer 3: Wikimedia text search by title
+  if (meta.title && meta.title !== 'Unknown') {
+    const ts = await fetchWikimediaTextSearch(meta.title, lat, lng, meta);
+    if (ts) { log('info', 'geo-photo-found', { label, layer: 'textsearch' }); return ts; }
+  }
+  log('warn', 'geo-photo-fail', { label, lat: lat.toFixed(4), lng: lng.toFixed(4), wikiTitle: meta.wikiTitle || 'none' });
+  return null;
+}
+
+async function selectGeoRounds(difficulty, totalRounds, customPhotos) {
+  const rounds = [];
+  for (const cp of (customPhotos || [])) {
+    if (rounds.length >= totalRounds) break;
+    const lat = parseFloat(cp.lat), lng = parseFloat(cp.lng);
+    const url = typeof cp.photoUrl === 'string' && /^https?:\/\//i.test(cp.photoUrl) ? cp.photoUrl.slice(0, 500) : null;
+    if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || !url) continue;
+    rounds.push({ photoUrl: url, lat, lng, country: String(cp.country || '?').slice(0, 50), city: String(cp.city || '').slice(0, 50), title: 'Custom Photo', difficulty: 'medium' });
+  }
+  const needed = totalRounds - rounds.length;
+  if (needed <= 0) return rounds;
+  const pool = getGeoDifficultyPool(difficulty);
+  const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(needed * 3, pool.length));
+  log('info', 'geo-select-start', { difficulty, totalRounds, needed, poolSize: pool.length, trying: shuffled.length });
+  const fetches = shuffled.map(e => fetchGeoPhoto(e.lat, e.lng, e));
+  const results = await Promise.allSettled(fetches);
+  const usedUrls = new Set();
+  let successCount = 0, failCount = 0;
+  for (const r of results) {
+    if (rounds.length >= totalRounds) break;
+    if (r.status === 'fulfilled' && r.value && !usedUrls.has(r.value.photoUrl)) {
+      usedUrls.add(r.value.photoUrl); rounds.push(r.value); successCount++;
+    } else { failCount++; }
+  }
+  log('info', 'geo-select-pass1', { got: successCount, failed: failCount, total: rounds.length });
+  if (rounds.length < totalRounds) {
+    log('info', 'geo-select-extras', { stillNeed: totalRounds - rounds.length });
+    const extras = Array.from({ length: 8 }, () => {
+      const c = randomGeoCoord(); return fetchGeoPhoto(c.lat, c.lng, { country: '?', city: '?', difficulty: 'medium', title: 'Unknown' });
+    });
+    const extraResults = await Promise.allSettled(extras);
+    for (const r of extraResults) {
+      if (rounds.length >= totalRounds) break;
+      if (r.status === 'fulfilled' && r.value && !usedUrls.has(r.value.photoUrl)) {
+        usedUrls.add(r.value.photoUrl); rounds.push(r.value);
+      }
+    }
+  }
+  log('info', 'geo-select-done', { final: rounds.length, needed: totalRounds });
+  return rounds.slice(0, totalRounds);
+}
+
+function randomGeoCoord() {
+  const regions = [
+    [35, 60, -10, 40], [20, 40, -10, 55], [-35, 35, -20, 55],
+    [5, 55, 60, 145], [25, 50, -130, -60], [-55, 15, -80, -35], [-45, -10, 110, 180],
+  ];
+  const r = regions[Math.floor(Math.random() * regions.length)];
+  return { lat: r[0] + Math.random() * (r[1] - r[0]), lng: r[2] + Math.random() * (r[3] - r[2]) };
+}
+
+function getGeoDifficultyPool(difficulty) {
+  if (difficulty === 'easy') return GEO_DB.filter(e => e.difficulty === 'easy');
+  if (difficulty === 'hard' || difficulty === 'nohints') return GEO_DB.filter(e => e.difficulty !== 'easy');
+  return GEO_DB;
+}
+
+const GEO_DB = [
+  // ── Easy — famous landmarks ──────────────────────────────────
+  { lat: 48.8584, lng: 2.2945, country: 'France', city: 'Paris', difficulty: 'easy', title: 'Eiffel Tower', wikiTitle: 'Eiffel_Tower' },
+  { lat: 41.8902, lng: 12.4922, country: 'Italy', city: 'Rome', difficulty: 'easy', title: 'Colosseum', wikiTitle: 'Colosseum' },
+  { lat: 27.1751, lng: 78.0421, country: 'India', city: 'Agra', difficulty: 'easy', title: 'Taj Mahal', wikiTitle: 'Taj_Mahal' },
+  { lat: 40.4319, lng: 116.5704, country: 'China', city: 'Beijing', difficulty: 'easy', title: 'Great Wall of China', wikiTitle: 'Great_Wall_of_China' },
+  { lat: 29.9792, lng: 31.1342, country: 'Egypt', city: 'Giza', difficulty: 'easy', title: 'Pyramids of Giza', wikiTitle: 'Egyptian_pyramids' },
+  { lat: 40.6892, lng: -74.0445, country: 'USA', city: 'New York', difficulty: 'easy', title: 'Statue of Liberty', wikiTitle: 'Statue_of_Liberty' },
+  { lat: 51.5007, lng: -0.1246, country: 'UK', city: 'London', difficulty: 'easy', title: 'Big Ben', wikiTitle: 'Big_Ben' },
+  { lat: 41.4036, lng: 2.1744, country: 'Spain', city: 'Barcelona', difficulty: 'easy', title: 'Sagrada Familia', wikiTitle: 'Sagrada_Família' },
+  { lat: -33.8568, lng: 151.2153, country: 'Australia', city: 'Sydney', difficulty: 'easy', title: 'Sydney Opera House', wikiTitle: 'Sydney_Opera_House' },
+  { lat: -22.9519, lng: -43.2105, country: 'Brazil', city: 'Rio de Janeiro', difficulty: 'easy', title: 'Christ the Redeemer', wikiTitle: 'Christ_the_Redeemer_(statue)' },
+  { lat: 25.1972, lng: 55.2744, country: 'UAE', city: 'Dubai', difficulty: 'easy', title: 'Burj Khalifa', wikiTitle: 'Burj_Khalifa' },
+  { lat: 37.9715, lng: 23.7257, country: 'Greece', city: 'Athens', difficulty: 'easy', title: 'Acropolis of Athens', wikiTitle: 'Acropolis_of_Athens' },
+  { lat: -13.1631, lng: -72.5450, country: 'Peru', city: 'Cusco', difficulty: 'easy', title: 'Machu Picchu', wikiTitle: 'Machu_Picchu' },
+  { lat: 13.4125, lng: 103.8660, country: 'Cambodia', city: 'Siem Reap', difficulty: 'easy', title: 'Angkor Wat', wikiTitle: 'Angkor_Wat' },
+  { lat: 35.3606, lng: 138.7274, country: 'Japan', city: 'Fujiyoshida', difficulty: 'easy', title: 'Mount Fuji', wikiTitle: 'Mount_Fuji' },
+  { lat: 43.8791, lng: 10.8997, country: 'Italy', city: 'Pisa', difficulty: 'easy', title: 'Leaning Tower of Pisa', wikiTitle: 'Leaning_Tower_of_Pisa' },
+  { lat: 37.8199, lng: -122.4783, country: 'USA', city: 'San Francisco', difficulty: 'easy', title: 'Golden Gate Bridge', wikiTitle: 'Golden_Gate_Bridge' },
+  { lat: 36.1069, lng: -112.1129, country: 'USA', city: 'Grand Canyon', difficulty: 'easy', title: 'Grand Canyon', wikiTitle: 'Grand_Canyon' },
+  { lat: 48.2093, lng: 16.3728, country: 'Austria', city: 'Vienna', difficulty: 'easy', title: 'Schönbrunn Palace', wikiTitle: 'Schönbrunn_Palace' },
+  { lat: 51.1789, lng: -1.8262, country: 'UK', city: 'Wiltshire', difficulty: 'easy', title: 'Stonehenge', wikiTitle: 'Stonehenge' },
+  { lat: 36.3932, lng: 25.4615, country: 'Greece', city: 'Santorini', difficulty: 'easy', title: 'Santorini Caldera', wikiTitle: 'Santorini' },
+  { lat: 45.4371, lng: 12.3328, country: 'Italy', city: 'Venice', difficulty: 'easy', title: 'Venice Grand Canal', wikiTitle: 'Grand_Canal_(Venice)' },
+  { lat: 55.7558, lng: 37.6173, country: 'Russia', city: 'Moscow', difficulty: 'easy', title: 'Red Square', wikiTitle: 'Red_Square' },
+  { lat: 39.9163, lng: 116.3972, country: 'China', city: 'Beijing', difficulty: 'easy', title: 'Forbidden City', wikiTitle: 'Forbidden_City' },
+  { lat: 20.9101, lng: 107.1839, country: 'Vietnam', city: 'Ha Long Bay', difficulty: 'easy', title: 'Ha Long Bay', wikiTitle: 'Ha_Long_Bay' },
+  { lat: 30.3285, lng: 35.4444, country: 'Jordan', city: 'Petra', difficulty: 'easy', title: 'Petra Treasury', wikiTitle: 'Petra' },
+  { lat: 38.6431, lng: 34.8289, country: 'Turkey', city: 'Nevşehir', difficulty: 'easy', title: 'Cappadocia', wikiTitle: 'Cappadocia' },
+  { lat: 43.0799, lng: -79.0747, country: 'Canada', city: 'Niagara', difficulty: 'easy', title: 'Niagara Falls', wikiTitle: 'Niagara_Falls' },
+  { lat: -3.0674, lng: 37.3556, country: 'Tanzania', city: 'Kilimanjaro', difficulty: 'easy', title: 'Mount Kilimanjaro', wikiTitle: 'Mount_Kilimanjaro' },
+  { lat: -17.9243, lng: 25.8572, country: 'Zimbabwe', city: 'Victoria Falls', difficulty: 'easy', title: 'Victoria Falls', wikiTitle: 'Victoria_Falls' },
+  { lat: -33.9625, lng: 18.4107, country: 'South Africa', city: 'Cape Town', difficulty: 'easy', title: 'Table Mountain', wikiTitle: 'Table_Mountain' },
+  { lat: -25.3444, lng: 131.0369, country: 'Australia', city: 'Northern Territory', difficulty: 'easy', title: 'Uluru', wikiTitle: 'Uluru' },
+  // ── Tunisia (20 entries) ──────────────────────────────────────
+  { lat: 35.2965, lng: 8.6935, country: 'Tunisia', city: 'El Jem', difficulty: 'easy', title: 'Amphitheater of El Jem', wikiTitle: 'El_Djem' },
+  { lat: 36.7992, lng: 10.1714, country: 'Tunisia', city: 'Tunis', difficulty: 'medium', title: 'Medina of Tunis', wikiTitle: 'Medina_of_Tunis' },
+  { lat: 36.8705, lng: 10.3434, country: 'Tunisia', city: 'Sidi Bou Said', difficulty: 'easy', title: 'Sidi Bou Said', wikiTitle: 'Sidi_Bou_Said' },
+  { lat: 35.6781, lng: 10.0517, country: 'Tunisia', city: 'Kairouan', difficulty: 'easy', title: 'Great Mosque of Kairouan', wikiTitle: 'Great_Mosque_of_Kairouan' },
+  { lat: 36.4228, lng: 9.2191, country: 'Tunisia', city: 'Dougga', difficulty: 'medium', title: 'Dougga Roman Ruins', wikiTitle: 'Dougga' },
+  { lat: 33.5000, lng: 8.0000, country: 'Tunisia', city: 'Tozeur', difficulty: 'medium', title: 'Chott el Djerid' },
+  { lat: 33.0667, lng: 9.0167, country: 'Tunisia', city: 'Tataouine', difficulty: 'hard', title: 'Ksar Ouled Soltane' },
+  { lat: 33.5406, lng: 9.9715, country: 'Tunisia', city: 'Matmata', difficulty: 'medium', title: 'Matmata Underground Houses' },
+  { lat: 33.9197, lng: 8.1337, country: 'Tunisia', city: 'Tozeur', difficulty: 'medium', title: 'Tozeur Oasis' },
+  { lat: 37.2736, lng: 9.8736, country: 'Tunisia', city: 'Bizerte', difficulty: 'medium', title: 'Port of Bizerte' },
+  { lat: 36.4000, lng: 10.6167, country: 'Tunisia', city: 'Hammamet', difficulty: 'medium', title: 'Hammamet Beach' },
+  { lat: 35.8286, lng: 10.6380, country: 'Tunisia', city: 'Sousse', difficulty: 'medium', title: 'Sousse Medina' },
+  { lat: 34.7398, lng: 10.7600, country: 'Tunisia', city: 'Sfax', difficulty: 'medium', title: 'Sfax Old City' },
+  { lat: 36.8528, lng: 10.3232, country: 'Tunisia', city: 'Carthage', difficulty: 'easy', title: 'Carthage Ruins' },
+  { lat: 36.4533, lng: 10.7358, country: 'Tunisia', city: 'Nabeul', difficulty: 'hard', title: 'Nabeul Pottery Town' },
+  { lat: 36.9553, lng: 8.7582, country: 'Tunisia', city: 'Tabarka', difficulty: 'hard', title: 'Tabarka Coastline' },
+  { lat: 35.7765, lng: 10.8262, country: 'Tunisia', city: 'Monastir', difficulty: 'medium', title: 'Monastir Ribat' },
+  { lat: 36.5569, lng: 8.7565, country: 'Tunisia', city: 'Jendouba', difficulty: 'hard', title: 'Bulla Regia Ruins' },
+  { lat: 33.4567, lng: 9.0236, country: 'Tunisia', city: 'Douz', difficulty: 'medium', title: 'Douz Desert Gateway' },
+  { lat: 33.2167, lng: 10.6833, country: 'Tunisia', city: 'Zarzis', difficulty: 'hard', title: 'Zarzis Coastal Area' },
+  // ── North Africa ──────────────────────────────────────────────
+  { lat: 31.6259, lng: -7.9891, country: 'Morocco', city: 'Marrakech', difficulty: 'easy', title: 'Djemaa el-Fna', wikiTitle: 'Djemaa_el-Fna' },
+  { lat: 35.1686, lng: -5.2697, country: 'Morocco', city: 'Chefchaouen', difficulty: 'easy', title: 'Blue City Chefchaouen', wikiTitle: 'Chefchaouen' },
+  { lat: 33.6083, lng: -7.6325, country: 'Morocco', city: 'Casablanca', difficulty: 'medium', title: 'Hassan II Mosque', wikiTitle: 'Hassan_II_Mosque' },
+  { lat: 34.0641, lng: -4.9776, country: 'Morocco', city: 'Fez', difficulty: 'medium', title: 'Fes el-Bali Medina', wikiTitle: 'Fes_el-Bali' },
+  { lat: 31.0475, lng: -7.1295, country: 'Morocco', city: 'Ouarzazate', difficulty: 'medium', title: 'Ait Benhaddou', wikiTitle: 'Aït_Benhaddou' },
+  { lat: 29.9753, lng: 31.1376, country: 'Egypt', city: 'Giza', difficulty: 'easy', title: 'Great Sphinx of Giza', wikiTitle: 'Great_Sphinx_of_Giza' },
+  { lat: 25.7188, lng: 32.6573, country: 'Egypt', city: 'Luxor', difficulty: 'easy', title: 'Karnak Temple', wikiTitle: 'Karnak' },
+  { lat: 22.3372, lng: 31.6259, country: 'Egypt', city: 'Aswan', difficulty: 'easy', title: 'Abu Simbel Temple', wikiTitle: 'Abu_Simbel' },
+  { lat: 30.0444, lng: 31.2357, country: 'Egypt', city: 'Cairo', difficulty: 'medium', title: 'Cairo Citadel', wikiTitle: 'Cairo_Citadel' },
+  { lat: 35.4842, lng: 6.4684, country: 'Algeria', city: 'Batna', difficulty: 'hard', title: 'Timgad Roman Ruins' },
+  { lat: 32.4908, lng: 3.6740, country: 'Algeria', city: 'Ghardaia', difficulty: 'hard', title: "Ghardaia M'Zab Valley" },
+  { lat: 32.6387, lng: 14.2975, country: 'Libya', city: 'Al Khums', difficulty: 'hard', title: 'Leptis Magna' },
+  // ── Europe ───────────────────────────────────────────────────
+  { lat: 50.0755, lng: 14.4378, country: 'Czech Republic', city: 'Prague', difficulty: 'medium', title: 'Prague Castle', wikiTitle: 'Prague_Castle' },
+  { lat: 52.3702, lng: 4.8952, country: 'Netherlands', city: 'Amsterdam', difficulty: 'medium', title: 'Amsterdam Canals', wikiTitle: 'Amsterdam' },
+  { lat: 55.9486, lng: -3.1999, country: 'UK', city: 'Edinburgh', difficulty: 'medium', title: 'Edinburgh Castle', wikiTitle: 'Edinburgh_Castle' },
+  { lat: 42.6507, lng: 18.0944, country: 'Croatia', city: 'Dubrovnik', difficulty: 'medium', title: 'Dubrovnik Old Town', wikiTitle: 'Dubrovnik' },
+  { lat: 37.1767, lng: -3.5886, country: 'Spain', city: 'Granada', difficulty: 'medium', title: 'Alhambra Palace', wikiTitle: 'Alhambra' },
+  { lat: 64.1355, lng: -21.8954, country: 'Iceland', city: 'Reykjavík', difficulty: 'medium', title: 'Icelandic Landscape' },
+  { lat: 60.3913, lng: 5.3221, country: 'Norway', city: 'Bergen', difficulty: 'medium', title: 'Bergen Fjords' },
+  { lat: 48.1351, lng: 11.5820, country: 'Germany', city: 'Munich', difficulty: 'medium', title: 'Marienplatz Munich' },
+  { lat: 47.3769, lng: 8.5417, country: 'Switzerland', city: 'Zürich', difficulty: 'hard', title: 'Zurich Old Town' },
+  { lat: 53.3498, lng: -6.2603, country: 'Ireland', city: 'Dublin', difficulty: 'hard', title: 'Dublin Streets' },
+  // ── Asia ──────────────────────────────────────────────────────
+  { lat: -8.4095, lng: 115.1889, country: 'Indonesia', city: 'Bali', difficulty: 'medium', title: 'Bali Rice Terraces' },
+  { lat: 35.0116, lng: 135.7681, country: 'Japan', city: 'Kyoto', difficulty: 'medium', title: 'Kyoto Fushimi Inari' },
+  { lat: 13.7563, lng: 100.5018, country: 'Thailand', city: 'Bangkok', difficulty: 'medium', title: 'Bangkok Temples' },
+  { lat: 28.6139, lng: 77.2090, country: 'India', city: 'New Delhi', difficulty: 'medium', title: 'India Gate Delhi' },
+  { lat: 27.9881, lng: 86.9250, country: 'Nepal', city: 'Solukhumbu', difficulty: 'hard', title: 'Everest Base Camp Area' },
+  { lat: 27.4728, lng: 89.6390, country: 'Bhutan', city: 'Thimphu', difficulty: 'hard', title: 'Bhutan Mountains' },
+  { lat: 4.1755, lng: 73.5093, country: 'Maldives', city: 'Malé', difficulty: 'hard', title: 'Maldives Atoll' },
+  { lat: 21.1717, lng: 94.8586, country: 'Myanmar', city: 'Bagan', difficulty: 'medium', title: 'Bagan Temples' },
+  { lat: 1.3521, lng: 103.8198, country: 'Singapore', city: 'Singapore', difficulty: 'medium', title: 'Singapore City' },
+  // ── Americas ─────────────────────────────────────────────────
+  { lat: 40.7580, lng: -73.9855, country: 'USA', city: 'New York', difficulty: 'easy', title: 'Times Square NYC' },
+  { lat: 19.4326, lng: -99.1332, country: 'Mexico', city: 'Mexico City', difficulty: 'medium', title: 'Zócalo Mexico City' },
+  { lat: 23.1370, lng: -82.3589, country: 'Cuba', city: 'Havana', difficulty: 'medium', title: 'Old Havana' },
+  { lat: 10.4230, lng: -75.5500, country: 'Colombia', city: 'Cartagena', difficulty: 'medium', title: 'Cartagena Walled City' },
+  { lat: -34.6037, lng: -58.3816, country: 'Argentina', city: 'Buenos Aires', difficulty: 'medium', title: 'Buenos Aires Centro' },
+  { lat: -33.4489, lng: -70.6693, country: 'Chile', city: 'Santiago', difficulty: 'medium', title: 'Santiago de Chile' },
+  { lat: -54.8019, lng: -68.3030, country: 'Argentina', city: 'Ushuaia', difficulty: 'hard', title: 'Ushuaia End of the World' },
+  { lat: -13.5319, lng: -71.9675, country: 'Peru', city: 'Cusco', difficulty: 'medium', title: 'Cusco Main Square' },
+  // ── Africa ───────────────────────────────────────────────────
+  { lat: -2.3333, lng: 34.8333, country: 'Tanzania', city: 'Serengeti', difficulty: 'hard', title: 'Serengeti Plains' },
+  { lat: 12.0320, lng: 39.0472, country: 'Ethiopia', city: 'Lalibela', difficulty: 'hard', title: 'Lalibela Rock Churches' },
+  { lat: 14.7167, lng: -17.4677, country: 'Senegal', city: 'Dakar', difficulty: 'medium', title: 'Dakar Atlantic Coast' },
+  // ── Oceania ──────────────────────────────────────────────────
+  { lat: -36.8485, lng: 174.7633, country: 'New Zealand', city: 'Auckland', difficulty: 'medium', title: 'Auckland City' },
+  { lat: -18.2861, lng: 147.6992, country: 'Australia', city: 'Queensland', difficulty: 'medium', title: 'Great Barrier Reef' },
+  { lat: -38.1368, lng: 176.2497, country: 'New Zealand', city: 'Rotorua', difficulty: 'hard', title: 'Rotorua Geysers' },
+  { lat: -37.8136, lng: 144.9631, country: 'Australia', city: 'Melbourne', difficulty: 'medium', title: 'Melbourne CBD' },
+];
+
 // ── Start ───────────────────────────────────────────────────────
 ensureFirestoreDatabase().then(async dbReady => {
   if (!dbReady) {
