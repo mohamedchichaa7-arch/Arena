@@ -2473,11 +2473,8 @@ wss.on('connection', (ws, req) => {
         const difficulty = ['easy', 'normal', 'hard', 'nohints'].includes(msg.difficulty) ? msg.difficulty : 'normal';
         const totalRounds = [5, 10, 15].includes(parseInt(msg.rounds)) ? parseInt(msg.rounds) : 10;
         const customPhotos = Array.isArray(msg.customPhotos) ? msg.customPhotos.slice(0, 5) : [];
-        const rounds = selectGeoRoundEntries(difficulty, totalRounds, customPhotos);
-        if (rounds.length === 0) { send(ws, { type: 'error', msg: 'No locations in database for this difficulty.' }); break; }
         room.geo = {
-          active: true, difficulty, totalRounds: Math.min(totalRounds, rounds.length),
-          currentRound: 0, rounds,
+          active: true, difficulty, totalRounds, currentRound: 0, rounds: [],
           phase: 'loading', phaseTimer: null, viewStart: null, guessStart: null,
           ready: new Set(), guesses: {},
           scores: Object.fromEntries([...room.players.keys()].map(pid => [pid, 0])),
@@ -2485,9 +2482,29 @@ wss.on('connection', (ws, req) => {
         };
         room.status = 'playing';
         broadcastLobby();
-        broadcastRoom(room.id, { type: 'geo-game-start', difficulty: room.geo.difficulty, totalRounds: room.geo.totalRounds });
-        geoStartViewPhase(room);
-        log('info', 'geo-start', { by: conn.name, roomId: room.id, difficulty, totalRounds: room.geo.totalRounds });
+        broadcastRoom(room.id, { type: 'geo-preparing', difficulty, totalRounds });
+        const geoRoomId = room.id;
+        selectGeoRounds(difficulty, totalRounds, customPhotos).then(rounds => {
+          const r = rooms.get(geoRoomId);
+          if (!r || !r.geo?.active || r.geo.phase !== 'loading') return;
+          if (rounds.length === 0) {
+            r.geo.active = false; r.status = 'waiting';
+            broadcastRoom(geoRoomId, { type: 'error', msg: 'No photos found. Check internet and try again.' });
+            broadcastLobby(); return;
+          }
+          r.geo.rounds = rounds;
+          r.geo.totalRounds = Math.min(r.geo.totalRounds, rounds.length);
+          broadcastRoom(geoRoomId, { type: 'geo-game-start', difficulty: r.geo.difficulty, totalRounds: r.geo.totalRounds });
+          geoStartViewPhase(r);
+        }).catch(err => {
+          const r = rooms.get(geoRoomId);
+          if (!r?.geo) return;
+          r.geo.active = false; r.status = 'waiting';
+          broadcastRoom(geoRoomId, { type: 'error', msg: 'Failed to load photos. Please try again.' });
+          broadcastLobby();
+          log('error', 'geo-start-fail', { roomId: geoRoomId, err: String(err) });
+        });
+        log('info', 'geo-start', { by: conn.name, roomId: room.id, difficulty, totalRounds });
         break;
       }
       case 'geo-ready': {
@@ -6888,10 +6905,7 @@ function geoStartViewPhase(room) {
   broadcastRoom(room.id, {
     type: 'geo-round-start',
     round: g.currentRound + 1, total: effectiveTotal,
-    // photoUrl only set for custom photos (already have a URL); DB entries are fetched by client
-    photoUrl: round.isCustom ? (round.photoUrl || null) : null,
-    wikiTitle: round.wikiTitle || null,
-    title: round.title || '',
+    photoUrl: round.photoUrl, title: round.title || '',
     country: g.difficulty !== 'nohints' ? (round.country || '') : '',
     city: g.difficulty !== 'nohints' ? (round.city || '') : '',
   });
@@ -6940,10 +6954,9 @@ function geoResolveRound(room) {
       distKm: Math.round(distKm), roundScore, speedBonus, totalRoundScore: total,
       cumulativeScore: g.scores[pid] });
   }
-  g.roundHistory.push({ round: g.currentRound + 1,
+  g.roundHistory.push({ round: g.currentRound + 1, photoUrl: round.photoUrl,
     correctLat: round.lat, correctLng: round.lng,
-    country: round.country || '', city: round.city || '', title: round.title || '',
-    wikiTitle: round.wikiTitle || null, results });
+    country: round.country || '', city: round.city || '', title: round.title || '', results });
   broadcastRoom(room.id, {
     type: 'geo-round-reveal',
     round: g.currentRound + 1, total: effectiveTotal,
@@ -6984,28 +6997,114 @@ function geoEndGame(room) {
   log('info', 'geo-game-over', { roomId: room.id, winnerId, score: winnerScore });
 }
 
-// Photo fetching moved to client (browser) — server has no outbound internet access.
+async function resolveWikimediaThumb(filename) {
+  try {
+    const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent('File:' + filename)}&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*`;
+    const resp = await fetch(apiUrl, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const page = Object.values(data.query?.pages || {})[0];
+    const url = page?.imageinfo?.[0]?.thumburl || page?.imageinfo?.[0]?.url;
+    return (url && /\.(jpg|jpeg|png|webp|gif)/i.test(url)) ? url : null;
+  } catch { return null; }
+}
 
-function selectGeoRoundEntries(difficulty, totalRounds, customPhotos) {
+async function fetchWikipediaPhoto(wikiTitle, lat, lng, meta) {
+  try {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(wikiTitle)}&prop=pageimages&pithumbsize=1200&format=json&origin=*`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    for (const page of Object.values(data.query?.pages || {})) {
+      if (page.thumbnail?.source)
+        return { photoUrl: page.thumbnail.source, lat, lng, country: meta.country || '?', city: meta.city || '?', difficulty: meta.difficulty || 'medium', title: meta.title || wikiTitle.replace(/_/g, ' ') };
+    }
+    return null;
+  } catch { return null; }
+}
+
+async function fetchWikimediaTextSearch(searchTerm, lat, lng, meta) {
+  try {
+    // gsrnamespace and gsrlimit are the correct prefixed params for generator=search
+    const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(searchTerm)}&gsrlimit=5&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    for (const page of Object.values(data.query?.pages || {})) {
+      const info = page.imageinfo?.[0];
+      const photoUrl = info?.thumburl || info?.url;
+      if (photoUrl && /\.(jpg|jpeg|png|webp)/i.test(photoUrl))
+        return { photoUrl, lat, lng, country: meta.country || '?', city: meta.city || '?', difficulty: meta.difficulty || 'medium', title: meta.title || searchTerm };
+    }
+    return null;
+  } catch { return null; }
+}
+
+async function fetchGeoPhoto(lat, lng, meta) {
+  // Layer 1: Wikimedia Commons geosearch (50km then 200km)
+  for (const radius of [50000, 200000]) {
+    try {
+      const url = `https://commons.wikimedia.org/w/api.php?action=query&list=geosearch&gsradius=${radius}&gscoord=${lat}|${lng}&gslimit=10&gsnamespace=6&format=json&origin=*`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!resp.ok) break;
+      const data = await resp.json();
+      const hits = (data.query?.geosearch || [])
+        .filter(h => !/\.(pdf|ogg|ogv|webm|mp4|mp3|wav|flac|midi|djvu)$/i.test(h.title))
+        .slice(0, 5);
+      for (const hit of hits) {
+        const thumbUrl = await resolveWikimediaThumb(hit.title.replace(/^File:/i, ''));
+        if (thumbUrl)
+          return { photoUrl: thumbUrl, lat: hit.lat, lng: hit.lon, country: meta.country || '?', city: meta.city || '?', difficulty: meta.difficulty || 'medium', title: hit.title.replace(/^File:/i,'').replace(/_/g,' ').replace(/\.[^.]+$/,'').slice(0,80) };
+      }
+    } catch {}
+  }
+  // Layer 2: Wikipedia article thumbnail (reliable for famous places with wikiTitle)
+  if (meta.wikiTitle) {
+    const wp = await fetchWikipediaPhoto(meta.wikiTitle, lat, lng, meta);
+    if (wp) return wp;
+  }
+  // Layer 3: Wikimedia text search
+  if (meta.title && meta.title !== 'Unknown') {
+    const ts = await fetchWikimediaTextSearch(meta.title, lat, lng, meta);
+    if (ts) return ts;
+  }
+  return null;
+}
+
+async function selectGeoRounds(difficulty, totalRounds, customPhotos) {
   const rounds = [];
   for (const cp of (customPhotos || [])) {
     if (rounds.length >= totalRounds) break;
     const lat = parseFloat(cp.lat), lng = parseFloat(cp.lng);
     const url = typeof cp.photoUrl === 'string' && /^https?:\/\//i.test(cp.photoUrl) ? cp.photoUrl.slice(0, 500) : null;
     if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || !url) continue;
-    // Custom photos already have a URL; flag so client skips fetching
-    rounds.push({ photoUrl: url, lat, lng, country: String(cp.country || '?').slice(0, 50), city: String(cp.city || '').slice(0, 50), title: 'Custom Photo', difficulty: 'medium', isCustom: true });
+    rounds.push({ photoUrl: url, lat, lng, country: String(cp.country || '?').slice(0, 50), city: String(cp.city || '').slice(0, 50), title: 'Custom Photo', difficulty: 'medium' });
   }
   const needed = totalRounds - rounds.length;
   if (needed <= 0) return rounds;
   const pool = getGeoDifficultyPool(difficulty);
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  for (const entry of shuffled) {
+  const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(needed * 3, pool.length));
+  const results = await Promise.allSettled(shuffled.map(e => fetchGeoPhoto(e.lat, e.lng, e)));
+  const usedUrls = new Set();
+  for (const r of results) {
     if (rounds.length >= totalRounds) break;
-    rounds.push({ lat: entry.lat, lng: entry.lng, country: entry.country || '?', city: entry.city || '',
-      title: entry.title || '?', wikiTitle: entry.wikiTitle || null, difficulty: entry.difficulty || 'medium' });
+    if (r.status === 'fulfilled' && r.value && !usedUrls.has(r.value.photoUrl)) {
+      usedUrls.add(r.value.photoUrl); rounds.push(r.value);
+    }
   }
-  log('info', 'geo-rounds-selected', { difficulty, count: rounds.length });
+  if (rounds.length < totalRounds) {
+    const extras = await Promise.allSettled(Array.from({ length: 8 }, () => {
+      const c = randomGeoCoord();
+      return fetchGeoPhoto(c.lat, c.lng, { country: '?', city: '?', difficulty: 'medium', title: 'Unknown' });
+    }));
+    for (const r of extras) {
+      if (rounds.length >= totalRounds) break;
+      if (r.status === 'fulfilled' && r.value && !usedUrls.has(r.value.photoUrl)) {
+        usedUrls.add(r.value.photoUrl); rounds.push(r.value);
+      }
+    }
+  }
+  log('info', 'geo-rounds-ready', { difficulty, count: rounds.length, needed: totalRounds });
   return rounds.slice(0, totalRounds);
 }
 
