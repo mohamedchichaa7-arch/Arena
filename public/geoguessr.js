@@ -165,7 +165,7 @@ cpUrl?.addEventListener('input', () => {
 function initCpMap() {
   if (cpMap) { cpMap.invalidateSize(); return; }
   cpMap = L.map('cpMap', { center:[20,0], zoom:1 });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(cpMap);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution:'© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(cpMap);
   cpMap.on('click', e => {
     cpLat = e.latlng.lat; cpLng = e.latlng.lng;
     if (cpMarker) cpMarker.setLatLng(e.latlng);
@@ -241,8 +241,8 @@ function closeLightbox() { $('lightbox').style.display = 'none'; }
 function initGuessMap() {
   if (guessMap) { guessMap.invalidateSize(); return; }
   guessMap = L.map('map', { center:[20,0], zoom:2, minZoom:1 });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom:18,
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © CARTO', maxZoom:19,
   }).addTo(guessMap);
   guessMap.on('click', onGuessClick);
 }
@@ -278,7 +278,7 @@ function buildRevealMap(data) {
   const el = $('revealMap');
   if (!el) return;
   revealMap = L.map(el, { zoomControl:true });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(revealMap);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution:'© OpenStreetMap © CARTO' }).addTo(revealMap);
 
   const bounds = [];
   const correctLL = [data.correctLat, data.correctLng];
@@ -382,7 +382,7 @@ function buildRecapMap(data) {
   const el = $('recapMap');
   if (!el) return;
   recapMap = L.map(el, { center:[20,0], zoom:2 });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(recapMap);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution:'© OpenStreetMap © CARTO' }).addTo(recapMap);
   const bounds = [];
   (data.roundHistory || []).forEach((rh, i) => {
     const ll = [rh.correctLat, rh.correctLng];

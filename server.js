@@ -7275,14 +7275,14 @@ async function fetchGeoPhoto(lat, lng, meta) {
     const wp = await fetchWikipediaPhoto(meta.wikiTitle, lat, lng, meta);
     if (wp) { log('debug', 'geo-photo-found', { label, layer: 'wikipedia' }); return wp; }
   }
-  // Layer 3: Wikimedia text search
-  if (meta.title && meta.title !== 'Unknown') {
-    const ts = await fetchWikimediaTextSearch(meta.title, lat, lng, meta);
-    if (ts) { log('debug', 'geo-photo-found', { label, layer: 'textsearch' }); return ts; }
-  }
+  // Layer 3 (text search) removed — returns non-location images (books, diagrams, etc.)
   log('warn', 'geo-photo-fail', { label, wikiTitle: meta.wikiTitle || 'none' });
   return null;
 }
+
+// Tracks titles used in recent games so the same location isn't repeated across games
+const geoRecentTitles = new Set();
+const GEO_RECENT_MAX = 40;
 
 async function selectGeoRounds(difficulty, totalRounds, customPhotos) {
   const rounds = [];
@@ -7296,15 +7296,19 @@ async function selectGeoRounds(difficulty, totalRounds, customPhotos) {
   const needed = totalRounds - rounds.length;
   if (needed <= 0) return rounds;
   const pool = getGeoDifficultyPool(difficulty);
-  const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(needed * 3, pool.length));
-  log('info', 'geo-select-start', { difficulty, totalRounds, poolSize: pool.length, trying: shuffled.length });
+  // Prefer entries not seen recently; fall back to all entries if not enough fresh ones
+  const fresh = pool.filter(e => !geoRecentTitles.has(e.title));
+  const candidates = (fresh.length >= needed ? fresh : pool).sort(() => Math.random() - 0.5).slice(0, Math.min(needed * 3, pool.length));
+  log('info', 'geo-select-start', { difficulty, totalRounds, poolSize: pool.length, fresh: fresh.length, trying: candidates.length });
   const usedUrls = new Set(rounds.map(r => r.photoUrl));
   // Sequential fetching — parallel requests trigger Wikimedia 429 rate limiting
-  for (const entry of shuffled) {
+  for (const entry of candidates) {
     if (rounds.length >= totalRounds) break;
     const result = await fetchGeoPhoto(entry.lat, entry.lng, entry);
     if (result && !usedUrls.has(result.photoUrl)) {
       usedUrls.add(result.photoUrl); rounds.push(result);
+      geoRecentTitles.add(entry.title);
+      if (geoRecentTitles.size > GEO_RECENT_MAX) geoRecentTitles.delete(geoRecentTitles.values().next().value);
     }
   }
   log('info', 'geo-select-done', { got: rounds.length, needed: totalRounds });
