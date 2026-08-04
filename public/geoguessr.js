@@ -50,6 +50,8 @@ let selectedDifficulty = 'normal';
 let selectedRounds = 10;
 let customPhotos = [];          // { photoUrl, lat, lng, country, city }
 
+let roundPhotoUrls = {};        // round number → resolved photo URL
+
 // ── Leaflet maps ──────────────────────────────────────────────────
 let guessMap = null, guessMarker = null;
 let revealMap = null;
@@ -385,7 +387,8 @@ function buildRecapMap(data) {
   (data.roundHistory || []).forEach((rh, i) => {
     const ll = [rh.correctLat, rh.correctLng];
     bounds.push(ll);
-    const popupContent = (rh.photoUrl ? `<img src="${escHtml(rh.photoUrl)}" style="width:120px;height:72px;object-fit:cover;border-radius:6px;display:block;margin-bottom:4px">` : '') +
+    const popupContent = (roundPhotoUrls[i+1] || rh.photoUrl
+      ? `<img src="${escHtml(roundPhotoUrls[i+1] || rh.photoUrl)}" style="width:120px;height:72px;object-fit:cover;border-radius:6px;display:block;margin-bottom:4px">` : '') +
       `<b>${escHtml(rh.title || [rh.city,rh.country].filter(Boolean).join(', ') || '?')}</b>`;
     L.marker(ll, { icon: numPinIcon(i+1) }).addTo(recapMap).bindPopup(popupContent);
   });
@@ -395,7 +398,8 @@ function buildRecapMap(data) {
 // ── Rematch / lobby buttons ────────────────────────────────────────
 btnRematch?.addEventListener('click', () => {
   if (recapMap) { recapMap.remove(); recapMap = null; }
-  gameScores = {};
+  // Clear photo cache for the new game
+  roundPhotoUrls = {};
   for (const [pid] of players) gameScores[pid] = 0;
   showPhase('lobby');
   statusEl.textContent = 'Waiting to start…';
@@ -460,11 +464,23 @@ function handleMsg(msg) {
       roundData = msg;
       myGuessLat = null; myGuessLng = null; guessConfirmed = false; opponentGuessed = false;
       showPhase('viewing');
-      $('roundPhoto').src = msg.photoUrl;
+      $('roundPhoto').src = msg.photoUrl || '';
       $('roundIndicator').textContent = `Round ${msg.round} / ${msg.total}`;
       $('readyStatus').textContent = '';
       enableReadyDelayed();
       startTimer(30, $('viewTimer'), () => {});
+      // Fetch photo in the browser if not already provided (custom photos have a URL)
+      if (!msg.photoUrl) {
+        fetchGeoPhotoClient(msg.wikiTitle, msg.title).then(url => {
+          if (url) {
+            roundData.photoUrl = url;
+            roundPhotoUrls[msg.round] = url;
+            $('roundPhoto').src = url;
+          }
+        });
+      } else {
+        roundPhotoUrls[msg.round] = msg.photoUrl;
+      }
       break;
     }
 
@@ -539,6 +555,43 @@ function handleMsg(msg) {
       break;
     }
   }
+}
+
+// ── Client-side Wikimedia photo fetch ────────────────────────────
+async function resolveWikimediaThumbClient(filename) {
+  try {
+    const url = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent('File:' + filename)}&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*`;
+    const data = await fetch(url).then(r => r.json());
+    const page = Object.values(data.query?.pages || {})[0];
+    const thumb = page?.imageinfo?.[0]?.thumburl || page?.imageinfo?.[0]?.url;
+    return (thumb && /\.(jpg|jpeg|png|webp|gif)/i.test(thumb)) ? thumb : null;
+  } catch { return null; }
+}
+
+async function fetchGeoPhotoClient(wikiTitle, title) {
+  // Layer 1: Wikipedia article thumbnail
+  if (wikiTitle) {
+    try {
+      const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(wikiTitle)}&prop=pageimages&pithumbsize=1200&format=json&origin=*`;
+      const data = await fetch(url).then(r => r.json());
+      for (const page of Object.values(data.query?.pages || {})) {
+        if (page.thumbnail?.source) return page.thumbnail.source;
+      }
+    } catch {}
+  }
+  // Layer 2: Wikimedia Commons text search by title
+  if (title && title !== 'Custom Photo') {
+    try {
+      const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsnamespace=6&gsrsearch=${encodeURIComponent(title)}&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*&gslimit=8`;
+      const data = await fetch(url).then(r => r.json());
+      for (const page of Object.values(data.query?.pages || {})) {
+        const info = page.imageinfo?.[0];
+        const src = info?.thumburl || info?.url;
+        if (src && /\.(jpg|jpeg|png|webp)/i.test(src)) return src;
+      }
+    } catch {}
+  }
+  return null;
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────
