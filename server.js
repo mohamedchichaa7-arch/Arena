@@ -6997,10 +6997,16 @@ function geoEndGame(room) {
   log('info', 'geo-game-over', { roomId: room.id, winnerId, score: winnerScore });
 }
 
+// Wikimedia API policy requires a descriptive User-Agent; omitting it causes aggressive rate limiting
+const GEO_UA = 'ArenaMultiplayerGames/1.0 (multiplayer-arena; https://arena-games.onrender.com)';
+function geoFetch(url, timeoutMs = 7000) {
+  return fetch(url, { headers: { 'User-Agent': GEO_UA, 'Api-User-Agent': GEO_UA }, signal: AbortSignal.timeout(timeoutMs) });
+}
+
 async function resolveWikimediaThumb(filename) {
   try {
     const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent('File:' + filename)}&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*`;
-    const resp = await fetch(apiUrl, { signal: AbortSignal.timeout(5000) });
+    const resp = await geoFetch(apiUrl, 5000);
     if (!resp.ok) { log('warn', 'geo-thumb-http', { file: filename.slice(0, 60), status: resp.status }); return null; }
     const data = await resp.json();
     const page = Object.values(data.query?.pages || {})[0];
@@ -7014,7 +7020,7 @@ async function resolveWikimediaThumb(filename) {
 async function fetchWikipediaPhoto(wikiTitle, lat, lng, meta) {
   try {
     const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(wikiTitle)}&prop=pageimages&pithumbsize=1200&format=json&origin=*`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const resp = await geoFetch(url, 6000);
     if (!resp.ok) { log('warn', 'geo-wp-http', { title: wikiTitle, status: resp.status }); return null; }
     const data = await resp.json();
     for (const page of Object.values(data.query?.pages || {})) {
@@ -7032,7 +7038,7 @@ async function fetchWikimediaTextSearch(searchTerm, lat, lng, meta) {
   try {
     // gsrnamespace and gsrlimit are the correct prefixed params for generator=search
     const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(searchTerm)}&gsrlimit=5&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const resp = await geoFetch(url, 6000);
     if (!resp.ok) { log('warn', 'geo-textsearch-http', { term: searchTerm.slice(0,40), status: resp.status }); return null; }
     const data = await resp.json();
     const pages = Object.values(data.query?.pages || {});
@@ -7056,7 +7062,7 @@ async function fetchGeoPhoto(lat, lng, meta) {
   for (const radius of [50000, 200000]) {
     try {
       const url = `https://commons.wikimedia.org/w/api.php?action=query&list=geosearch&gsradius=${radius}&gscoord=${lat}|${lng}&gslimit=10&gsnamespace=6&format=json&origin=*`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const resp = await geoFetch(url, 6000);
       if (!resp.ok) { log('warn', 'geo-geosearch-http', { label, radius, status: resp.status }); break; }
       const data = await resp.json();
       const hits = (data.query?.geosearch || [])
@@ -7100,29 +7106,16 @@ async function selectGeoRounds(difficulty, totalRounds, customPhotos) {
   const pool = getGeoDifficultyPool(difficulty);
   const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(needed * 3, pool.length));
   log('info', 'geo-select-start', { difficulty, totalRounds, poolSize: pool.length, trying: shuffled.length });
-  const results = await Promise.allSettled(shuffled.map(e => fetchGeoPhoto(e.lat, e.lng, e)));
-  const usedUrls = new Set();
-  let ok = 0, fail = 0;
-  for (const r of results) {
+  const usedUrls = new Set(rounds.map(r => r.photoUrl));
+  // Sequential fetching — parallel requests trigger Wikimedia 429 rate limiting
+  for (const entry of shuffled) {
     if (rounds.length >= totalRounds) break;
-    if (r.status === 'fulfilled' && r.value && !usedUrls.has(r.value.photoUrl)) {
-      usedUrls.add(r.value.photoUrl); rounds.push(r.value); ok++;
-    } else { fail++; }
-  }
-  log('info', 'geo-select-pass1', { ok, fail, total: rounds.length });
-  if (rounds.length < totalRounds) {
-    const extras = await Promise.allSettled(Array.from({ length: 8 }, () => {
-      const c = randomGeoCoord();
-      return fetchGeoPhoto(c.lat, c.lng, { country: '?', city: '?', difficulty: 'medium', title: 'Unknown' });
-    }));
-    for (const r of extras) {
-      if (rounds.length >= totalRounds) break;
-      if (r.status === 'fulfilled' && r.value && !usedUrls.has(r.value.photoUrl)) {
-        usedUrls.add(r.value.photoUrl); rounds.push(r.value);
-      }
+    const result = await fetchGeoPhoto(entry.lat, entry.lng, entry);
+    if (result && !usedUrls.has(result.photoUrl)) {
+      usedUrls.add(result.photoUrl); rounds.push(result);
     }
   }
-  log('info', 'geo-rounds-ready', { difficulty, count: rounds.length, needed: totalRounds });
+  log('info', 'geo-select-done', { got: rounds.length, needed: totalRounds });
   return rounds.slice(0, totalRounds);
 }
 
