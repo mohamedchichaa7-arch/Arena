@@ -241,7 +241,7 @@
     for (const r of rooms) {
       const card = document.createElement('div');
       card.className = 'room-card';
-      const icon = r.type === 'tetris' ? '\u{1F3AE}' : r.type === 'tictactoe' ? '\u2B55' : r.type === 'bluffrummy' ? '\u{1F0CF}' : r.type === 'rami' ? '\u{1F3B4}' : r.type === 'pool' ? '\u{1F3B1}' : r.type === 'battleship' ? '\u2693' : r.type === 'egame' ? '\u{1F451}' : r.type === 'snakesladders' ? '\u{1F40D}' : r.type === 'uno' ? '\u{1F3B4}' : r.type === 'tanks' ? '\u{1F3EE}' : r.type === 'bomberman' ? '\u{1F4A3}' : r.type === 'minesweeper' ? '\u{1F4A5}' : r.type === 'barricade' ? '\u{1F6A7}' : r.type === 'td' ? '\u{1F3F0}' : r.type === 'sudoku' ? '\u{1F522}' : r.type === 'geoguessr' ? '\u{1F30D}' : '\u{1F3C1}';
+      const icon = r.type === 'tetris' ? '\u{1F3AE}' : r.type === 'tictactoe' ? '\u2B55' : r.type === 'bluffrummy' ? '\u{1F0CF}' : r.type === 'rami' ? '\u{1F3B4}' : r.type === 'pool' ? '\u{1F3B1}' : r.type === 'battleship' ? '\u2693' : r.type === 'egame' ? '\u{1F451}' : r.type === 'snakesladders' ? '\u{1F40D}' : r.type === 'uno' ? '\u{1F3B4}' : r.type === 'tanks' ? '\u{1F3EE}' : r.type === 'bomberman' ? '\u{1F4A3}' : r.type === 'minesweeper' ? '\u{1F4A5}' : r.type === 'barricade' ? '\u{1F6A7}' : r.type === 'td' ? '\u{1F3F0}' : r.type === 'sudoku' ? '\u{1F522}' : r.type === 'geoguessr' ? '\u{1F30D}' : r.type === 'memoryduel' ? '\u{1F0CF}' : '\u{1F3C1}';
       const statusCls = r.status === 'playing' ? 'playing' : 'waiting';
       const full = r.players >= r.maxPlayers;
       const lockBadge = r.locked ? '<span class="room-lock">\uD83D\uDD12</span>' : '';
@@ -282,6 +282,7 @@
     ballescape: 'Highest level reached',
     sudoku: 'Highest puzzle score',
     geoguessr: 'Total match wins',
+    memoryduel: 'Total wins',
   };
 
   // ── Game Picker ──

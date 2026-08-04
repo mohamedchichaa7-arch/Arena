@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr', 'memoryduel']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr', 'memoryduel']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html', '/memoryduel': '/memoryduel.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -605,6 +605,18 @@ function removeFromRoom(conn) {
       broadcastLobby();
     }
   }
+  if (room.md && room.md.active) {
+    if (room.md.stealWindow?.stealTimer) { clearTimeout(room.md.stealWindow.stealTimer); room.md.stealWindow.stealTimer = null; }
+    if (room.players.size === 0) {
+      room.md = null;
+    } else {
+      const [[winId, winP]] = [...room.players.entries()];
+      room.md.active = false;
+      room.status = 'waiting';
+      broadcastRoom(room.id, { type: 'md-opponent-left', winnerId: winId, winnerName: winP.name });
+      broadcastLobby();
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -612,7 +624,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active) || (room.md?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -708,9 +720,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : msg.gameType === 'memoryduel' ? 'memoryduel' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' || type === 'memoryduel' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -828,6 +840,10 @@ wss.on('connection', (ws, req) => {
         if (room.status === 'playing' && room.type === 'geoguessr') {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
+        // Lock memoryduel rooms while game is running
+        if (room.status === 'playing' && room.type === 'memoryduel') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
 
         removeFromRoom(conn); // leave any existing room
         conn.mode = 'room';
@@ -850,6 +866,10 @@ wss.on('connection', (ws, req) => {
         // Send current GeoGuessr lobby config to the joiner
         if (room.type === 'geoguessr' && room.geoConfig) {
           send(ws, { type: 'geo-config', difficulty: room.geoConfig.difficulty, totalRounds: room.geoConfig.totalRounds });
+        }
+        // Send current Memory Duel lobby config to the joiner
+        if (room.type === 'memoryduel' && room.mdConfig) {
+          send(ws, { type: 'md-lobby-config', gridSize: room.mdConfig.gridSize, stealWindowMs: room.mdConfig.stealWindowMs, ghostMode: room.mdConfig.ghostMode, cardTheme: room.mdConfig.cardTheme });
         }
 
         // Restore BR hand on reconnect
@@ -2460,6 +2480,178 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(conn.roomId);
         if (!room || !room.td?.active) break;
         tdSendEnemies(room, id, parseInt(msg.packageIdx), msg.targetId);
+        break;
+      }
+
+      // ── Memory Duel ────────────────────────────────────────────
+      case 'md-lobby-config': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'memoryduel') break;
+        if (room.players.keys().next().value !== id) break;
+        if (room.md?.active) break;
+        const validSizes = ['4x4', '6x6', '8x6'];
+        const validSw = [1000, 2000, 3000];
+        const gs = validSizes.includes(msg.gridSize) ? msg.gridSize : '6x6';
+        const sw = validSw.includes(Number(msg.stealWindowMs)) ? Number(msg.stealWindowMs) : 2000;
+        const gm = !!msg.ghostMode;
+        const ct = ['emoji', 'numbers', 'colors'].includes(msg.cardTheme) ? msg.cardTheme : 'emoji';
+        room.mdConfig = { gridSize: gs, stealWindowMs: sw, ghostMode: gm, cardTheme: ct };
+        broadcastRoom(room.id, { type: 'md-lobby-config', gridSize: gs, stealWindowMs: sw, ghostMode: gm, cardTheme: ct }, id);
+        break;
+      }
+      case 'md-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'memoryduel') break;
+        if (room.players.keys().next().value !== id) break;
+        if (room.md?.active) break;
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2 players to start' }); break; }
+        const gs = room.mdConfig?.gridSize || '6x6';
+        const sw = room.mdConfig?.stealWindowMs || 2000;
+        const gm = room.mdConfig?.ghostMode || false;
+        const ct = room.mdConfig?.cardTheme || 'emoji';
+        const [cols, rows] = gs === '4x4' ? [4, 4] : gs === '8x6' ? [8, 6] : [6, 6];
+        const totalCards = cols * rows;
+        const pairCount = totalCards / 2;
+        const deck = [];
+        for (let i = 0; i < pairCount; i++) {
+          deck.push({ value: i, emoji: MD_EMOJIS[i], color: MD_COLORS[i] });
+          deck.push({ value: i, emoji: MD_EMOJIS[i], color: MD_COLORS[i] });
+        }
+        for (let i = deck.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [deck[i], deck[j]] = [deck[j], deck[i]];
+        }
+        const grid = deck.map(card => ({ value: card.value, emoji: card.emoji, color: card.color, captured: false, capturedBy: null }));
+        const playerIds = [...room.players.keys()];
+        const turnId = playerIds[Math.floor(Math.random() * playerIds.length)];
+        const scores = {}, streaks = {}, stealStats = {}, longestStreak = {};
+        for (const pid of playerIds) { scores[pid] = 0; streaks[pid] = 0; stealStats[pid] = { attempts: 0, successes: 0, failures: 0 }; longestStreak[pid] = 0; }
+        room.md = {
+          active: true, grid, gridSize: gs, cols, rows, totalCards, pairCount,
+          turnId, scores, streaks, stealStats, longestStreak,
+          penalties: new Set(), stealWindow: null, firstFlip: null, turnPhase: 'idle',
+          capturedPairs: 0, totalPairs: pairCount, winner: null,
+          stealWindowMs: sw, ghostMode: gm, cardTheme: ct,
+          startedAt: Date.now(), lastCaptor: null,
+        };
+        room.status = 'playing';
+        broadcastLobby();
+        broadcastRoom(room.id, { type: 'md-go', gridSize: gs, cols, rows, totalCards, pairCount, turnId, stealWindowMs: sw, ghostMode: gm, cardTheme: ct, scores: { ...scores } });
+        log('info', 'md-start', { roomId: room.id, gridSize: gs, pairCount, turnId });
+        break;
+      }
+      case 'md-flip': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.md?.active) break;
+        const md = room.md;
+        if (md.turnId !== id) break;
+        if (md.turnPhase !== 'idle' && md.turnPhase !== 'second-flip') break;
+        const pos = Number(msg.pos);
+        if (!Number.isInteger(pos) || pos < 0 || pos >= md.grid.length) break;
+        const card = md.grid[pos];
+        if (!card || card.captured) break;
+        if (md.turnPhase === 'idle') {
+          md.firstFlip = { pos, value: card.value, emoji: card.emoji, color: card.color };
+          md.turnPhase = 'steal-window';
+          broadcastRoom(room.id, { type: 'md-card-revealed', pos, value: card.value, emoji: card.emoji, color: card.color });
+          const endsAt = Date.now() + md.stealWindowMs;
+          md.stealWindow = {
+            active: true, firstPos: pos, firstValue: card.value, endsAt,
+            stealTimer: setTimeout(() => {
+              if (!room.md?.stealWindow?.active) return;
+              room.md.stealWindow.active = false;
+              room.md.stealWindow.stealTimer = null;
+              room.md.turnPhase = 'second-flip';
+              broadcastRoom(room.id, { type: 'md-steal-window-close' });
+            }, md.stealWindowMs),
+          };
+          broadcastRoom(room.id, { type: 'md-steal-window-open', durationMs: md.stealWindowMs, pos, value: card.value, emoji: card.emoji, color: card.color });
+        } else if (md.turnPhase === 'second-flip') {
+          if (pos === md.firstFlip.pos) break;
+          if (card.captured) break;
+          md.turnPhase = 'resolving';
+          broadcastRoom(room.id, { type: 'md-card-revealed', pos, value: card.value, emoji: card.emoji, color: card.color });
+          const first = md.firstFlip;
+          const activeId = id;
+          setTimeout(() => {
+            if (!room.md?.active) return;
+            if (first.value === card.value) {
+              md.grid[first.pos].captured = true; md.grid[first.pos].capturedBy = activeId;
+              md.grid[pos].captured = true; md.grid[pos].capturedBy = activeId;
+              md.streaks[activeId] = (md.streaks[activeId] || 0) + 1;
+              if (md.streaks[activeId] > (md.longestStreak[activeId] || 0)) md.longestStreak[activeId] = md.streaks[activeId];
+              const bonus = md.streaks[activeId] >= 3 ? md.streaks[activeId] - 2 : 0;
+              md.scores[activeId] = (md.scores[activeId] || 0) + 1 + bonus;
+              md.capturedPairs++;
+              md.lastCaptor = activeId;
+              const ap = room.players.get(activeId);
+              broadcastRoom(room.id, { type: 'md-pair-captured', captorId: activeId, captorName: ap?.name || '?', positions: [first.pos, pos], value: first.value, emoji: first.emoji, color: first.color, newScores: { ...md.scores }, streak: md.streaks[activeId], bonus });
+              if (md.capturedPairs >= md.totalPairs) { mdEndGame(room); return; }
+              md.firstFlip = null;
+              md.stealWindow = null;
+              md.turnPhase = 'idle';
+            } else {
+              md.streaks[activeId] = 0;
+              md.firstFlip = null;
+              md.stealWindow = null;
+              broadcastRoom(room.id, { type: 'md-no-match', positions: [first.pos, pos] });
+              mdAdvanceTurn(room, activeId);
+            }
+          }, 1500);
+        }
+        break;
+      }
+      case 'md-steal-attempt': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.md?.active) break;
+        const md = room.md;
+        if (md.turnId === id) break;
+        if (!md.stealWindow?.active) break;
+        if (Date.now() > md.stealWindow.endsAt + 200) break; // 200ms server leniency
+        const sPos = Number(msg.pos);
+        if (!Number.isInteger(sPos) || sPos < 0 || sPos >= md.grid.length) break;
+        const sCard = md.grid[sPos];
+        if (!sCard || sCard.captured || sPos === md.stealWindow.firstPos) break;
+        if (md.stealWindow.stealTimer) { clearTimeout(md.stealWindow.stealTimer); md.stealWindow.stealTimer = null; }
+        md.stealWindow.active = false;
+        md.turnPhase = 'resolving';
+        const firstPos = md.stealWindow.firstPos;
+        const firstValue = md.stealWindow.firstValue;
+        md.stealStats[id].attempts++;
+        const stealerId = id;
+        const originalTurnId = md.turnId;
+        if (sCard.value === firstValue) {
+          md.stealStats[stealerId].successes++;
+          md.grid[firstPos].captured = true; md.grid[firstPos].capturedBy = stealerId;
+          md.grid[sPos].captured = true; md.grid[sPos].capturedBy = stealerId;
+          md.streaks[stealerId] = (md.streaks[stealerId] || 0) + 1;
+          if (md.streaks[stealerId] > (md.longestStreak[stealerId] || 0)) md.longestStreak[stealerId] = md.streaks[stealerId];
+          md.streaks[originalTurnId] = 0;
+          const isPerfectSteal = md.capturedPairs === 0;
+          const bonus = isPerfectSteal ? 3 : 1;
+          md.scores[stealerId] = (md.scores[stealerId] || 0) + 1 + bonus;
+          md.capturedPairs++;
+          md.lastCaptor = stealerId;
+          const sp = room.players.get(stealerId);
+          broadcastRoom(room.id, { type: 'md-steal-success', stealerId, stealerName: sp?.name || '?', positions: [firstPos, sPos], value: firstValue, emoji: md.grid[firstPos].emoji, color: md.grid[firstPos].color, newScores: { ...md.scores }, streak: md.streaks[stealerId], bonus, isPerfectSteal });
+          if (md.capturedPairs >= md.totalPairs) { setTimeout(() => mdEndGame(room), 1400); return; }
+          md.firstFlip = null;
+          md.stealWindow = null;
+          setTimeout(() => {
+            if (!room.md?.active) return;
+            md.turnPhase = 'idle';
+            mdAdvanceTurn(room, stealerId);
+          }, 1400);
+        } else {
+          md.stealStats[stealerId].failures++;
+          md.penalties.add(stealerId);
+          broadcastRoom(room.id, { type: 'md-steal-failed', attempterId: stealerId, wrongPos: sPos });
+          setTimeout(() => {
+            if (!room.md?.active) return;
+            md.turnPhase = 'second-flip';
+            broadcastRoom(room.id, { type: 'md-steal-window-close' });
+          }, 800);
+        }
         break;
       }
 
@@ -7132,6 +7324,66 @@ function getGeoDifficultyPool(difficulty) {
   if (difficulty === 'easy') return GEO_DB.filter(e => e.difficulty === 'easy');
   if (difficulty === 'hard' || difficulty === 'nohints') return GEO_DB.filter(e => e.difficulty !== 'easy');
   return GEO_DB;
+}
+
+// ── Memory Duel helpers ───────────────────────────────────────────
+const MD_EMOJIS = ['🐶','🐱','🐸','🦊','🐼','🐨','🦁','🐯','🦋','🌸','🌺','🍕','🍔','🎸','🎮','🚀','🌈','⚡','🔥','💎','👑','🎯','🎪','🏆'];
+const MD_COLORS = ['#6d28d9','#1d4ed8','#0891b2','#059669','#65a30d','#d97706','#dc2626','#db2777','#7c3aed','#2563eb','#0e7490','#047857','#4d7c0f','#b45309','#b91c1c','#9d174d','#5b21b6','#1e40af','#155e75','#064e3b','#365314','#78350f','#7f1d1d','#831843'];
+
+function mdAdvanceTurn(room, fromId) {
+  if (!room.md?.active) return;
+  const md = room.md;
+  const playerIds = [...room.players.keys()];
+  const fromIdx = playerIds.indexOf(fromId);
+  let nextIdx = (fromIdx + 1) % playerIds.length;
+  let nextId = playerIds[nextIdx];
+  let skipReason = undefined;
+  if (md.penalties.has(nextId)) {
+    md.penalties.delete(nextId);
+    skipReason = 'steal-penalty';
+    const skippedId = nextId;
+    nextIdx = (nextIdx + 1) % playerIds.length;
+    nextId = playerIds[nextIdx];
+    broadcastRoom(room.id, { type: 'md-turn-change', activeId: skippedId, skipped: true, skipReason, nextId });
+    setTimeout(() => {
+      if (!room.md?.active) return;
+      md.turnId = nextId;
+      md.firstFlip = null;
+      md.stealWindow = null;
+      md.turnPhase = 'idle';
+      broadcastRoom(room.id, { type: 'md-turn-change', activeId: nextId });
+    }, 1500);
+    return;
+  }
+  md.turnId = nextId;
+  md.firstFlip = null;
+  md.stealWindow = null;
+  md.turnPhase = 'idle';
+  broadcastRoom(room.id, { type: 'md-turn-change', activeId: nextId });
+}
+
+function mdEndGame(room) {
+  if (!room.md) return;
+  const md = room.md;
+  md.active = false;
+  room.status = 'waiting';
+  const playerIds = [...room.players.keys()];
+  let winnerId = null, highScore = -1, tie = false;
+  for (const pid of playerIds) {
+    const s = md.scores[pid] || 0;
+    if (s > highScore) { highScore = s; winnerId = pid; tie = false; }
+    else if (s === highScore) { tie = true; }
+  }
+  if (tie && md.lastCaptor) winnerId = md.lastCaptor;
+  md.winner = winnerId;
+  const winnerName = room.players.get(winnerId)?.name || '?';
+  const stats = {};
+  for (const pid of playerIds) {
+    stats[pid] = { score: md.scores[pid] || 0, stealAttempts: md.stealStats[pid]?.attempts || 0, stealSuccesses: md.stealStats[pid]?.successes || 0, stealFailures: md.stealStats[pid]?.failures || 0, longestStreak: md.longestStreak[pid] || 0 };
+  }
+  broadcastRoom(room.id, { type: 'md-game-over', winnerId, winnerName, scores: { ...md.scores }, stats });
+  broadcastLobby();
+  log('info', 'md-end', { roomId: room.id, winnerId, winnerName });
 }
 
 const GEO_DB = [

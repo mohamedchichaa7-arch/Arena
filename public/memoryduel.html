@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Memory Duel — Game Arena</title>
+  <link rel="stylesheet" href="memoryduel.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">0</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+      <div class="score-panel" id="scorePanel" style="display:none">
+        <div class="score-divider"></div>
+        <div class="score-row" id="scoreRow1"></div>
+        <div class="score-row" id="scoreRow2"></div>
+        <div class="pairs-left" id="pairsLeft"></div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar">👥</button>
+        <h1 class="logo logo-sm">MEMORY DUEL</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+
+      <!-- Lobby controls -->
+      <div class="lobby-area" id="lobbyArea">
+        <p class="status-msg" id="status">Connecting…</p>
+        <div class="lobby-config" id="lobbyConfig" style="display:none">
+          <h2 class="config-title">Game Settings</h2>
+          <div class="config-row">
+            <label>Grid Size</label>
+            <div class="config-opts" id="cfgGridSize">
+              <button class="cfg-btn" data-val="4x4">4×4<span class="cfg-sub">8 pairs · Quick</span></button>
+              <button class="cfg-btn active" data-val="6x6">6×6<span class="cfg-sub">18 pairs · Standard</span></button>
+              <button class="cfg-btn" data-val="8x6">8×6<span class="cfg-sub">24 pairs · Long</span></button>
+            </div>
+          </div>
+          <div class="config-row">
+            <label>Steal Window</label>
+            <div class="config-opts" id="cfgStealWindow">
+              <button class="cfg-btn" data-val="1000">1s<span class="cfg-sub">Lightning</span></button>
+              <button class="cfg-btn active" data-val="2000">2s<span class="cfg-sub">Standard</span></button>
+              <button class="cfg-btn" data-val="3000">3s<span class="cfg-sub">Relaxed</span></button>
+            </div>
+          </div>
+          <div class="config-row">
+            <label>Ghost Mode</label>
+            <div class="config-opts" id="cfgGhostMode">
+              <button class="cfg-btn active" data-val="false">Off<span class="cfg-sub">For experts</span></button>
+              <button class="cfg-btn" data-val="true">On<span class="cfg-sub">Memory aid</span></button>
+            </div>
+          </div>
+          <div class="config-row">
+            <label>Card Theme</label>
+            <div class="config-opts" id="cfgCardTheme">
+              <button class="cfg-btn active" data-val="emoji">Emoji<span class="cfg-sub">Visual</span></button>
+              <button class="cfg-btn" data-val="numbers">Numbers<span class="cfg-sub">Classic</span></button>
+              <button class="cfg-btn" data-val="colors">Colors<span class="cfg-sub">Accessible</span></button>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-lg" id="btnStart" style="display:none">▶ Start Game</button>
+        <p class="waiting-hint" id="waitingHint" style="display:none">Waiting for host to start…</p>
+      </div>
+
+      <!-- Game area -->
+      <div class="game-area" id="gameArea" style="display:none">
+        <div class="turn-banner" id="turnBanner"></div>
+        <div class="card-grid" id="cardGrid"></div>
+        <div class="steal-zone" id="stealZone">
+          <div class="steal-hint" id="stealHint"></div>
+          <button class="steal-btn" id="stealBtn" disabled>
+            <svg class="steal-ring" viewBox="0 0 60 60">
+              <circle class="ring-bg" cx="30" cy="30" r="27"/>
+              <circle class="ring-fg" id="stealRingFg" cx="30" cy="30" r="27"/>
+            </svg>
+            <span class="steal-label">STEAL</span>
+          </button>
+        </div>
+        <div class="penalty-notice" id="penaltyNotice" style="display:none">⚠️ Your next turn is skipped</div>
+      </div>
+
+      <!-- Result overlay -->
+      <div class="overlay" id="resultOverlay" style="display:none">
+        <div class="result-card">
+          <div class="result-trophy" id="resultTrophy">🏆</div>
+          <h2 class="result-title" id="resultTitle"></h2>
+          <div class="result-scores" id="resultScores"></div>
+          <div class="result-stats" id="resultStats"></div>
+          <button class="btn btn-primary btn-lg" id="btnPlayAgain">Play Again</button>
+        </div>
+      </div>
+
+      <!-- Ghost overlay -->
+      <div class="ghost-overlay" id="ghostOverlay" style="display:none"></div>
+    </main>
+  </div>
+
+  <!-- Rules modal -->
+  <div class="overlay" id="rulesOverlay" style="display:none">
+    <div class="result-card rules-card">
+      <h2>Memory Duel Rules</h2>
+      <ul class="rules-list">
+        <li>Take turns flipping two face-down cards to find matching pairs.</li>
+        <li>Find a match → keep the pair and <strong>take another turn</strong>.</li>
+        <li>No match → cards flip back, turn passes to opponent.</li>
+        <li><strong>Steal:</strong> after your opponent flips their first card, a steal window opens. Click <em>STEAL</em> then click the matching card to steal the pair!</li>
+        <li>Wrong steal → you lose your next turn.</li>
+        <li>Streak bonus: 3+ consecutive captures = +1 point per extra pair.</li>
+        <li>Steal bonus: successful steal = +1 extra point.</li>
+        <li>Perfect steal (first flip of game) = +3 extra points!</li>
+        <li>Most pairs wins. Tiebreaker: last pair captured.</li>
+      </ul>
+      <button class="btn btn-primary" id="btnCloseRules">Got it</button>
+    </div>
+  </div>
+
+  <script src="memoryduel.js"></script>
+</body>
+</html>
