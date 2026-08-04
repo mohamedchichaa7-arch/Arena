@@ -2590,6 +2590,7 @@ wss.on('connection', (ws, req) => {
               md.firstFlip = null;
               md.stealWindow = null;
               md.turnPhase = 'idle';
+              broadcastRoom(room.id, { type: 'md-turn-change', activeId: activeId });
             } else {
               md.streaks[activeId] = 0;
               md.firstFlip = null;
