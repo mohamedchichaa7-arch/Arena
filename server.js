@@ -7001,26 +7001,31 @@ async function resolveWikimediaThumb(filename) {
   try {
     const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent('File:' + filename)}&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*`;
     const resp = await fetch(apiUrl, { signal: AbortSignal.timeout(5000) });
-    if (!resp.ok) return null;
+    if (!resp.ok) { log('warn', 'geo-thumb-http', { file: filename.slice(0, 60), status: resp.status }); return null; }
     const data = await resp.json();
     const page = Object.values(data.query?.pages || {})[0];
     const url = page?.imageinfo?.[0]?.thumburl || page?.imageinfo?.[0]?.url;
-    return (url && /\.(jpg|jpeg|png|webp|gif)/i.test(url)) ? url : null;
-  } catch { return null; }
+    if (url && /\.(jpg|jpeg|png|webp|gif)/i.test(url)) return url;
+    log('warn', 'geo-thumb-badext', { file: filename.slice(0, 60), url: String(url).slice(0, 80) });
+    return null;
+  } catch (e) { log('warn', 'geo-thumb-err', { file: filename.slice(0, 60), err: String(e).slice(0, 80) }); return null; }
 }
 
 async function fetchWikipediaPhoto(wikiTitle, lat, lng, meta) {
   try {
     const url = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(wikiTitle)}&prop=pageimages&pithumbsize=1200&format=json&origin=*`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!resp.ok) return null;
+    if (!resp.ok) { log('warn', 'geo-wp-http', { title: wikiTitle, status: resp.status }); return null; }
     const data = await resp.json();
     for (const page of Object.values(data.query?.pages || {})) {
-      if (page.thumbnail?.source)
+      if (page.thumbnail?.source) {
+        log('debug', 'geo-wp-ok', { title: wikiTitle });
         return { photoUrl: page.thumbnail.source, lat, lng, country: meta.country || '?', city: meta.city || '?', difficulty: meta.difficulty || 'medium', title: meta.title || wikiTitle.replace(/_/g, ' ') };
+      }
     }
+    log('warn', 'geo-wp-nothumb', { title: wikiTitle });
     return null;
-  } catch { return null; }
+  } catch (e) { log('warn', 'geo-wp-err', { title: wikiTitle, err: String(e).slice(0, 80) }); return null; }
 }
 
 async function fetchWikimediaTextSearch(searchTerm, lat, lng, meta) {
@@ -7028,46 +7033,56 @@ async function fetchWikimediaTextSearch(searchTerm, lat, lng, meta) {
     // gsrnamespace and gsrlimit are the correct prefixed params for generator=search
     const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(searchTerm)}&gsrlimit=5&prop=imageinfo&iiprop=url&iiurlwidth=1200&format=json&origin=*`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
-    if (!resp.ok) return null;
+    if (!resp.ok) { log('warn', 'geo-textsearch-http', { term: searchTerm.slice(0,40), status: resp.status }); return null; }
     const data = await resp.json();
-    for (const page of Object.values(data.query?.pages || {})) {
+    const pages = Object.values(data.query?.pages || {});
+    if (data.warnings) log('warn', 'geo-textsearch-apiwarn', { term: searchTerm.slice(0,40), warn: JSON.stringify(data.warnings).slice(0,120) });
+    for (const page of pages) {
       const info = page.imageinfo?.[0];
       const photoUrl = info?.thumburl || info?.url;
-      if (photoUrl && /\.(jpg|jpeg|png|webp)/i.test(photoUrl))
+      if (photoUrl && /\.(jpg|jpeg|png|webp)/i.test(photoUrl)) {
+        log('debug', 'geo-textsearch-ok', { term: searchTerm.slice(0,40) });
         return { photoUrl, lat, lng, country: meta.country || '?', city: meta.city || '?', difficulty: meta.difficulty || 'medium', title: meta.title || searchTerm };
+      }
     }
+    log('warn', 'geo-textsearch-none', { term: searchTerm.slice(0,40), hits: pages.length });
     return null;
-  } catch { return null; }
+  } catch (e) { log('warn', 'geo-textsearch-err', { term: searchTerm.slice(0,40), err: String(e).slice(0, 80) }); return null; }
 }
 
 async function fetchGeoPhoto(lat, lng, meta) {
+  const label = (meta.title || 'unknown').slice(0, 40);
   // Layer 1: Wikimedia Commons geosearch (50km then 200km)
   for (const radius of [50000, 200000]) {
     try {
       const url = `https://commons.wikimedia.org/w/api.php?action=query&list=geosearch&gsradius=${radius}&gscoord=${lat}|${lng}&gslimit=10&gsnamespace=6&format=json&origin=*`;
       const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
-      if (!resp.ok) break;
+      if (!resp.ok) { log('warn', 'geo-geosearch-http', { label, radius, status: resp.status }); break; }
       const data = await resp.json();
       const hits = (data.query?.geosearch || [])
         .filter(h => !/\.(pdf|ogg|ogv|webm|mp4|mp3|wav|flac|midi|djvu)$/i.test(h.title))
         .slice(0, 5);
+      log('debug', 'geo-geosearch-hits', { label, radius, hits: hits.length });
       for (const hit of hits) {
         const thumbUrl = await resolveWikimediaThumb(hit.title.replace(/^File:/i, ''));
-        if (thumbUrl)
+        if (thumbUrl) {
+          log('debug', 'geo-photo-found', { label, layer: 'geosearch', radius });
           return { photoUrl: thumbUrl, lat: hit.lat, lng: hit.lon, country: meta.country || '?', city: meta.city || '?', difficulty: meta.difficulty || 'medium', title: hit.title.replace(/^File:/i,'').replace(/_/g,' ').replace(/\.[^.]+$/,'').slice(0,80) };
+        }
       }
-    } catch {}
+    } catch (e) { log('warn', 'geo-geosearch-err', { label, radius, err: String(e).slice(0, 80) }); }
   }
   // Layer 2: Wikipedia article thumbnail (reliable for famous places with wikiTitle)
   if (meta.wikiTitle) {
     const wp = await fetchWikipediaPhoto(meta.wikiTitle, lat, lng, meta);
-    if (wp) return wp;
+    if (wp) { log('debug', 'geo-photo-found', { label, layer: 'wikipedia' }); return wp; }
   }
   // Layer 3: Wikimedia text search
   if (meta.title && meta.title !== 'Unknown') {
     const ts = await fetchWikimediaTextSearch(meta.title, lat, lng, meta);
-    if (ts) return ts;
+    if (ts) { log('debug', 'geo-photo-found', { label, layer: 'textsearch' }); return ts; }
   }
+  log('warn', 'geo-photo-fail', { label, wikiTitle: meta.wikiTitle || 'none' });
   return null;
 }
 
@@ -7084,14 +7099,17 @@ async function selectGeoRounds(difficulty, totalRounds, customPhotos) {
   if (needed <= 0) return rounds;
   const pool = getGeoDifficultyPool(difficulty);
   const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(needed * 3, pool.length));
+  log('info', 'geo-select-start', { difficulty, totalRounds, poolSize: pool.length, trying: shuffled.length });
   const results = await Promise.allSettled(shuffled.map(e => fetchGeoPhoto(e.lat, e.lng, e)));
   const usedUrls = new Set();
+  let ok = 0, fail = 0;
   for (const r of results) {
     if (rounds.length >= totalRounds) break;
     if (r.status === 'fulfilled' && r.value && !usedUrls.has(r.value.photoUrl)) {
-      usedUrls.add(r.value.photoUrl); rounds.push(r.value);
-    }
+      usedUrls.add(r.value.photoUrl); rounds.push(r.value); ok++;
+    } else { fail++; }
   }
+  log('info', 'geo-select-pass1', { ok, fail, total: rounds.length });
   if (rounds.length < totalRounds) {
     const extras = await Promise.allSettled(Array.from({ length: 8 }, () => {
       const c = randomGeoCoord();
