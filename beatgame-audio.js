@@ -115,22 +115,43 @@ function setCached(type, url, data) {
 
 // ── YouTube ──────────────────────────────────────────────────────────
 const YT_URL_RE = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)/i;
+// android/ios clients historically skip the PO-token "sign in to confirm you're
+// not a bot" check that the default web client hits on datacenter IPs (Render etc.)
+const YT_CLIENT_ARGS = ['--extractor-args', 'youtube:player_client=android,ios,web'];
+
+function friendlyYtError(err) {
+  const raw = String((err && (err.stderr || err.message)) || err || '');
+  if (/sign in to confirm|not a bot/i.test(raw)) return 'YouTube blocked this download (bot/sign-in check). Try a different video, or use Spotify / file upload instead.';
+  if (/private video|video unavailable/i.test(raw)) return 'This video is private or unavailable.';
+  if (/age[- ]restrict/i.test(raw)) return 'This video is age-restricted and cannot be downloaded here.';
+  if (/copyright/i.test(raw)) return 'This video is blocked due to a copyright claim.';
+  if (/match-filter|does not pass filter/i.test(raw)) return 'Video duration must be between 30 seconds and 8 minutes.';
+  return 'Failed to fetch this YouTube video. Try a different video, or use Spotify / file upload instead.';
+}
 
 async function fetchYoutubeMeta(url) {
-  const { stdout } = await execFileAsync('python3', ['-m', 'yt_dlp', '--dump-json', '--no-warnings', '--no-playlist', url], { timeout: 20000, maxBuffer: 20 * 1024 * 1024, env: pyEnv() });
-  const firstLine = stdout.trim().split('\n')[0];
-  const info = JSON.parse(firstLine);
-  return { id: info.id, title: info.title || 'Untitled', thumbnail: info.thumbnail || null, duration: info.duration || 0 };
+  try {
+    const { stdout } = await execFileAsync('python3', ['-m', 'yt_dlp', ...YT_CLIENT_ARGS, '--dump-json', '--no-warnings', '--no-playlist', url], { timeout: 20000, maxBuffer: 20 * 1024 * 1024, env: pyEnv() });
+    const firstLine = stdout.trim().split('\n')[0];
+    const info = JSON.parse(firstLine);
+    return { id: info.id, title: info.title || 'Untitled', thumbnail: info.thumbnail || null, duration: info.duration || 0 };
+  } catch (err) {
+    throw new Error(friendlyYtError(err));
+  }
 }
 
 async function downloadYoutubeAudio(url, id) {
   const outTemplate = path.join(TEMP_DIR, `beatgame_${id}.%(ext)s`);
-  await execFileAsync('python3', [
-    '-m', 'yt_dlp',
-    '-x', '--audio-format', 'wav', '--audio-quality', '0', '--no-playlist',
-    '--match-filter', 'duration >= 30 & duration <= 480',
-    '-o', outTemplate, url,
-  ], { timeout: 120000, maxBuffer: 20 * 1024 * 1024, env: pyEnv() });
+  try {
+    await execFileAsync('python3', [
+      '-m', 'yt_dlp', ...YT_CLIENT_ARGS,
+      '-x', '--audio-format', 'wav', '--audio-quality', '0', '--no-playlist',
+      '--match-filter', 'duration >= 30 & duration <= 480',
+      '-o', outTemplate, url,
+    ], { timeout: 120000, maxBuffer: 20 * 1024 * 1024, env: pyEnv() });
+  } catch (err) {
+    throw new Error(friendlyYtError(err));
+  }
   const wavPath = path.join(TEMP_DIR, `beatgame_${id}.wav`);
   if (!fs.existsSync(wavPath)) throw new Error('yt-dlp did not produce an audio file (video may be unavailable, private, or age-restricted)');
   return wavPath;

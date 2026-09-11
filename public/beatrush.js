@@ -335,7 +335,7 @@ function initThree() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050508);
-  scene.fog = new THREE.Fog(0x050508, 20, 55);
+  scene.fog = new THREE.Fog(0x050508, 40, 100);
   camera = new THREE.PerspectiveCamera(70, 1, 0.1, 200);
   camera.position.set(0, 0.5, 4.5);
   camera.lookAt(0, 0.3, -10);
@@ -415,25 +415,41 @@ function makeArrowTexture(direction) {
   return tex;
 }
 
+function makeGlowSprite(color) {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  const hex = '#' + color.toString(16).padStart(6, '0');
+  grad.addColorStop(0, hex); grad.addColorStop(0.4, hex); grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(3, 3, 3);
+  return sprite;
+}
+
 function spawnNoteMesh(note) {
   let mesh;
   if (note.type === 'bomb') {
-    const geo = new THREE.IcosahedronGeometry(0.45, 0);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, emissive: 0xff0000, emissiveIntensity: 0.6, roughness: 0.6 });
+    const geo = new THREE.IcosahedronGeometry(0.65, 0);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, emissive: 0xff0000, emissiveIntensity: 0.9, roughness: 0.6 });
     mesh = new THREE.Mesh(geo, mat);
+    mesh.add(makeGlowSprite(0xff0000));
   } else {
     const color = note.lane % 2 === 0 ? 0xff3366 : 0x3366ff;
-    const geo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
-    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4, roughness: 0.4 });
+    const geo = new THREE.BoxGeometry(1.15, 1.15, 1.15);
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9, roughness: 0.3 });
     mesh = new THREE.Mesh(geo, mat);
+    mesh.add(makeGlowSprite(color));
     const spriteMat = new THREE.SpriteMaterial({ map: makeArrowTexture(note.direction), depthTest: false });
     const sprite = new THREE.Sprite(spriteMat);
-    sprite.scale.set(0.6, 0.6, 0.6);
-    sprite.position.z = 0.45;
+    sprite.scale.set(0.95, 0.95, 0.95);
+    sprite.position.z = 0.6;
     mesh.add(sprite);
   }
   mesh.position.set(LANE_X[note.lane], 0.4, SPAWN_Z);
-  const light = new THREE.PointLight(note.type === 'bomb' ? 0xff0000 : (note.lane % 2 === 0 ? 0xff3366 : 0x3366ff), 0.8, 4);
+  const light = new THREE.PointLight(note.type === 'bomb' ? 0xff0000 : (note.lane % 2 === 0 ? 0xff3366 : 0x3366ff), 1.5, 8);
   mesh.add(light);
   scene.add(mesh);
   note.mesh = mesh;
@@ -547,11 +563,10 @@ function judgeMiss(note) {
   note.judged = true;
   combo = 0; multiplier = 1;
   counts.miss++;
-  health -= 10;
+  health = Math.max(0, health - 10);
   showJudge('MISS', '#666666');
   if (note.mesh) { scene.remove(note.mesh); note.mesh = null; }
   updateHud();
-  checkFail();
 }
 
 function judgeBomb(note) {
@@ -559,15 +574,10 @@ function judgeBomb(note) {
   combo = 0; multiplier = 1;
   totalScore = Math.max(0, totalScore - 10);
   counts.bomb++;
-  health -= 10;
+  health = Math.max(0, health - 10);
   showJudge('BOMB!', '#ff3333');
   if (note.mesh) { burstParticles(note.mesh.position, 0xff0000); scene.remove(note.mesh); note.mesh = null; }
   updateHud();
-  checkFail();
-}
-
-function checkFail() {
-  if (health <= 0 && !ended) { endGame(true); }
 }
 
 const KEY_DIR = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', q: 'up-left', e: 'up-right', z: 'down-left', c: 'down-right', ' ': 'dot' };
