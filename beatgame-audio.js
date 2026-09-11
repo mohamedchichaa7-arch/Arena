@@ -19,6 +19,16 @@ const execFileAsync = promisify(execFile);
 const TEMP_DIR = path.join(os.tmpdir(), 'arena-beatgame');
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
+// yt-dlp is pip-installed into this fixed project-local dir at build time
+// (render.yaml: `pip3 install --target ./py-deps yt-dlp`) — using PYTHONPATH
+// instead of relying on `pip --user` avoids HOME/site-packages mismatches
+// between the build and runtime environment on Render.
+const PY_DEPS_DIR = path.join(__dirname, 'py-deps');
+function pyEnv() {
+  const existing = process.env.PYTHONPATH;
+  return { ...process.env, PYTHONPATH: existing ? `${PY_DEPS_DIR}${path.delimiter}${existing}` : PY_DEPS_DIR };
+}
+
 let ytDlpAvailable = false;
 let ffmpegAvailable = false;
 let activeJobs = 0;
@@ -27,7 +37,7 @@ const MAX_CONCURRENT_JOBS = 3;
 async function checkTools(log) {
   const logFn = log || (() => {});
   try {
-    await execFileAsync('python3', ['-m', 'yt_dlp', '--version'], { timeout: 10000 });
+    await execFileAsync('python3', ['-m', 'yt_dlp', '--version'], { timeout: 10000, env: pyEnv() });
     ytDlpAvailable = true;
   } catch {
     ytDlpAvailable = false;
@@ -79,7 +89,7 @@ function setCached(type, url, data) {
 const YT_URL_RE = /^https?:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)/i;
 
 async function fetchYoutubeMeta(url) {
-  const { stdout } = await execFileAsync('python3', ['-m', 'yt_dlp', '--dump-json', '--no-warnings', '--no-playlist', url], { timeout: 20000, maxBuffer: 20 * 1024 * 1024 });
+  const { stdout } = await execFileAsync('python3', ['-m', 'yt_dlp', '--dump-json', '--no-warnings', '--no-playlist', url], { timeout: 20000, maxBuffer: 20 * 1024 * 1024, env: pyEnv() });
   const firstLine = stdout.trim().split('\n')[0];
   const info = JSON.parse(firstLine);
   return { id: info.id, title: info.title || 'Untitled', thumbnail: info.thumbnail || null, duration: info.duration || 0 };
@@ -92,7 +102,7 @@ async function downloadYoutubeAudio(url, id) {
     '-x', '--audio-format', 'wav', '--audio-quality', '0', '--no-playlist',
     '--match-filter', 'duration >= 30 & duration <= 480',
     '-o', outTemplate, url,
-  ], { timeout: 120000, maxBuffer: 20 * 1024 * 1024 });
+  ], { timeout: 120000, maxBuffer: 20 * 1024 * 1024, env: pyEnv() });
   const wavPath = path.join(TEMP_DIR, `beatgame_${id}.wav`);
   if (!fs.existsSync(wavPath)) throw new Error('yt-dlp did not produce an audio file (video may be unavailable, private, or age-restricted)');
   return wavPath;

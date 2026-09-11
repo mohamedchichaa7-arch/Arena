@@ -40,6 +40,9 @@ build/Release
 # Dependency directories
 node_modules/
 
+# Beat Rush — yt-dlp installed here at build time via render.yaml, not committed
+py-deps/
+
 # Firebase service account — contains private key, never commit
 service-account.json
 jspm_packages/
