@@ -33,15 +33,43 @@ let ytDlpAvailable = false;
 let ffmpegAvailable = false;
 let activeJobs = 0;
 const MAX_CONCURRENT_JOBS = 3;
+let toolsCheckPromise = null;
 
-async function checkTools(log) {
+// Self-healing install: works even if the host's dashboard build command was
+// never updated to run `pip3 install ... yt-dlp` (e.g. render.yaml only takes
+// effect for Blueprint-managed services — a plain dashboard-created Web Service
+// ignores it). python3-pip is available at runtime on Render's native Node
+// image too, so we can install on first boot instead of relying on the build step.
+async function ensureYtDlpInstalled(logFn) {
+  if (!fs.existsSync(PY_DEPS_DIR)) fs.mkdirSync(PY_DEPS_DIR, { recursive: true });
+  try {
+    await execFileAsync('pip3', ['install', '--break-system-packages', '--target', PY_DEPS_DIR, 'yt-dlp'], { timeout: 90000, env: pyEnv() });
+    return true;
+  } catch (err) {
+    logFn('warn', 'beatgame-ytdlp-install-failed', { err: String(err.message || err).split('\n')[0].slice(0, 300) });
+    return false;
+  }
+}
+
+function checkTools(log) {
+  toolsCheckPromise = doCheckTools(log);
+  return toolsCheckPromise;
+}
+
+async function doCheckTools(log) {
   const logFn = log || (() => {});
   try {
     await execFileAsync('python3', ['-m', 'yt_dlp', '--version'], { timeout: 10000, env: pyEnv() });
     ytDlpAvailable = true;
   } catch {
-    ytDlpAvailable = false;
-    logFn('warn', 'beatgame-ytdlp-missing', { msg: 'yt-dlp not found (pip install yt-dlp) — YouTube support disabled for Beat Rush' });
+    logFn('info', 'beatgame-ytdlp-installing', { msg: 'yt-dlp not found — attempting one-time pip install…' });
+    if (await ensureYtDlpInstalled(logFn)) {
+      try {
+        await execFileAsync('python3', ['-m', 'yt_dlp', '--version'], { timeout: 10000, env: pyEnv() });
+        ytDlpAvailable = true;
+      } catch { ytDlpAvailable = false; }
+    }
+    if (!ytDlpAvailable) logFn('warn', 'beatgame-ytdlp-missing', { msg: 'yt-dlp not found (pip install yt-dlp) — YouTube support disabled for Beat Rush' });
   }
   try {
     await execFileAsync('ffmpeg', ['-version'], { timeout: 10000 });
@@ -346,6 +374,7 @@ async function analyzeAudioFile(playbackFilePath, sessionSeed, seedStr) {
 async function prepareSong(payload) {
   const type = payload && payload.type;
   if (!['youtube', 'spotify', 'upload'].includes(type)) throw new Error('Invalid source type');
+  if (toolsCheckPromise) await toolsCheckPromise; // don't race the one-time yt-dlp self-install
   if (!ffmpegAvailable) throw new Error('Audio processing is unavailable on this server (ffmpeg missing)');
   if (activeJobs >= MAX_CONCURRENT_JOBS) throw new Error('Server is busy processing other songs — try again shortly');
 

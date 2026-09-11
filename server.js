@@ -3258,7 +3258,7 @@ wss.on('connection', (ws, req) => {
           active: false, ready: new Set(), difficulty: 'normal', scores: {}, finals: {},
           song: { title: msg.title, artist: msg.artist || null, thumbnail: msg.thumbnail || null, bpm: msg.bpm, duration: msg.duration, sessionId: msg.sessionId },
         };
-        broadcastRoom(room.id, { type: 'beat-song-ready', title: msg.title, artist: msg.artist || null, thumbnail: msg.thumbnail || null, bpm: msg.bpm, duration: msg.duration, sessionId: msg.sessionId, noteMaps: msg.noteMaps }, id);
+        broadcastRoom(room.id, { type: 'beat-song-ready', title: msg.title, artist: msg.artist || null, thumbnail: msg.thumbnail || null, bpm: msg.bpm, duration: msg.duration, sessionId: msg.sessionId, noteMaps: msg.noteMaps });
         log('info', 'beat-song-ready', { roomId: room.id, title: msg.title });
         break;
       }
@@ -3330,7 +3330,7 @@ wss.on('connection', (ws, req) => {
         room.beatrush.ready.clear();
         room.beatrush.finals = {};
         room.beatrush.scores = {};
-        broadcastRoom(room.id, { type: 'beat-reset' }, id);
+        broadcastRoom(room.id, { type: 'beat-reset' });
         break;
       }
       // ── End Beat Rush ────────────────────────────────────────────────────────
