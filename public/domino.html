@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Domino — Game Arena</title>
+  <link rel="stylesheet" href="domino.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+
+<!-- PRE-GAME LOBBY -->
+<div id="lobbyScreen" class="lobby-screen">
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">0</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+    </aside>
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar">👥</button>
+        <h1 class="logo logo-sm">🁣 DOMINO</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+      <div class="lobby-body">
+        <div class="lobby-card" id="lobbyCard">
+          <h2 class="lobby-title">🁣 Domino</h2>
+          <p class="lobby-subtitle">Classic Tunisian rules — place tiles, empty your hand, score points!</p>
+
+          <div class="config-group" id="configGroup">
+            <div class="config-row">
+              <label>Target Score</label>
+              <div class="btn-group">
+                <button class="btn btn-sm cfg-btn active" data-cfg="target" data-val="100">100</button>
+                <button class="btn btn-sm cfg-btn" data-cfg="target" data-val="150">150</button>
+                <button class="btn btn-sm cfg-btn" data-cfg="target" data-val="200">200</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="waitingMsg" class="waiting-msg" style="display:none">Waiting for host to start…</div>
+
+          <button class="btn btn-primary btn-lg" id="btnStart" style="display:none">Start Match</button>
+
+          <div class="lobby-tip">💡 2–4 players · 7 tiles each · First to reach target score wins</div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- GAME TABLE SCREEN -->
+<div id="gameScreen" class="game-screen" style="display:none">
+  <!-- Score panel (floating top-right) -->
+  <div class="score-panel" id="scorePanel"></div>
+
+  <!-- Opponent seats (rendered dynamically) -->
+  <div class="opponents-area" id="opponentsArea"></div>
+
+  <!-- THE FELT TABLE -->
+  <div class="felt-table" id="feltTable">
+    <div class="felt-light-overlay"></div>
+
+    <!-- Chain area -->
+    <div class="chain-wrapper" id="chainWrapper">
+      <div class="chain-scroll" id="chainScroll">
+        <div class="chain-end-indicator" id="chainEndLeft" data-end="left"></div>
+        <div class="chain-row" id="chainRow"></div>
+        <div class="chain-end-indicator" id="chainEndRight" data-end="right"></div>
+      </div>
+    </div>
+
+    <!-- Boneyard corner -->
+    <div class="boneyard-area" id="boneyardArea">
+      <div class="boneyard-stack" id="boneyardStack">
+        <div class="boneyard-tile" id="boneyard-t3"></div>
+        <div class="boneyard-tile" id="boneyard-t2"></div>
+        <div class="boneyard-tile" id="boneyard-t1"></div>
+        <div class="boneyard-tile boneyard-top" id="boneyard-t0"></div>
+      </div>
+      <div class="boneyard-label">BONEYARD</div>
+      <div class="boneyard-count" id="boneyardCount">—</div>
+    </div>
+
+    <!-- Turn / status banner -->
+    <div class="turn-banner" id="turnBanner"></div>
+  </div>
+
+  <!-- Action buttons -->
+  <div class="action-bar" id="actionBar" style="display:none">
+    <button class="btn btn-draw" id="btnDraw" style="display:none">🎲 Draw</button>
+    <button class="btn btn-pass" id="btnPass" style="display:none">⏭ Pass</button>
+    <button class="btn btn-cancel-sel" id="btnCancelSel" style="display:none">✕ Deselect</button>
+  </div>
+
+  <!-- Your hand tray -->
+  <div class="hand-area" id="handArea">
+    <div class="hand-label" id="handLabel">Your tiles</div>
+    <div class="hand-tray" id="handTray"></div>
+  </div>
+</div>
+
+<!-- ROUND SUMMARY OVERLAY -->
+<div class="overlay" id="roundSummaryOverlay" style="display:none">
+  <div class="result-card round-summary-card">
+    <div class="rs-header" id="rsHeader"></div>
+    <div class="rs-table" id="rsTable"></div>
+    <div class="rs-scores" id="rsScores"></div>
+    <div class="rs-progress" id="rsProgress"></div>
+    <div class="rs-auto" id="rsAuto">Next round in <span id="rsCountdown">8</span>s…</div>
+    <button class="btn btn-primary" id="btnNextRound">Next Round ▶</button>
+  </div>
+</div>
+
+<!-- MATCH OVER OVERLAY -->
+<div class="overlay" id="matchOverOverlay" style="display:none">
+  <div class="result-card match-over-card">
+    <div class="mo-crown">🏆</div>
+    <div class="mo-winner" id="moWinner"></div>
+    <div class="mo-subtitle" id="moSubtitle"></div>
+    <div class="mo-scores" id="moScores"></div>
+    <div class="mo-history" id="moHistory"></div>
+    <div class="mo-actions">
+      <button class="btn btn-primary" id="btnRematch">🔄 Rematch</button>
+      <button class="btn btn-back" id="btnMatchBack">← Lobby</button>
+    </div>
+  </div>
+  <canvas id="confettiCanvas" style="position:fixed;inset:0;pointer-events:none;z-index:200"></canvas>
+</div>
+
+<!-- RULES OVERLAY -->
+<div class="overlay" id="rulesOverlay" style="display:none">
+  <div class="result-card rules-card">
+    <h2>📜 Domino Rules</h2>
+    <div class="rules-body">
+      <h3>Setup</h3>
+      <p>Each player draws 7 tiles. Remaining tiles form the boneyard.</p>
+      <p>The player with the highest double (or highest tile) goes first.</p>
+      <h3>Gameplay</h3>
+      <p><strong>Play a tile</strong> that matches an open end of the chain.</p>
+      <p><strong>Draw</strong> from the boneyard if you have no playable tile.</p>
+      <p><strong>Pass</strong> only when the boneyard is empty and you still cannot play.</p>
+      <h3>Scoring (Tunisian)</h3>
+      <p>Empty your hand → score the pip total of all opponents' remaining tiles (rounded to 5).</p>
+      <p>Blocked game → the player with the lowest remaining pip total wins and scores accordingly.</p>
+      <h3>Match</h3>
+      <p>First to reach the target score wins the match.</p>
+    </div>
+    <button class="btn btn-primary" id="btnCloseRules">Got it</button>
+  </div>
+</div>
+
+<script src="domino.js"></script>
+</body>
+</html>

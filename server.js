@@ -114,9 +114,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr', 'memoryduel']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'cryptogram_easy', 'cryptogram_normal', 'cryptogram_hard', 'cryptogram_expert', 'domino']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr', 'memoryduel']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'domino']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -145,7 +145,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html', '/memoryduel': '/memoryduel.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html', '/memoryduel': '/memoryduel.html', '/cryptogram': '/cryptogram.html', '/domino': '/domino.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -241,6 +241,65 @@ const httpServer = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: err.message }));
       }
     });
+    return;
+  }
+
+  // ── API: POST /api/cryptogram/score ────────────────────────────────────────
+  if (req.method === 'POST' && urlPath === '/api/cryptogram/score') {
+    if (!firestoreReady) { res.writeHead(503, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Database not ready' })); }
+    let body = '';
+    req.on('data', chunk => { if (body.length < 4096) body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { difficulty, elapsed, mistakes, hints, score, isDaily, date } = JSON.parse(body);
+        const authHeader = req.headers['authorization'] || '';
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        if (!token) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+        const validDiffs = ['e','n','h','x'];
+        if (!validDiffs.includes(difficulty) || typeof elapsed !== 'number' || typeof mistakes !== 'number' || typeof hints !== 'number' || typeof score !== 'number') {
+          res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Invalid payload' }));
+        }
+        // Validate score formula
+        const MULT = {e:1, n:1.8, h:3, x:5}, PAR = {e:180, n:300, h:480, x:900};
+        const expectedScore = Math.max(100, Math.floor((5000 - elapsed * 3) * MULT[difficulty] - 150 * mistakes - 400 * hints + (elapsed < PAR[difficulty] / 2 ? 500 : 0)));
+        const tolerance = Math.max(200, expectedScore * 0.15);
+        if (Math.abs(score - expectedScore) > tolerance) {
+          res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Score mismatch' }));
+        }
+        const decoded = await admin.auth().verifyIdToken(token);
+        const uid = decoded.uid;
+        const displayName = decoded.name || decoded.email?.split('@')[0] || 'Player';
+        const gameKey = `cryptogram_${{e:'easy',n:'normal',h:'hard',x:'expert'}[difficulty]}`;
+        const docRef = db.collection('leaderboard').doc(`${uid}_${gameKey}`);
+        const doc = await docRef.get();
+        if (!doc.exists || score > (doc.data().score || 0)) {
+          await docRef.set({ uid, displayName, game: gameKey, score, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        }
+        if (isDaily && date && typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          await db.collection('cg_daily').doc(`${uid}_${date}`).set({ uid, displayName, date, score, elapsed, mistakes, hints, savedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        }
+        log('info', 'cg-score-saved', { uid, difficulty, score, elapsed });
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        const status = err.code?.startsWith('auth/') ? 401 : 500;
+        res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // ── API: GET /api/cryptogram/daily?date=YYYY-MM-DD ─────────────────────────
+  if (req.method === 'GET' && urlPath === '/api/cryptogram/daily') {
+    if (!firestoreReady) { res.writeHead(503, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ entries: [] })); }
+    const qp = new URLSearchParams(req.url.split('?')[1] || '');
+    const date = qp.get('date') || new Date().toISOString().slice(0,10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Invalid date' })); }
+    db.collection('cg_daily').where('date','==',date).orderBy('score','desc').limit(20).get()
+      .then(snap => {
+        const entries = snap.docs.map((doc, i) => ({ rank: i+1, uid: doc.data().uid, displayName: doc.data().displayName, score: doc.data().score, elapsed: doc.data().elapsed, mistakes: doc.data().mistakes }));
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(entries));
+      })
+      .catch(err => { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: err.message })); });
     return;
   }
 
@@ -617,6 +676,29 @@ function removeFromRoom(conn) {
       broadcastLobby();
     }
   }
+  if (room.cg && room.cg.active) {
+    if (room.cg.progressTimer) { clearInterval(room.cg.progressTimer); room.cg.progressTimer = null; }
+    if (room.players.size === 0) {
+      room.cg = null;
+    } else {
+      const [[winId, winP]] = [...room.players.entries()];
+      room.cg.active = false;
+      room.status = 'waiting';
+      broadcastRoom(room.id, { type: 'cg-opponent-left', winnerId: winId, winnerName: winP.name });
+      broadcastLobby();
+    }
+  }
+  if (room.domino && room.domino.active) {
+    if (room.players.size === 0) {
+      room.domino = null;
+    } else {
+      room.domino.active = false;
+      room.domino.roundActive = false;
+      room.status = 'waiting';
+      broadcastRoom(room.id, { type: 'domino-opponent-left', leftId: id });
+      broadcastLobby();
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -624,7 +706,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active) || (room.md?.active);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active) || (room.md?.active) || (room.cg?.active) || (room.domino?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -720,9 +802,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : msg.gameType === 'memoryduel' ? 'memoryduel' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : msg.gameType === 'memoryduel' ? 'memoryduel' : msg.gameType === 'cryptogram' ? 'cryptogram' : msg.gameType === 'domino' ? 'domino' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' || type === 'memoryduel' ? 2 : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' || type === 'memoryduel' || type === 'cryptogram' ? 2 : type === 'domino' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -844,6 +926,14 @@ wss.on('connection', (ws, req) => {
         if (room.status === 'playing' && room.type === 'memoryduel') {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
+        // Lock cryptogram rooms while game is running
+        if (room.status === 'playing' && room.type === 'cryptogram') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
+        // Lock domino rooms while game is running
+        if (room.status === 'playing' && room.type === 'domino') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
 
         removeFromRoom(conn); // leave any existing room
         conn.mode = 'room';
@@ -870,6 +960,10 @@ wss.on('connection', (ws, req) => {
         // Send current Memory Duel lobby config to the joiner
         if (room.type === 'memoryduel' && room.mdConfig) {
           send(ws, { type: 'md-lobby-config', gridSize: room.mdConfig.gridSize, stealWindowMs: room.mdConfig.stealWindowMs, ghostMode: room.mdConfig.ghostMode, cardTheme: room.mdConfig.cardTheme });
+        }
+        // Send current Domino lobby config to the joiner
+        if (room.type === 'domino' && room.dominoConfig) {
+          send(ws, { type: 'domino-config', target: room.dominoConfig.target });
         }
 
         // Restore BR hand on reconnect
@@ -2736,6 +2830,358 @@ wss.on('connection', (ws, req) => {
         broadcastRoom(room.id, { type: 'geo-config', difficulty: cfgDiff, totalRounds: cfgRounds }, id);
         break;
       }
+
+      // ── Cryptogram ─────────────────────────────────────────────────────────
+      case 'cg-config': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'cryptogram') break;
+        if (room.players.keys().next().value !== id) break;
+        const validDiffs = ['e','n','h','x'];
+        const validCats = ['all','movie','history','humor','motivation','philosophy','music','tunisian'];
+        const cfgDiff = validDiffs.includes(msg.difficulty) ? msg.difficulty : 'n';
+        const cfgCat = validCats.includes(msg.category) ? msg.category : 'all';
+        room.cgConfig = { difficulty: cfgDiff, category: cfgCat };
+        broadcastRoom(room.id, { type: 'cg-lobby-config', difficulty: cfgDiff, category: cfgCat }, id);
+        break;
+      }
+
+      case 'cg-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'cryptogram') break;
+        if (room.players.keys().next().value !== id) break;
+        if (room.cg?.active) break;
+        if (room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2 players to start' }); break; }
+        const validDiffs = ['e','n','h','x'];
+        const validCats = ['all','movie','history','humor','motivation','philosophy','music','tunisian'];
+        const diff = validDiffs.includes(msg.difficulty) ? msg.difficulty : (room.cgConfig?.difficulty || 'n');
+        const cat  = validCats.includes(msg.category)   ? msg.category  : (room.cgConfig?.category  || 'all');
+        const usedQuotes = room.cg?.usedQuotes || new Set();
+        const quote = cgPickQuote(diff, cat, usedQuotes);
+        if (!quote) { send(ws, { type: 'error', msg: 'No quotes available for those settings' }); break; }
+        const quoteIdx = CG_QUOTES.indexOf(quote);
+        usedQuotes.add(quoteIdx);
+        const cipher = cgGenerateCipher();
+        const tokens = cgEncryptQuote(quote[0], cipher.ltn);
+        const uniqueNums = [...new Set(tokens.filter(t => t.k === 'l').map(t => t.n))];
+        const preRevealed = cgGetPreRevealed(tokens, cipher.ntl, diff);
+        const progress = new Map();
+        for (const [pid] of room.players) {
+          const solvedMap = new Map();
+          for (const {n, l} of preRevealed) solvedMap.set(n, l);
+          progress.set(pid, { solvedMap, mistakes: 0, hintUsed: false, completedAt: null });
+        }
+        room.cg = {
+          active: true, quote, quoteIdx, cipher, tokens, uniqueNums, preRevealed,
+          diff, cat, startedAt: Date.now(), winner: null, progress, usedQuotes,
+          firstSolve: new Map(), progressTimer: null,
+          rematch: { requested: null },
+        };
+        room.status = 'playing';
+        broadcastLobby();
+        // Progress broadcast every 2 seconds
+        room.cg.progressTimer = setInterval(() => {
+          if (!room.cg?.active) { clearInterval(room.cg.progressTimer); return; }
+          for (const [pid, pdata] of room.cg.progress) {
+            const pct = Math.round(pdata.solvedMap.size / room.cg.uniqueNums.length * 100);
+            const solvedNums = [...pdata.solvedMap.keys()];
+            for (const [oid, oPlayer] of room.players) {
+              if (oid !== pid) {
+                send(oPlayer.ws, { type: 'cg-progress', percent: pct, solved: pdata.solvedMap.size, total: room.cg.uniqueNums.length, solvedNums, hintUsed: pdata.hintUsed });
+              }
+            }
+          }
+        }, 2000);
+        // Send game-start to all
+        for (const [pid, pConn] of room.players) {
+          send(pConn.ws, {
+            type: 'cg-game-start',
+            tokens,
+            preRevealed,
+            totalUnique: uniqueNums.length,
+            difficulty: diff,
+            category: quote[2],
+            authorHint: String(quote[1]).split(',')[0].trim(),
+          });
+        }
+        log('info', 'cg-start', { roomId: room.id, diff, quoteLen: quote[0].length, players: room.players.size });
+        break;
+      }
+
+      case 'cg-letter': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.cg?.active) break;
+        const cipherNum = Number(msg.cipherNum);
+        const letter = String(msg.letter || '').toUpperCase().trim();
+        if (!Number.isInteger(cipherNum) || cipherNum < 1 || cipherNum > 26 || !/^[A-Z]$/.test(letter)) break;
+        const pdata = room.cg.progress.get(id);
+        if (!pdata) break;
+        // Don't allow re-solving already correctly solved nums
+        if (pdata.solvedMap.has(cipherNum)) break;
+        const correct = room.cg.cipher.ntl[cipherNum] === letter;
+        if (correct) {
+          pdata.solvedMap.set(cipherNum, letter);
+          const isFirst = !room.cg.firstSolve.has(cipherNum);
+          if (isFirst) {
+            room.cg.firstSolve.set(cipherNum, id);
+            broadcastRoom(room.id, { type: 'cg-first-solve', cipherNum, winnerId: id });
+          }
+          send(room.players.get(id)?.ws, { type: 'cg-placement-result', cipherNum, correct: true, mistakesCount: pdata.mistakes });
+          // Check win
+          if (pdata.solvedMap.size >= room.cg.uniqueNums.length) {
+            pdata.completedAt = Date.now();
+            const elapsed = Math.floor((pdata.completedAt - room.cg.startedAt) / 1000) + (pdata.hintUsed ? 30 : 0);
+            room.cg.winner = id;
+            room.cg.active = false;
+            if (room.cg.progressTimer) { clearInterval(room.cg.progressTimer); room.cg.progressTimer = null; }
+            room.status = 'waiting';
+            broadcastLobby();
+            const winP = room.players.get(id);
+            const loserEntry = [...room.players.entries()].find(([pid]) => pid !== id);
+            const loserPdata = loserEntry ? room.cg.progress.get(loserEntry[0]) : null;
+            const loserPct = loserPdata ? Math.round(loserPdata.solvedMap.size / room.cg.uniqueNums.length * 100) : 0;
+            broadcastRoom(room.id, {
+              type: 'cg-game-over',
+              winnerId: id,
+              winnerName: winP?.name || '?',
+              winnerTime: elapsed,
+              winnerMistakes: pdata.mistakes,
+              loserMistakes: loserPdata?.mistakes || 0,
+              loserPercent: loserPct,
+              fullText: room.cg.quote[0],
+              author: room.cg.quote[1],
+              funFact: room.cg.quote[4] || null,
+            });
+            log('info', 'cg-win', { id, name: winP?.name, roomId: room.id, elapsed });
+          }
+        } else {
+          pdata.mistakes++;
+          send(room.players.get(id)?.ws, { type: 'cg-placement-result', cipherNum, correct: false, mistakesCount: pdata.mistakes });
+        }
+        break;
+      }
+
+      case 'cg-hint': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.cg?.active) break;
+        const pdata = room.cg.progress.get(id);
+        if (!pdata || pdata.hintUsed) break;
+        const unsolved = room.cg.uniqueNums.filter(n => !pdata.solvedMap.has(n));
+        if (!unsolved.length) break;
+        const cipherNum = unsolved[Math.floor(Math.random() * unsolved.length)];
+        const letter = room.cg.cipher.ntl[cipherNum];
+        pdata.hintUsed = true;
+        pdata.solvedMap.set(cipherNum, letter);
+        send(room.players.get(id)?.ws, { type: 'cg-hint-reveal', cipherNum, letter });
+        broadcastRoom(room.id, { type: 'cg-hint-used', playerId: id }, id);
+        break;
+      }
+
+      case 'cg-rematch-request': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'cryptogram') break;
+        if (!room.cg) room.cg = { usedQuotes: new Set(), active: false };
+        if (!room.cg.rematch) room.cg.rematch = { requested: null };
+        if (!room.cg.rematch.requested) {
+          room.cg.rematch.requested = id;
+          broadcastRoom(room.id, { type: 'cg-rematch-requested', requesterId: id }, id);
+        } else if (room.cg.rematch.requested !== id) {
+          room.cg.rematch = { requested: null };
+          broadcastRoom(room.id, { type: 'cg-rematch-start' });
+        }
+        break;
+      }
+      // ── End Cryptogram ──────────────────────────────────────────────────────
+
+      // ── Domino ──────────────────────────────────────────────────────────────
+      case 'domino-config': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'domino') break;
+        if (room.players.keys().next().value !== id) break;
+        const target = [100,150,200].includes(parseInt(msg.target)) ? parseInt(msg.target) : 150;
+        room.dominoConfig = { target };
+        broadcastRoom(room.id, { type: 'domino-config', target }, id);
+        break;
+      }
+
+      case 'domino-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'domino') break;
+        if (room.players.keys().next().value !== id) break;
+        if (room.domino?.active) break;
+        if (room.players.size < 2) break;
+        const target = [100,150,200].includes(parseInt(msg.target)) ? parseInt(msg.target) : (room.dominoConfig?.target || 150);
+        room.dominoConfig = { target };
+        const order = [...room.players.keys()];
+        const matchScores = {};
+        for (const pid of order) matchScores[pid] = 0;
+        room.domino = {
+          active: true, roundActive: false,
+          config: { target },
+          matchScores, turnOrder: order, roundHistory: [],
+          hands: new Map(), boneyard: [], chain: [], leftEnd: null, rightEnd: null,
+          turnIdx: 0, passCount: 0, lastPlayedBy: null, mustPlayTile: null,
+          rematch: null,
+        };
+        room.status = 'playing';
+        broadcastLobby();
+        dominoStartRound(room, null, true);
+        log('info', 'domino-start', { roomId: room.id, players: room.players.size, target });
+        break;
+      }
+
+      case 'domino-play': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.domino?.roundActive) break;
+        const dm = room.domino;
+        const turnId = dm.turnOrder[dm.turnIdx];
+        if (turnId !== id) break;
+
+        const tileA = parseInt(msg.tileA), tileB = parseInt(msg.tileB);
+        if (!Number.isInteger(tileA) || !Number.isInteger(tileB) || tileA < 0 || tileA > 6 || tileB < 0 || tileB > 6) break;
+
+        // Find tile in player hand (canonical a≤b)
+        const hand = dm.hands.get(id);
+        const tileIdx = hand.findIndex(t =>
+          (t.a === tileA && t.b === tileB) || (t.a === tileB && t.b === tileA)
+        );
+        if (tileIdx === -1) break;
+
+        const end = msg.end === 'left' ? 'left' : 'right';
+
+        // Validate against open end
+        if (dm.chain.length === 0) {
+          // First tile of the round — must match mustPlayTile if set
+          if (dm.mustPlayTile) {
+            const mt = dm.mustPlayTile;
+            if (!((tileA === mt.a && tileB === mt.b) || (tileA === mt.b && tileB === mt.a))) break;
+          }
+        } else {
+          const openEnd = end === 'left' ? dm.leftEnd : dm.rightEnd;
+          if (tileA !== openEnd && tileB !== openEnd) break;
+        }
+
+        // Determine left/right values as placed in chain
+        let placedLeft, placedRight;
+        if (dm.chain.length === 0) {
+          placedLeft = tileA; placedRight = tileB;
+        } else if (end === 'right') {
+          const re = dm.rightEnd;
+          if (tileA === re) { placedLeft = tileA; placedRight = tileB; }
+          else              { placedLeft = tileB; placedRight = tileA; }
+        } else {
+          const le = dm.leftEnd;
+          // The connecting side faces right (joins existing chain), other side becomes new leftEnd
+          if (tileA === le) { placedLeft = tileB; placedRight = tileA; }
+          else              { placedLeft = tileA; placedRight = tileB; }
+        }
+
+        // Remove tile from hand
+        hand.splice(tileIdx, 1);
+        dm.lastPlayedBy = id;
+        dm.passCount = 0;
+        dm.mustPlayTile = null;
+
+        // Update chain
+        if (end === 'left') dm.chain.unshift({ left: placedLeft, right: placedRight });
+        else                dm.chain.push({ left: placedLeft, right: placedRight });
+
+        dm.leftEnd  = dm.chain[0].left;
+        dm.rightEnd = dm.chain[dm.chain.length-1].right;
+
+        const nextTurn = dominoNextTurn(dm);
+
+        broadcastRoom(room.id, {
+          type: 'domino-played',
+          playerId: id, tileA, tileB,
+          left: placedLeft, right: placedRight, end,
+          newLeftEnd: dm.leftEnd, newRightEnd: dm.rightEnd,
+          handSize: hand.length, nextTurn,
+        });
+
+        // Check if player emptied hand
+        if (hand.length === 0) { dominoEndRound(room, id, 'emptied'); break; }
+
+        // Check blocked
+        if (dominoIsBlocked(dm)) dominoEndRound(room, null, 'blocked');
+        break;
+      }
+
+      case 'domino-draw': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.domino?.roundActive) break;
+        const dm = room.domino;
+        if (dm.turnOrder[dm.turnIdx] !== id) break;
+        if (dm.boneyard.length === 0) break;
+
+        const hand = dm.hands.get(id);
+        // Only allow draw if player has no playable tile
+        if (dominoCanPlay(hand, dm.leftEnd, dm.rightEnd)) break;
+
+        const tile = dm.boneyard.pop();
+        hand.push(tile);
+
+        send(room.players.get(id)?.ws, {
+          type: 'domino-drawn', tileA: tile.a, tileB: tile.b,
+          boneyardCount: dm.boneyard.length,
+        });
+        broadcastRoom(room.id, {
+          type: 'domino-draw-notify', playerId: id,
+          boneyardCount: dm.boneyard.length,
+        }, id);
+        break;
+      }
+
+      case 'domino-pass': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.domino?.roundActive) break;
+        const dm = room.domino;
+        if (dm.turnOrder[dm.turnIdx] !== id) break;
+        // Only allow pass if boneyard empty and no playable tile
+        if (dm.boneyard.length > 0) break;
+        const hand = dm.hands.get(id);
+        if (dominoCanPlay(hand, dm.leftEnd, dm.rightEnd)) break;
+
+        dm.passCount++;
+        const nextTurn = dominoNextTurn(dm);
+        broadcastRoom(room.id, { type: 'domino-passed', playerId: id, nextTurn });
+
+        if (dominoIsBlocked(dm)) dominoEndRound(room, null, 'blocked');
+        break;
+      }
+
+      case 'domino-next-round': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.domino?.active) break;
+        if (room.players.keys().next().value !== id) break;
+        if (room.domino.roundActive) break;
+        // Start next round with previous round's winner going first
+        dominoStartRound(room, room.domino.lastRoundWinner, false);
+        break;
+      }
+
+      case 'domino-rematch': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'domino') break;
+        if (!room.domino) break;
+        if (!room.domino.rematch) room.domino.rematch = new Set();
+        room.domino.rematch.add(id);
+        if (room.domino.rematch.size >= room.players.size) {
+          room.domino.rematch = null;
+          const order = [...room.players.keys()];
+          const matchScores = {};
+          for (const pid of order) matchScores[pid] = 0;
+          room.domino.matchScores = matchScores;
+          room.domino.turnOrder = order;
+          room.domino.roundHistory = [];
+          room.domino.active = true;
+          room.status = 'playing';
+          broadcastRoom(room.id, { type: 'domino-rematch-start' });
+          broadcastLobby();
+          dominoStartRound(room, null, true);
+        }
+        break;
+      }
+      // ── End Domino ──────────────────────────────────────────────────────────
 
       case 'game-over': {
         const room = rooms.get(conn.roomId);
@@ -7329,6 +7775,376 @@ function getGeoDifficultyPool(difficulty) {
   if (difficulty === 'easy') return GEO_DB.filter(e => e.difficulty === 'easy');
   if (difficulty === 'hard' || difficulty === 'nohints') return GEO_DB.filter(e => e.difficulty !== 'easy');
   return GEO_DB;
+}
+
+// ── Cryptogram helpers ───────────────────────────────────────────
+// [text, author, category, difficulty, optional_fun_fact]
+const CG_QUOTES = [
+  // EASY (30-50 chars)
+  ["Be yourself; everyone else is taken.","Oscar Wilde","humor","e","Wilde made this quip in conversation and it spread worldwide after his death."],
+  ["All that glitters is not gold.","Shakespeare","movie","e","The original line from 1596 reads 'All that glisters is not gold.'"],
+  ["Do or do not, there is no try.","Yoda, Star Wars","movie","e","Said to Luke Skywalker in The Empire Strikes Back (1980)."],
+  ["The best revenge is massive success.","Frank Sinatra","motivation","e"],
+  ["It always seems impossible until it's done.","Nelson Mandela","motivation","e","Mandela spent 27 years in prison before leading South Africa to democracy."],
+  ["Time you enjoy wasting is not wasted time.","Bertrand Russell","philosophy","e"],
+  ["Float like a butterfly, sting like a bee.","Muhammad Ali","history","e","Ali's trainer Bundini Brown first coined this phrase."],
+  ["Well-behaved women rarely make history.","Laurel Thatcher Ulrich","history","e","Written in a 1976 academic article about Puritan funeral sermons."],
+  ["Life is what happens while you make plans.","John Lennon","music","e","Lennon included a version of this in the song Beautiful Boy (1980)."],
+  ["Happiness is not something readymade.","Dalai Lama","philosophy","e"],
+  ["The pen is mightier than the sword.","Edward Bulwer-Lytton","history","e","From the 1839 play Richelieu."],
+  ["A smile is the best makeup a girl can wear.","Marilyn Monroe","humor","e"],
+  ["Give me liberty, or give me death!","Patrick Henry","history","e","Delivered in 1775 to spark the American Revolution."],
+  ["With great power comes great responsibility.","Stan Lee, Spider-Man","movie","e","First appeared in Amazing Fantasy #15 (1962)."],
+  ["Every cloud has a silver lining.","English Proverb","motivation","e"],
+  ["I feel the need, the need for speed.","Top Gun","movie","e","Said by Maverick and Goose in the 1986 film."],
+  ["A camel is a horse designed by committee.","Alec Issigonis","humor","e","Issigonis designed the Mini and made this quip about committee design."],
+  ["Truth is rarely pure and never simple.","Oscar Wilde","philosophy","e","From The Importance of Being Earnest (1895)."],
+  ["The unexamined life is not worth living.","Socrates","philosophy","e","Socrates said this at his trial, choosing death over exile."],
+  ["He who laughs last laughs best.","Proverb","humor","e"],
+  ["Not all those who wander are lost.","J.R.R. Tolkien","motivation","e","From the poem in The Fellowship of the Ring."],
+  ["Failure is only the opportunity to begin again.","Henry Ford","motivation","e"],
+  ["An eye for an eye makes the whole world blind.","Mahatma Gandhi","history","e"],
+  ["Music is the shorthand of emotion.","Leo Tolstoy","music","e"],
+  ["Patience is the key to paradise.","Islamic Proverb","tunisian","e","In Arabic: Assabr miftah al-faraj."],
+  ["The eye cannot see its own eyelash.","Arabic Proverb","tunisian","e","Means we are blind to our own faults."],
+  ["A good friend is worth more than silver or gold.","Tunisian Proverb","tunisian","e"],
+  ["In the beginning was the Word.","The Bible, John 1:1","history","e"],
+  ["To boldly go where no man has gone before.","Star Trek","movie","e","The original TV series opening narration from 1966."],
+  ["Why so serious? Let's put a smile on that face.","The Dark Knight","movie","e","Said by Heath Ledger's Joker in the 2008 film."],
+  ["I'm going to make him an offer he can't refuse.","The Godfather","movie","e","Said by Marlon Brando as Don Corleone in 1972."],
+  ["Keep your friends close, and your enemies closer.","The Godfather Part II","movie","e"],
+  ["You talking to me? There is no one else here.","Taxi Driver, paraphrase","movie","e","De Niro improvised the original scene."],
+  ["The stuff that dreams are made of.","The Maltese Falcon","movie","e","Said by Humphrey Bogart in the 1941 classic."],
+  ["After all, tomorrow is another day.","Gone with the Wind","movie","e","Scarlett O'Hara's closing line from the 1939 film."],
+  ["May the odds be ever in your favor.","The Hunger Games","movie","e"],
+  ["No, I am your father. Search your feelings.","Star Wars, paraphrase","movie","e","From The Empire Strikes Back."],
+  ["Carpe diem. Seize the day, boys.","Dead Poets Society","movie","e","Robin Williams as Professor Keating in 1989."],
+  ["Life is like a box of chocolates.","Forrest Gump","movie","e","Forrest's mama told him this in the 1994 film."],
+  ["I am inevitable. And I am Iron Man.","Avengers: Endgame","movie","e","Tony Stark's final words in the 2019 film."],
+  // NORMAL (50-80 chars)
+  ["Two things are infinite: the universe and human stupidity.","Albert Einstein","humor","n","Einstein may have added: 'And I'm not sure about the universe.'"],
+  ["You only live once, but if you do it right, once is enough.","Mae West","humor","n"],
+  ["In three words I can sum up everything about life: it goes on.","Robert Frost","philosophy","n"],
+  ["I am not a product of my circumstances; I am a product of my decisions.","Stephen Covey","motivation","n","From The 7 Habits of Highly Effective People."],
+  ["The only way to do great work is to love what you do.","Steve Jobs","motivation","n","From Jobs' 2005 Stanford commencement address."],
+  ["I have a dream that one day this nation will rise up and live out its creed.","Martin Luther King Jr.","history","n","Delivered at the March on Washington, August 28, 1963."],
+  ["Ask not what your country can do for you, ask what you can do for your country.","John F. Kennedy","history","n","From JFK's inaugural address, January 20, 1961."],
+  ["We shall fight on the beaches, and we shall never surrender.","Winston Churchill","history","n","Delivered to the House of Commons on June 4, 1940."],
+  ["The most common form of despair is not being who you truly are.","Soren Kierkegaard","philosophy","n"],
+  ["In the middle of every difficulty lies opportunity.","Albert Einstein","motivation","n"],
+  ["An investment in knowledge always pays the best interest.","Benjamin Franklin","motivation","n"],
+  ["It does not matter how slowly you go as long as you do not stop.","Confucius","motivation","n"],
+  ["The best time to plant a tree was 20 years ago; the second best is now.","Chinese Proverb","motivation","n"],
+  ["You can't use up creativity. The more you use, the more you have.","Maya Angelou","motivation","n"],
+  ["One small step for man, one giant leap for all of mankind.","Neil Armstrong","history","n","Armstrong landed on the moon on July 20, 1969."],
+  ["Imagination is more important than knowledge, for knowledge is limited.","Albert Einstein","philosophy","n"],
+  ["You've got to ask yourself one question: do I feel lucky? Well, do ya, punk?","Dirty Harry","movie","n","From the 1971 Clint Eastwood film."],
+  ["You can't handle the truth! Son, we live in a world with walls.","A Few Good Men, paraphrase","movie","n"],
+  ["Get busy living, or get busy dying. That is the only real choice.","The Shawshank Redemption","movie","n","Said by Andy Dufresne in the 1994 film."],
+  ["Why do we fall? So we can learn to pick ourselves back up.","Batman Begins","movie","n"],
+  ["There is no greater agony than bearing an untold story inside you.","Maya Angelou","motivation","n","From I Know Why the Caged Bird Sings."],
+  ["The only true wisdom is in knowing you know nothing at all.","Socrates","philosophy","n"],
+  ["What we think, we become. Our thoughts shape our entire world.","Buddha","philosophy","n"],
+  ["The lion does not turn around when a small dog barks at him.","African Proverb","tunisian","n"],
+  ["He who does not travel does not fully know the value of other men.","Ibn Battuta","tunisian","n","Ibn Battuta traveled over 75,000 miles in the 14th century."],
+  ["Knowledge without action is like a tree without fruit.","Arabic Proverb","tunisian","n"],
+  ["One good thing about music is that when it hits you, you feel no pain.","Bob Marley","music","n"],
+  ["Always forgive your enemies; nothing annoys them so much.","Oscar Wilde","humor","n"],
+  ["I have not failed. I've just found 10,000 ways that won't work.","Thomas Edison","motivation","n"],
+  ["Do not go where the path may lead; go instead where there is no path.","Ralph Waldo Emerson","motivation","n"],
+  ["We are what we repeatedly do. Excellence is not an act, but a habit.","Aristotle","philosophy","n"],
+  ["The secret of change is to focus your energy on building the new.","Socrates","motivation","n"],
+  ["People will forget what you said, but never how you made them feel.","Maya Angelou","motivation","n"],
+  ["A day without laughter is a day wasted. Make someone smile today.","Charlie Chaplin, adapted","humor","n"],
+  ["Behind every great man there is a great woman rolling her eyes.","Jim Carrey","humor","n"],
+  ["Stars cannot shine without darkness. Embrace your struggles.","Proverb","motivation","n"],
+  ["To change the world, you must first change yourself from the inside out.","Mahatma Gandhi","motivation","n"],
+  ["Music gives wings to the mind, flight to the imagination, and life to everything.","Plato","music","n"],
+  ["In seeking wisdom you are wise; imagining you have attained it, you are a fool.","Rabbi Ben Azai","philosophy","n"],
+  ["A journey of a thousand miles begins with a single step forward.","Lao Tzu","motivation","n"],
+  ["Yesterday is history, tomorrow is a mystery, and today is a gift.","Alice Morse Earle, adapted","philosophy","n"],
+  ["The privilege of a lifetime is being who you are and never apologizing for it.","Carl Jung","motivation","n"],
+  ["Science without religion is lame, religion without science is blind.","Albert Einstein","philosophy","n"],
+  ["Education is not the filling of a bucket, but the lighting of a fire.","William Butler Yeats","motivation","n"],
+  ["If you want to know the measure of a man, watch how he treats others.","Anonymous","motivation","n"],
+  // HARD (80-120 chars)
+  ["The greatest glory in living lies not in never falling, but in rising every time we fall.","Nelson Mandela","motivation","h","Mandela used this idea to inspire South Africa after apartheid."],
+  ["It is not death that a man should fear, but he should fear never beginning to live.","Marcus Aurelius","philosophy","h","From Meditations, written in the 2nd century AD."],
+  ["In the end, it's not the years in your life that count. It's the life in your years.","Abraham Lincoln","motivation","h"],
+  ["Success is not final, failure is not fatal: it is the courage to continue that counts.","Winston Churchill","motivation","h"],
+  ["The most difficult thing is to make decisions, and the rest is merely tenacity and hard work.","Amelia Earhart","motivation","h","Earhart was the first woman to fly solo across the Atlantic Ocean."],
+  ["You have power over your mind, not outside events. Realize this and you will find true strength.","Marcus Aurelius","philosophy","h"],
+  ["Darkness cannot drive out darkness; only light can do that. Hate cannot drive out hate; only love can.","Martin Luther King Jr.","history","h","From Strength to Love (1963)."],
+  ["I am not afraid of storms, for I am learning how to sail my ship through the roughest of seas.","Louisa May Alcott","motivation","h","Alcott wrote this in Little Women (1868)."],
+  ["First they ignore you, then they laugh at you, then they fight you, then you win.","Mahatma Gandhi","history","h"],
+  ["Logic will get you from A to B. But imagination will take you everywhere in the universe.","Albert Einstein","philosophy","h"],
+  ["The way to get started is to quit talking and begin doing. Action beats intention every time.","Walt Disney","motivation","h"],
+  ["The two most important days in your life are the day you are born and the day you find out why.","Mark Twain","philosophy","h"],
+  ["Innovation distinguishes between a leader and a follower. Dare to be different every single day.","Steve Jobs","motivation","h"],
+  ["Live as if you were to die tomorrow. Learn as if you were to live forever, growing wiser with every breath.","Mahatma Gandhi","motivation","h"],
+  ["There is only one way to avoid criticism: do nothing, say nothing, and be nothing at all.","Aristotle","humor","h"],
+  ["The mind that opens to a new idea never returns to its original size. That is the power of learning.","Albert Einstein","philosophy","h"],
+  ["Whoever is happy will make others happy too. That is the only true measure of real human kindness.","Anne Frank","philosophy","h","From Anne Frank's diary, written while hiding from the Nazis."],
+  ["We must accept finite disappointment, but we must never lose infinite hope in the face of adversity.","Martin Luther King Jr.","motivation","h"],
+  ["The only person you are destined to become is the person you decide to be each single day you live.","Ralph Waldo Emerson","motivation","h"],
+  ["Nothing in life is to be feared, it is only to be understood. Now is the time to understand more.","Marie Curie","philosophy","h","Curie was the first person to win two Nobel Prizes."],
+  ["Education is the most powerful weapon which you can use to change the world around you.","Nelson Mandela","history","h"],
+  ["He who fights with monsters should look to it that he himself does not become a monster.","Friedrich Nietzsche","philosophy","h","From Beyond Good and Evil (1886)."],
+  ["For it is in giving that we receive, and in losing ourselves that we find the greatest truth.","St. Francis of Assisi","philosophy","h"],
+  ["Twenty years from now you will be more disappointed by the things you didn't do than by the ones you did.","Mark Twain","motivation","h"],
+  ["The greatest revolution of our generation is discovering that human beings can alter their lives.","William James","motivation","h"],
+  ["Try not to become a person of success, but rather try to become a person of value and true purpose.","Albert Einstein","motivation","h"],
+  ["When you reach the end of your rope, tie a knot in it and hold on with all your might.","Franklin D. Roosevelt","motivation","h"],
+  ["Do what you feel in your heart to be right, even if you will be criticized no matter what you do.","Eleanor Roosevelt","motivation","h"],
+  ["A ship in the harbor is safe, but that is not what ships are for. Sail into the unknown.","William G.T. Shedd","motivation","h"],
+  ["The purpose of life is not to be happy alone, but to be useful, honorable, and deeply compassionate.","Ralph Waldo Emerson","philosophy","h"],
+  ["A leader is one who knows the way, goes the way, and shows the way to those who are willing to follow.","John C. Maxwell","motivation","h"],
+  ["Not everything that is faced can be changed, but nothing can be changed until it is faced head-on.","James Baldwin","motivation","h"],
+  ["The measure of intelligence is the ability to change when change is necessary and wisdom demands it.","Albert Einstein","philosophy","h"],
+  ["The world is changed by your example, not by your opinion alone, for actions speak louder than words.","Paulo Coelho","motivation","h"],
+  ["Know thyself, control thyself, give of thyself to the world, and the world shall reward you greatly.","Ancient Proverb","philosophy","h"],
+  ["Blessed are those who dream, for they will eventually have to wake up and make those dreams real.","Anonymous","motivation","h"],
+  ["The secret of success is to know something nobody else knows, and to use it wisely and fearlessly.","Anonymous","motivation","h"],
+  ["Science and religion are not enemies; they are two sides of the same coin in our search for truth.","Anonymous","philosophy","h"],
+  ["In seeking wisdom you are wise; imagining that you have attained it, thou art indeed a fool.","Rabbi Ben Azai","philosophy","h"],
+  ["Whoever does not know their history has neither present nor future. Learn your roots.","Arabic adapted","tunisian","h"],
+  // EXPERT (120-180 chars)
+  ["I've learned that people will forget what you said, people will forget what you did, but people will never forget how you made them feel.","Maya Angelou","motivation","x","Angelou is one of the most quoted women in the world."],
+  ["I have a dream that my four little children will one day live in a nation where they will not be judged by the color of their skin but by their character.","Martin Luther King Jr.","history","x","Delivered at the March on Washington, DC, on August 28, 1963."],
+  ["To be yourself in a world that is constantly trying to make you something else is the greatest accomplishment a human being can achieve in a lifetime.","Ralph Waldo Emerson","motivation","x"],
+  ["We hold these truths to be self-evident, that all men are created equal, endowed by their Creator with certain unalienable Rights among these Life and Liberty.","Thomas Jefferson","history","x","From the United States Declaration of Independence, 1776."],
+  ["The world is a book, and those who do not travel read only one page; those who travel read every chapter and write their own remarkable story.","St. Augustine, adapted","motivation","x"],
+  ["Thousands of candles can be lighted from a single candle, and the life of the candle will not be shortened. Happiness never decreases by being shared.","Buddha","philosophy","x"],
+  ["Our deepest fear is not that we are inadequate. Our deepest fear is that we are powerful beyond measure. It is our light, not our darkness, that most frightens us.","Marianne Williamson","motivation","x","From A Return to Love (1992)."],
+  ["In the depth of winter, I finally learned that within me there lay an invincible summer. That discovery changed everything about how I faced the cold seasons of life.","Albert Camus","philosophy","x","Camus won the Nobel Prize in Literature in 1957."],
+  ["Many of life's failures are people who did not realize how close they were to success when they gave up and walked away. Do not be one of them.","Thomas Edison","motivation","x"],
+  ["Keep your face always toward the sunshine, and shadows will fall behind you. That is the motto of those who choose to live with joy and purpose.","Walt Whitman","motivation","x"],
+  ["The key is not to prioritize what is on your schedule, but to schedule your priorities wisely, for time once lost can never be regained by anyone.","Stephen Covey","motivation","x","From The 7 Habits of Highly Effective People."],
+  ["Not everything that can be counted counts, and not everything that counts can be counted. That is the paradox at the heart of all meaningful measurement.","William Bruce Cameron","philosophy","x"],
+  ["I am not discouraged, because every wrong attempt discarded is another step forward toward the goal. Failure and success are two sides of the same coin.","Thomas Edison","motivation","x"],
+  ["The mediocre teacher tells, the good teacher explains, the superior teacher demonstrates, and the great teacher inspires those around them every day.","William Arthur Ward","motivation","x"],
+  ["If you hear a voice within you saying you cannot paint, then by all means paint and that voice will be silenced by the beauty of your own creation.","Vincent van Gogh","motivation","x"],
+  ["The most wasted of all days is one without laughter, without learning, and without love. Fill each day with purpose, curiosity, and connections that matter.","Nicolas Chamfort, adapted","motivation","x"],
+  ["All that is gold does not glitter, not all those who wander are lost; the old that is strong does not wither, deep roots are not reached by the frost.","J.R.R. Tolkien","music","x","From the poem in The Fellowship of the Ring."],
+  ["You have brains in your head, you have feet in your shoes, you can steer yourself in any direction you choose. You are on your own and you know what you know.","Dr. Seuss","motivation","x","From Oh, the Places You'll Go! (1990)."],
+  ["Yesterday is history, tomorrow is a mystery, but today is a gift; that is why they call it the present. Open it fully and live every moment with deep intention.","Anonymous","motivation","x"],
+  ["The privilege of a lifetime is being who you are, standing fully in your truth, and never apologizing for the person that life and experience have shaped you to become.","Carl Jung, adapted","motivation","x"],
+  ["Not the ones speaking the same language but the ones sharing the same feeling understand each other, and that understanding forms the truest bond of human friendship.","Rumi","philosophy","x","Rumi was a 13th-century Persian poet and Islamic scholar."],
+  ["We do not inherit the earth from our ancestors; we borrow it from our children, and we owe them a world worth living in when they finally come of age and take our place.","Native American Proverb","tunisian","x"],
+  ["In the garden of life, patience is the water that nourishes every seed; those who cannot wait will never taste the sweetest fruit that time and perseverance bring forth.","Arabic Proverb","tunisian","x"],
+  ["The ink of the scholar is holier than the blood of the martyr, for knowledge is the light that guides humanity through every darkness it will ever encounter on its path.","Islamic Proverb","tunisian","x"],
+  ["Whoever does not know the past has no present and no future; learn your history, honor your roots, and build upon the foundation of those who came before and paved your way.","Arabic adapted","tunisian","x"],
+  ["The tongue has no bones, but it is strong enough to break a heart; use it wisely, for every word you speak leaves a permanent mark that cannot always be undone by apology.","Tunisian Proverb","tunisian","x"],
+  ["Music, when soft voices die, vibrates in the memory; odours, when sweet violets sicken, live within the sense they quicken in our hearts and remain with us forever.","Percy Bysshe Shelley","music","x"],
+  ["The reason we struggle with insecurity is because we compare our behind-the-scenes with everyone else's highlight reel, and inevitably find ourselves painfully wanting.","Steven Furtick","motivation","x"],
+  ["Your time is limited, so don't waste it living someone else's life. Don't be trapped by dogma, which is living with the results of other people's thinking and choices.","Steve Jobs","motivation","x","From Jobs' 2005 Stanford commencement address."],
+  ["Believe you can and you're halfway there; the remaining half is nothing but relentless action, unwavering persistence, and the courage to never stop trying no matter what.","Theodore Roosevelt","motivation","x"],
+];
+
+function cgGenerateCipher() {
+  const nums = Array.from({length: 26}, (_, i) => i + 1);
+  for (let i = 25; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [nums[i], nums[j]] = [nums[j], nums[i]];
+  }
+  const ltn = {}, ntl = {};
+  for (let i = 0; i < 26; i++) {
+    const l = String.fromCharCode(65 + i);
+    ltn[l] = nums[i];
+    ntl[nums[i]] = l;
+  }
+  return {ltn, ntl};
+}
+
+function cgEncryptQuote(text, ltn) {
+  return text.toUpperCase().split('').map(ch => {
+    if (/[A-Z]/.test(ch)) return {k:'l', n:ltn[ch]};
+    if (ch === ' ') return {k:'s'};
+    return {k:'p', c:ch};
+  });
+}
+
+function cgGetPreRevealed(tokens, ntl, diff) {
+  const countMap = {e:4, n:2, h:1, x:0};
+  const count = countMap[diff] || 0;
+  const uNums = [...new Set(tokens.filter(t => t.k === 'l').map(t => t.n))];
+  for (let i = uNums.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [uNums[i], uNums[j]] = [uNums[j], uNums[i]];
+  }
+  return uNums.slice(0, count).map(n => ({n, l:ntl[n]}));
+}
+
+function cgPickQuote(diff, cat, usedSet) {
+  const pool = CG_QUOTES.filter((q, i) => q[3] === diff && (cat === 'all' || q[2] === cat));
+  let unused = pool.filter(q => !usedSet.has(CG_QUOTES.indexOf(q)));
+  if (unused.length === 0) unused = pool;
+  if (unused.length === 0) return null;
+  return unused[Math.floor(Math.random() * unused.length)];
+}
+
+// ── Domino helpers ───────────────────────────────────────────────
+function dominoCreateSet() {
+  const tiles = [];
+  for (let a = 0; a <= 6; a++) for (let b = a; b <= 6; b++) tiles.push({ a, b });
+  return tiles;
+}
+
+function dominoShuffle(tiles) {
+  for (let i = tiles.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+  }
+  return tiles;
+}
+
+function dominoHandPips(hand) {
+  return hand.reduce((s, t) => s + t.a + t.b, 0);
+}
+
+function dominoCanPlay(hand, leftEnd, rightEnd) {
+  if (leftEnd === null) return true; // first tile of round
+  return hand.some(t => t.a === leftEnd || t.b === leftEnd || t.a === rightEnd || t.b === rightEnd);
+}
+
+function dominoIsBlocked(dm) {
+  if (dm.boneyard.length > 0) return false;
+  for (const [, hand] of dm.hands) {
+    if (dominoCanPlay(hand, dm.leftEnd, dm.rightEnd)) return false;
+  }
+  return true;
+}
+
+function dominoNextTurn(dm) {
+  dm.turnIdx = (dm.turnIdx + 1) % dm.turnOrder.length;
+  return dm.turnOrder[dm.turnIdx];
+}
+
+function dominoStartRound(room, firstPlayerId, isFirstRound) {
+  const dm = room.domino;
+  const tiles = dominoShuffle(dominoCreateSet());
+  const order = dm.turnOrder;
+
+  const hands = new Map();
+  for (const pid of order) hands.set(pid, tiles.splice(0, 7));
+  const boneyard = tiles; // leftover (0 for 4 players, 7 for 3, 14 for 2)
+
+  // Find first player + forced starting tile
+  let firstId = firstPlayerId;
+  let mustPlayTile = null;
+
+  if (isFirstRound) {
+    // Highest double goes first
+    outer: for (let v = 6; v >= 0; v--) {
+      for (const pid of order) {
+        const dbl = hands.get(pid).find(t => t.a === v && t.b === v);
+        if (dbl) { firstId = pid; mustPlayTile = dbl; break outer; }
+      }
+    }
+    // No double — highest pip total tile
+    if (!firstId) {
+      let maxPips = -1;
+      for (const pid of order) {
+        for (const t of hands.get(pid)) {
+          if (t.a + t.b > maxPips) { maxPips = t.a + t.b; firstId = pid; mustPlayTile = t; }
+        }
+      }
+    }
+  } else {
+    firstId = firstId || order[0];
+  }
+
+  // Reorder turnOrder so firstId goes first
+  const startIdx = order.indexOf(firstId);
+  const reordered = startIdx >= 0 ? [...order.slice(startIdx), ...order.slice(0, startIdx)] : order;
+
+  dm.hands = hands;
+  dm.boneyard = boneyard;
+  dm.chain = [];
+  dm.leftEnd = null; dm.rightEnd = null;
+  dm.turnOrder = reordered;
+  dm.turnIdx = 0;
+  dm.roundActive = true;
+  dm.passCount = 0;
+  dm.lastPlayedBy = null;
+  dm.mustPlayTile = mustPlayTile;
+
+  const roundNumber = dm.roundHistory.length + 1;
+
+  // Send each player their hand + game state
+  for (const [pid, hand] of hands) {
+    const p = room.players.get(pid);
+    if (!p || !p.ws) continue;
+    send(p.ws, {
+      type: 'domino-deal',
+      hand,
+      turnOrder: reordered.map(rid => ({ id: rid, name: room.players.get(rid)?.name || '?', handSize: hands.get(rid)?.length || 0 })),
+      currentTurn: reordered[0],
+      boneyardCount: boneyard.length,
+      matchScores: { ...dm.matchScores },
+      mustPlayTile: pid === reordered[0] ? mustPlayTile : null,
+      roundNumber,
+    });
+  }
+  log('info', 'domino-round-start', { roomId: room.id, round: roundNumber, firstId, boneyard: boneyard.length });
+}
+
+function dominoEndRound(room, winnerId, reason) {
+  const dm = room.domino;
+  dm.roundActive = false;
+
+  const allHands = {};
+  for (const [pid, hand] of dm.hands) allHands[pid] = dominoHandPips(hand);
+
+  let finalWinnerId = winnerId;
+  let roundScore = 0;
+
+  if (reason === 'emptied') {
+    // Sum of opponents' pips, rounded to nearest 5
+    const total = Object.entries(allHands)
+      .filter(([pid]) => pid !== winnerId)
+      .reduce((s, [, pips]) => s + pips, 0);
+    roundScore = Math.round(total / 5) * 5;
+  } else {
+    // Blocked — lowest pip total wins; tiebreak = lastPlayedBy
+    let minPips = Infinity;
+    for (const [pid, pips] of Object.entries(allHands)) {
+      if (pips < minPips || (pips === minPips && pid === dm.lastPlayedBy)) {
+        minPips = pips; finalWinnerId = pid;
+      }
+    }
+    const total = Object.values(allHands).reduce((s, p) => s + p, 0);
+    roundScore = Math.round((total - (allHands[finalWinnerId] || 0)) / 5) * 5;
+  }
+
+  if (finalWinnerId) {
+    dm.matchScores[finalWinnerId] = (dm.matchScores[finalWinnerId] || 0) + roundScore;
+  }
+  dm.lastRoundWinner = finalWinnerId;
+  dm.roundHistory.push({ winner: finalWinnerId, scores: { ...dm.matchScores } });
+
+  broadcastRoom(room.id, {
+    type: 'domino-round-over',
+    winnerId: finalWinnerId, reason, roundScore,
+    allHands, matchScores: { ...dm.matchScores },
+    winnerName: room.players.get(finalWinnerId)?.name || '?',
+  });
+
+  // Check match winner
+  const matchWinner = Object.entries(dm.matchScores).find(([, s]) => s >= dm.config.target);
+  if (matchWinner) {
+    dm.active = false;
+    room.status = 'waiting';
+    broadcastRoom(room.id, {
+      type: 'domino-match-over',
+      winnerId: matchWinner[0], finalScores: { ...dm.matchScores },
+      winnerName: room.players.get(matchWinner[0])?.name || '?',
+    });
+    broadcastLobby();
+    // Report win for leaderboard
+    const winP = room.players.get(matchWinner[0]);
+    if (winP) log('info', 'domino-match-over', { winner: winP.name, roomId: room.id });
+  }
 }
 
 // ── Memory Duel helpers ───────────────────────────────────────────

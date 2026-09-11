@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Cryptogram 🔐 — Game Arena</title>
+  <link rel="stylesheet" href="cryptogram.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="/firebase-init.js"></script>
+  <script>
+    async function postScore(game, score) {
+      try {
+        const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+        if (!token) return;
+        await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+      } catch {}
+    }
+    function reportScore(game, score) { postScore(game, score); }
+  </script>
+</head>
+<body>
+<div class="layout" id="layout">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h3 id="sidebarTitle">Players</h3>
+      <span class="player-count" id="playerCount">0</span>
+    </div>
+    <div class="player-grid" id="playerList"></div>
+    <div id="soloStatsSidebar" class="solo-stats-sidebar"></div>
+  </aside>
+
+  <main class="main-content">
+    <header class="game-header">
+      <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+      <button class="btn btn-mobile-toggle" id="btnToggleSidebar">👥</button>
+      <h1 class="logo logo-sm">🔐 CRYPTOGRAM</h1>
+      <span class="room-badge" id="roomBadge"></span>
+      <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+    </header>
+
+    <!-- ══ HUB SCREEN ═══════════════════════════════════════════ -->
+    <div id="screen-hub" class="screen">
+      <div class="hub-container">
+        <div class="hub-hero">
+          <div class="hub-lock-anim">🔐</div>
+          <h1 class="hub-title">CRYPTOGRAM</h1>
+          <p class="hub-subtitle">Decode encrypted quotes by cracking the number-to-letter cipher</p>
+        </div>
+
+        <div class="hub-modes">
+          <button class="hub-mode-btn" id="btnSoloMode">
+            <span class="mode-icon">🧩</span>
+            <div class="mode-text">
+              <span class="mode-name">Solo Practice</span>
+              <span class="mode-desc">Solve at your own pace with hints, timer &amp; leaderboard</span>
+            </div>
+          </button>
+          <button class="hub-mode-btn pvp-mode-btn" id="btnPvPMode">
+            <span class="mode-icon">⚔️</span>
+            <div class="mode-text">
+              <span class="mode-name">PvP Race</span>
+              <span class="mode-desc">Race a friend — decode the same quote simultaneously</span>
+            </div>
+          </button>
+        </div>
+
+        <div class="daily-card" id="dailyCard">
+          <div class="daily-left">
+            <span class="daily-icon">📅</span>
+            <div>
+              <div class="daily-title">Daily Challenge</div>
+              <div class="daily-streak" id="dailyStreak">🔥 Streak: 0</div>
+            </div>
+          </div>
+          <div class="daily-right">
+            <p class="daily-status" id="dailyStatus">Today's puzzle is waiting!</p>
+            <button class="btn btn-accent btn-sm" id="btnDailyChallenge">Play Today</button>
+          </div>
+        </div>
+
+        <div class="hub-footer-btns">
+          <button class="btn btn-sm btn-back" id="btnHubStats">📊 My Stats</button>
+          <button class="btn btn-sm btn-back" id="btnHubLeaderboard">🏆 Leaderboard</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SOLO CONFIG SCREEN ════════════════════════════════════ -->
+    <div id="screen-config" class="screen" style="display:none">
+      <div class="config-wrap">
+        <div class="config-card">
+          <button class="btn btn-sm btn-back" id="btnBackFromConfig">← Back</button>
+          <h2 class="config-heading">Choose Your Challenge</h2>
+
+          <div class="config-section">
+            <div class="config-label">Difficulty</div>
+            <div class="pill-row" id="diffPills">
+              <button class="diff-pill" data-diff="e">Easy<br><small>4 revealed</small></button>
+              <button class="diff-pill active" data-diff="n">Normal<br><small>2 revealed</small></button>
+              <button class="diff-pill" data-diff="h">Hard<br><small>1 revealed</small></button>
+              <button class="diff-pill" data-diff="x">Expert<br><small>none revealed</small></button>
+            </div>
+          </div>
+
+          <div class="config-section">
+            <div class="config-label">Category</div>
+            <div class="pill-row flex-wrap" id="catPills">
+              <button class="cat-pill active" data-cat="all">🌟 All</button>
+              <button class="cat-pill" data-cat="movie">🎬 Movies &amp; TV</button>
+              <button class="cat-pill" data-cat="history">🌍 History</button>
+              <button class="cat-pill" data-cat="humor">😂 Humor</button>
+              <button class="cat-pill" data-cat="motivation">💪 Motivation</button>
+              <button class="cat-pill" data-cat="philosophy">🧠 Philosophy</button>
+              <button class="cat-pill" data-cat="music">🎵 Music</button>
+              <button class="cat-pill" data-cat="tunisian">🇹🇳 Tunisian</button>
+            </div>
+          </div>
+
+          <button class="btn btn-primary btn-lg" id="btnStartSolo">Start Puzzle ▶</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PVP LOBBY SCREEN ══════════════════════════════════════ -->
+    <div id="screen-pvp-lobby" class="screen" style="display:none">
+      <div class="pvp-lobby-wrap">
+        <div class="pvp-lobby-card">
+          <h2>⚔️ Cryptogram PvP Race</h2>
+          <div id="pvpLobbyStatus" class="pvp-status-line">Waiting for opponent…</div>
+
+          <div id="pvpConfig" class="pvp-config-block" style="display:none">
+            <div class="pvp-config-row">
+              <span class="pcr-label">Difficulty</span>
+              <div class="pill-row" id="pvpDiffPills">
+                <button class="diff-pill" data-diff="e">Easy</button>
+                <button class="diff-pill active" data-diff="n">Normal</button>
+                <button class="diff-pill" data-diff="h">Hard</button>
+                <button class="diff-pill" data-diff="x">Expert</button>
+              </div>
+            </div>
+            <div class="pvp-config-row">
+              <span class="pcr-label">Category</span>
+              <select id="pvpCategory" class="pvp-select">
+                <option value="all">All Categories</option>
+                <option value="movie">🎬 Movies &amp; TV</option>
+                <option value="history">🌍 History</option>
+                <option value="humor">😂 Humor</option>
+                <option value="motivation">💪 Motivation</option>
+                <option value="philosophy">🧠 Philosophy</option>
+                <option value="music">🎵 Music</option>
+                <option value="tunisian">🇹🇳 Tunisian</option>
+              </select>
+            </div>
+          </div>
+
+          <button class="btn btn-primary btn-lg" id="btnStartPvP" style="display:none">Start Race ▶</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PUZZLE SCREEN (Solo & PvP shared) ═════════════════════ -->
+    <div id="screen-puzzle" class="screen" style="display:none">
+
+      <!-- Header bar -->
+      <div class="puzzle-hbar">
+        <div class="phb-left">
+          <span class="phb-badge" id="phCategory"></span>
+          <span class="phb-badge phb-diff" id="phDifficulty"></span>
+        </div>
+        <div class="phb-center">
+          <span class="timer-display" id="timerDisplay">0:00</span>
+        </div>
+        <div class="phb-right">
+          <span class="phb-stat">❌ <b id="mistakeCount">0</b></span>
+          <span class="phb-stat" id="hintStatWrap">💡 <b id="hintCount">3</b></span>
+          <button class="btn btn-sm btn-back" id="btnPause" title="Pause">⏸</button>
+        </div>
+      </div>
+
+      <!-- Puzzle body: grid + opponent panel -->
+      <div class="puzzle-body">
+        <div class="puzzle-main" id="puzzleMain">
+          <div class="puzzle-scroll-area" id="puzzleScrollArea">
+            <div id="puzzleGrid" class="puzzle-grid"></div>
+          </div>
+          <div class="author-hint-bar" id="authorHintBar"></div>
+        </div>
+
+        <!-- Opponent panel (PvP only, hidden in solo) -->
+        <div class="opponent-panel" id="opponentPanel" style="display:none">
+          <div class="opp-header">
+            <div class="opp-avatar" id="oppAvatar">?</div>
+            <div class="opp-info">
+              <div class="opp-name" id="oppName">Opponent</div>
+              <div class="opp-sub" id="oppSub">Solving…</div>
+            </div>
+          </div>
+          <div class="opp-bar-wrap">
+            <div class="opp-bar-fill" id="oppBarFill"></div>
+          </div>
+          <div class="opp-bar-label" id="oppBarLabel">0 / 0 letters cracked</div>
+          <div class="opp-hint-flag" id="oppHintFlag" style="display:none">💡 Hint used</div>
+          <div class="opp-mini-grid-wrap">
+            <div class="opp-mini-grid" id="oppMiniGrid"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls: letter tray + actions -->
+      <div class="puzzle-controls" id="puzzleControls">
+        <div class="tray-wrapper">
+          <div id="letterTray" class="letter-tray"></div>
+        </div>
+        <div class="ctrl-actions">
+          <button class="btn btn-accent btn-sm" id="btnHint">💡 Hint (<span id="hintCountBtn">3</span>)</button>
+          <button class="btn btn-sm btn-back" id="btnFreq">📊 Freq</button>
+        </div>
+      </div>
+
+      <!-- Frequency panel (collapsible) -->
+      <div class="freq-panel" id="freqPanel" style="display:none">
+        <div class="freq-header">
+          <span>Cipher Frequency — most common in English: E, T, A, O, I, N</span>
+          <button class="btn btn-sm btn-back" id="btnCloseFreq">✕</button>
+        </div>
+        <div id="freqBars" class="freq-bars"></div>
+      </div>
+
+      <!-- Hidden input to capture keyboard events -->
+      <input id="hiddenInput" class="hidden-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    </div>
+
+    <!-- ══ RESULT OVERLAY ════════════════════════════════════════ -->
+    <div id="resultOverlay" class="overlay" style="display:none">
+      <div class="result-card" id="resultCard">
+        <div class="result-banner" id="resultBanner"></div>
+        <div class="result-quote-reveal" id="resultQuoteReveal"></div>
+        <div class="result-meta" id="resultMeta"></div>
+        <div class="result-funfact" id="resultFunfact"></div>
+        <div class="result-stats-grid" id="resultStatsGrid"></div>
+        <div class="result-share-row" id="resultShareRow" style="display:none">
+          <button class="btn btn-sm btn-back" id="btnShareResult">📋 Copy Share Card</button>
+        </div>
+        <div class="result-actions-row" id="resultActionsRow"></div>
+      </div>
+    </div>
+
+    <!-- ══ PAUSE OVERLAY ═════════════════════════════════════════ -->
+    <div id="pauseOverlay" class="overlay" style="display:none">
+      <div class="pause-card">
+        <div class="pause-icon">⏸</div>
+        <h2>Paused</h2>
+        <p class="pause-note">Your progress is safe.</p>
+        <button class="btn btn-primary" id="btnResume">▶ Resume</button>
+        <button class="btn btn-sm btn-back" id="btnQuitToHub">Quit to Hub</button>
+      </div>
+    </div>
+
+    <!-- ══ STATS OVERLAY ═════════════════════════════════════════ -->
+    <div id="statsOverlay" class="overlay" style="display:none">
+      <div class="modal-card wide-card">
+        <div class="modal-hdr">
+          <h2>📊 My Stats</h2>
+          <button class="btn btn-sm btn-back" id="btnCloseStats">✕</button>
+        </div>
+        <div id="statsContent" class="stats-content"></div>
+      </div>
+    </div>
+
+    <!-- ══ LEADERBOARD OVERLAY ═══════════════════════════════════ -->
+    <div id="lbOverlay" class="overlay" style="display:none">
+      <div class="modal-card wide-card">
+        <div class="modal-hdr">
+          <h2>🏆 Leaderboard</h2>
+          <button class="btn btn-sm btn-back" id="btnCloseLb">✕</button>
+        </div>
+        <div class="lb-cg-tabs" id="lbTabs">
+          <button class="lb-cg-tab active" data-game="cryptogram_easy">Easy</button>
+          <button class="lb-cg-tab" data-game="cryptogram_normal">Normal</button>
+          <button class="lb-cg-tab" data-game="cryptogram_hard">Hard</button>
+          <button class="lb-cg-tab" data-game="cryptogram_expert">Expert</button>
+          <button class="lb-cg-tab" data-game="cryptogram">PvP Wins</button>
+        </div>
+        <div id="lbContent" class="lb-cg-content"><div class="lb-loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- ══ RULES OVERLAY ═════════════════════════════════════════ -->
+    <div id="rulesOverlay" class="overlay" style="display:none">
+      <div class="modal-card">
+        <div class="modal-hdr">
+          <h2>📜 How to Play</h2>
+          <button class="btn btn-sm btn-back" id="btnCloseRules">✕</button>
+        </div>
+        <div class="rules-body">
+          <p>🔐 <strong>Cryptogram:</strong> Every letter in the quote is replaced by a unique number (1–26). The same number always means the same letter throughout the puzzle.</p>
+          <p>👆 <strong>Click</strong> any letter cell to select it, then <strong>type a letter</strong>. All cells with the same number fill simultaneously.</p>
+          <p>⌨️ <strong>Arrow keys</strong> navigate between cells. <strong>Backspace</strong> clears the current number group. <strong>Tab</strong> jumps to the next unsolved group.</p>
+          <p>💡 <strong>Hints</strong> reveal one cipher number. Use them wisely — they reduce your score!</p>
+          <p>⚔️ <strong>PvP Mode:</strong> Race your opponent! Wrong placements are rejected immediately. First to complete the full quote wins.</p>
+          <p>📅 <strong>Daily Challenge:</strong> One puzzle per day, the same for everyone. Build your streak!</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- PvP urgency edge pulse -->
+    <div id="urgencyEdge" class="urgency-edge" style="display:none"></div>
+
+    <!-- Status line (PvP disconnect etc) -->
+    <div id="status" class="status-line" style="display:none"></div>
+
+  </main>
+</div>
+
+<script src="cryptogram.js"></script>
+</body>
+</html>
