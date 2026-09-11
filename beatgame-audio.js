@@ -286,7 +286,13 @@ function detectBeats(samples, sampleRate) {
   }
 
   const beats = peaks.map(p => parseFloat((p * frameTime).toFixed(4)));
-  const maxEnergy = energies.length ? energies.reduce((a, b) => Math.max(a, b), 0.0001) : 0.0001;
+  // Normalize against the beat peaks' own energy distribution (90th percentile),
+  // not the single loudest frame in the whole track — that global max is almost
+  // always a rare transient, which pushed nearly every real beat's normalized
+  // energy below the 0.4/0.7 thresholds and made the note map far too sparse.
+  const peakEnergies = peaks.map(p => energies[p]).sort((a, b) => a - b);
+  const refEnergy = peakEnergies.length ? peakEnergies[Math.floor(peakEnergies.length * 0.9)] || peakEnergies[peakEnergies.length - 1] : 0.0001;
+  const maxEnergy = Math.max(refEnergy, 0.0001);
   const energyList = peaks.map(p => Math.min(1, energies[p] / maxEnergy));
 
   let bpm = 120;
@@ -331,7 +337,7 @@ const DIRECTIONS_4 = ['up', 'down', 'left', 'right'];
 function last3Same(arr, lane) { return arr.length >= 3 && arr.every(l => l === lane); }
 
 function buildDifficultyMap(beats, energies, rng, opts) {
-  const { minEnergy, directions, allowBombs, allowDouble, minGap } = opts;
+  const { minEnergy, directions, allowBombs, allowDouble, minGap, lowEnergyChance = 0.4 } = opts;
   const notes = [];
   const lastLanes = [];
   let lastNoteTime = -Infinity;
@@ -341,7 +347,7 @@ function buildDifficultyMap(beats, energies, rng, opts) {
     let count = 0;
     if (e > 0.7) count = 2;
     else if (e >= 0.4 && e >= minEnergy) count = 1;
-    else if (e >= minEnergy && rng() < 0.4) count = 1;
+    else if (e >= minEnergy && rng() < lowEnergyChance) count = 1;
     if (e < minEnergy) count = 0;
     if (count === 0) continue;
     lastNoteTime = beats[i];
@@ -389,7 +395,7 @@ function generateNoteMaps(beats, energies, seedStr) {
   return {
     easy: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0.7, directions: DIRECTIONS_4, allowBombs: false, allowDouble: false, minGap: 0.5 }), timingWindow: 0.15 },
     normal: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0.4, directions: DIRECTIONS_8, allowBombs: true, allowDouble: true, minGap: 0.35 }), timingWindow: 0.10 },
-    hard: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0, directions: DIRECTIONS_8, allowBombs: true, allowDouble: true, minGap: 0.25 }), timingWindow: 0.07 },
+    hard: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0, directions: DIRECTIONS_8, allowBombs: true, allowDouble: true, minGap: 0.25, lowEnergyChance: 1 }), timingWindow: 0.07 },
   };
 }
 
