@@ -2,7 +2,7 @@ services:
   - type: web
     name: game-arena
     runtime: node
-    buildCommand: npm install
+    buildCommand: npm install && pip3 install --user --break-system-packages yt-dlp
     startCommand: npm start
     envVars:
       - key: NODE_ENV

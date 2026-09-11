@@ -4,6 +4,7 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 const { createHmac } = require('crypto');
 const admin = require('firebase-admin');
+const beatgame = require('./beatgame-audio');
 
 // ── Firebase Admin SDK ──────────────────────────────────────────
 let serviceAccount;
@@ -114,7 +115,7 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'cryptogram_easy', 'cryptogram_normal', 'cryptogram_hard', 'cryptogram_expert', 'domino']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'cryptogram_easy', 'cryptogram_normal', 'cryptogram_hard', 'cryptogram_expert', 'domino', 'beatrush']);
 const LOWER_IS_BETTER = new Set(['maze']);
 const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'domino']);
 
@@ -145,7 +146,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html', '/memoryduel': '/memoryduel.html', '/cryptogram': '/cryptogram.html', '/domino': '/domino.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html', '/memoryduel': '/memoryduel.html', '/cryptogram': '/cryptogram.html', '/domino': '/domino.html', '/beatrush': '/beatrush.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -241,6 +242,56 @@ const httpServer = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: err.message }));
       }
     });
+    return;
+  }
+
+  // ── API: POST /api/beatgame/prepare ─────────────────────────────────────────
+  if (req.method === 'POST' && urlPath === '/api/beatgame/prepare') {
+    const MAX_BODY = 28 * 1024 * 1024; // ~28MB caps base64-encoded 20MB uploads
+    let body = '';
+    let tooLarge = false;
+    req.on('data', chunk => {
+      if (tooLarge) return;
+      body += chunk;
+      if (body.length > MAX_BODY) {
+        tooLarge = true;
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Payload too large' }));
+        req.destroy();
+      }
+    });
+    req.on('end', async () => {
+      if (tooLarge) return;
+      let payload;
+      try { payload = JSON.parse(body); } catch { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: 'Invalid request body' })); }
+      try {
+        const result = await beatgame.prepareSong(payload);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        log('warn', 'beatgame-prepare-error', { err: String(err.message || err).slice(0, 200) });
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message || 'Failed to prepare song' }));
+      }
+    });
+    return;
+  }
+
+  // ── API: GET /api/beatgame/audio/:sessionId ─────────────────────────────────
+  if (req.method === 'GET' && urlPath.startsWith('/api/beatgame/audio/')) {
+    const sessionId = urlPath.slice('/api/beatgame/audio/'.length);
+    const session = beatgame.consumeSessionAudio(sessionId);
+    if (!session || !fs.existsSync(session.filePath)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'Audio not found or expired' }));
+    }
+    const ext = path.extname(session.filePath).toLowerCase();
+    const contentType = ext === '.mp3' ? 'audio/mpeg' : ext === '.ogg' ? 'audio/ogg' : 'audio/wav';
+    res.writeHead(200, { 'Content-Type': contentType });
+    const stream = fs.createReadStream(session.filePath);
+    stream.pipe(res);
+    stream.on('close', () => beatgame.cleanupSession(sessionId));
+    stream.on('error', () => beatgame.cleanupSession(sessionId));
     return;
   }
 
@@ -699,6 +750,16 @@ function removeFromRoom(conn) {
       broadcastLobby();
     }
   }
+  if (room.beatrush && room.beatrush.active) {
+    if (room.players.size === 0) {
+      room.beatrush = null;
+    } else {
+      room.beatrush.active = false;
+      room.status = 'waiting';
+      broadcastRoom(room.id, { type: 'beat-opponent-left' });
+      broadcastLobby();
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -706,7 +767,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active) || (room.md?.active) || (room.cg?.active) || (room.domino?.active);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active) || (room.md?.active) || (room.cg?.active) || (room.domino?.active) || (room.beatrush?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -802,9 +863,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : msg.gameType === 'memoryduel' ? 'memoryduel' : msg.gameType === 'cryptogram' ? 'cryptogram' : msg.gameType === 'domino' ? 'domino' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : msg.gameType === 'memoryduel' ? 'memoryduel' : msg.gameType === 'cryptogram' ? 'cryptogram' : msg.gameType === 'domino' ? 'domino' : msg.gameType === 'beatrush' ? 'beatrush' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' || type === 'memoryduel' || type === 'cryptogram' ? 2 : type === 'domino' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' || type === 'memoryduel' || type === 'cryptogram' || type === 'beatrush' ? 2 : type === 'domino' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -932,6 +993,10 @@ wss.on('connection', (ws, req) => {
         }
         // Lock domino rooms while game is running
         if (room.status === 'playing' && room.type === 'domino') {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
+        // Lock beatrush rooms while game is running
+        if (room.status === 'playing' && room.type === 'beatrush') {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
 
@@ -3182,6 +3247,93 @@ wss.on('connection', (ws, req) => {
         break;
       }
       // ── End Domino ──────────────────────────────────────────────────────────
+
+      // ── Beat Rush ────────────────────────────────────────────────────────────
+      case 'beat-song-ready': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'beatrush') break;
+        if (room.players.keys().next().value !== id) break; // host only
+        if (room.beatrush?.active) break;
+        room.beatrush = {
+          active: false, ready: new Set(), difficulty: 'normal', scores: {}, finals: {},
+          song: { title: msg.title, artist: msg.artist || null, thumbnail: msg.thumbnail || null, bpm: msg.bpm, duration: msg.duration, sessionId: msg.sessionId },
+        };
+        broadcastRoom(room.id, { type: 'beat-song-ready', title: msg.title, artist: msg.artist || null, thumbnail: msg.thumbnail || null, bpm: msg.bpm, duration: msg.duration, sessionId: msg.sessionId, noteMaps: msg.noteMaps }, id);
+        log('info', 'beat-song-ready', { roomId: room.id, title: msg.title });
+        break;
+      }
+
+      case 'beat-set-difficulty': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'beatrush' || !room.beatrush || room.beatrush.active) break;
+        if (room.players.keys().next().value !== id) break; // host only
+        room.beatrush.difficulty = ['easy', 'normal', 'hard'].includes(msg.difficulty) ? msg.difficulty : 'normal';
+        room.beatrush.ready.clear();
+        broadcastRoom(room.id, { type: 'beat-difficulty', difficulty: room.beatrush.difficulty });
+        break;
+      }
+
+      case 'beat-ready': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'beatrush' || !room.beatrush || room.beatrush.active) break;
+        room.beatrush.ready.add(id);
+        broadcastRoom(room.id, { type: 'beat-player-ready', id }, id);
+        const soloStart = room.players.size === 1 && room.beatrush.ready.size === 1;
+        const pvpStart = room.players.size >= 2 && room.beatrush.ready.size >= room.players.size;
+        if (soloStart || pvpStart) {
+          room.beatrush.active = true;
+          room.status = 'playing';
+          room.beatrush.scores = {};
+          room.beatrush.finals = {};
+          const startTimestamp = Date.now() + 3000;
+          room.beatrush.startTimestamp = startTimestamp;
+          broadcastLobby();
+          broadcastRoom(room.id, { type: 'beat-go', startTimestamp, difficulty: room.beatrush.difficulty, solo: room.players.size === 1 });
+          log('info', 'beat-go', { roomId: room.id, players: room.players.size, difficulty: room.beatrush.difficulty });
+        }
+        break;
+      }
+
+      case 'beat-score-update': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.beatrush?.active) break;
+        const p = room.players.get(id);
+        room.beatrush.scores[id] = { score: msg.score, health: msg.health, combo: msg.combo, accuracy: msg.accuracy };
+        broadcastRoom(room.id, { type: 'beat-opponent-update', id, name: p?.name, score: msg.score, health: msg.health, combo: msg.combo, accuracy: msg.accuracy }, id);
+        break;
+      }
+
+      case 'beat-final-score': {
+        const room = rooms.get(conn.roomId);
+        if (!room || !room.beatrush?.active) break;
+        const p = room.players.get(id);
+        room.beatrush.finals[id] = { name: p?.name || '?', score: msg.score, accuracy: msg.accuracy, maxCombo: msg.maxCombo, rank: msg.rank, breakdown: msg.breakdown || null, failed: !!msg.failed };
+        if (Object.keys(room.beatrush.finals).length >= room.players.size) {
+          room.beatrush.active = false;
+          room.status = 'waiting';
+          const finals = room.beatrush.finals;
+          let winnerId = null, bestScore = -1;
+          for (const [pid, f] of Object.entries(finals)) { if (f.score > bestScore) { bestScore = f.score; winnerId = pid; } }
+          const solo = room.players.size === 1;
+          broadcastRoom(room.id, { type: 'beat-game-over', results: finals, winnerId, solo });
+          if (solo && winnerId) { /* score already posted client-side via reportScore */ }
+          room.beatrush.ready.clear();
+          broadcastLobby();
+          log('info', 'beat-game-over', { roomId: room.id, winnerId, solo });
+        }
+        break;
+      }
+
+      case 'beat-play-again': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'beatrush' || !room.beatrush) break;
+        room.beatrush.ready.clear();
+        room.beatrush.finals = {};
+        room.beatrush.scores = {};
+        broadcastRoom(room.id, { type: 'beat-reset' }, id);
+        break;
+      }
+      // ── End Beat Rush ────────────────────────────────────────────────────────
 
       case 'game-over': {
         const room = rooms.get(conn.roomId);
@@ -8317,6 +8469,7 @@ const GEO_DB = [
 ];
 
 // ── Start ───────────────────────────────────────────────────────
+beatgame.checkTools(log);
 ensureFirestoreDatabase().then(async dbReady => {
   if (!dbReady) {
     log('warn', 'firestore-unavailable', { msg: 'Leaderboard/skins will not work until Firestore is ready' });

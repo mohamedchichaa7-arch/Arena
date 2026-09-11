@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Beat Rush — Game Arena</title>
+<link rel="stylesheet" href="beatrush.css">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="/firebase-init.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+  async function postScore(game, score) {
+    try {
+      const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+      if (!token) return;
+      await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+    } catch {}
+  }
+  function reportScore(game, score) { postScore(game, score); }
+</script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h3>Players</h3>
+        <span class="player-count" id="playerCount">0</span>
+      </div>
+      <div class="player-grid" id="playerList"></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="game-header">
+        <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+        <button class="btn btn-mobile-toggle" id="btnToggleSidebar">👥</button>
+        <h1 class="logo logo-sm">⚡ BEAT RUSH</h1>
+        <span class="room-badge" id="roomBadge"></span>
+        <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+      </header>
+
+      <div class="br-status" id="status">Connecting…</div>
+
+      <!-- HUB / SONG SELECT -->
+      <section class="br-screen" id="screenHub">
+        <div class="br-disclaimer">⚡ This game is for personal use only. Audio is processed temporarily and never stored.</div>
+
+        <div class="br-hub-grid">
+          <div class="br-panel">
+            <div class="br-tabs">
+              <button class="br-tab active" data-src="youtube">▶ YouTube</button>
+              <button class="br-tab" data-src="spotify">🎵 Spotify</button>
+              <button class="br-tab" data-src="upload">📁 Upload</button>
+            </div>
+
+            <div class="br-src-panel" id="srcYoutube">
+              <input type="text" id="youtubeUrl" placeholder="Paste YouTube URL...">
+            </div>
+            <div class="br-src-panel" id="srcSpotify" style="display:none">
+              <input type="text" id="spotifyUrl" placeholder="Paste Spotify track URL...">
+            </div>
+            <div class="br-src-panel" id="srcUpload" style="display:none">
+              <input type="file" id="uploadFile" accept=".mp3,.wav,.ogg,audio/*">
+              <div class="br-hint">MP3, WAV, or OGG — max 20MB</div>
+            </div>
+
+            <button class="btn btn-primary btn-lg" id="btnAnalyze">Analyze Song</button>
+            <div class="br-hint" id="hostOnlyHint">Only the room host can prepare a song.</div>
+
+            <div class="br-loading" id="loadingBox" style="display:none">
+              <div class="br-waveform"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+              <div class="br-loading-text" id="loadingText">Analyzing beats…</div>
+            </div>
+            <div class="br-error" id="prepareError" style="display:none"></div>
+          </div>
+
+          <div class="br-panel" id="recentPanel">
+            <h3>Recently Played</h3>
+            <div class="br-recent-list" id="recentList"><div class="br-hint">No songs played yet.</div></div>
+          </div>
+        </div>
+
+        <!-- Song info / pre-game -->
+        <div class="br-panel br-song-info" id="songInfo" style="display:none">
+          <div class="br-song-header">
+            <img id="songThumb" class="br-song-thumb" alt="">
+            <div>
+              <div class="br-song-title" id="songTitle">—</div>
+              <div class="br-song-artist" id="songArtist"></div>
+              <div class="br-song-meta">
+                <span id="songBpm">BPM —</span> · <span id="songDuration">0:00</span>
+              </div>
+            </div>
+          </div>
+          <div class="br-diff-select" id="diffSelect">
+            <div class="br-diff-card" data-diff="easy"><b>Easy</b><span id="countEasy">0 notes</span></div>
+            <div class="br-diff-card selected" data-diff="normal"><b>Normal</b><span id="countNormal">0 notes</span></div>
+            <div class="br-diff-card" data-diff="hard"><b>Hard</b><span id="countHard">0 notes</span></div>
+          </div>
+          <div class="br-ready-row">
+            <button class="btn btn-accent btn-lg" id="btnReady">Ready</button>
+            <div class="br-hint" id="readyHint"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- COUNTDOWN -->
+      <section class="br-screen" id="screenCountdown" style="display:none">
+        <div class="br-countdown-num" id="countdownNum">3</div>
+      </section>
+
+      <!-- GAMEPLAY -->
+      <section class="br-screen br-game-screen" id="screenGame" style="display:none">
+        <canvas id="gameCanvas"></canvas>
+        <div class="br-hud">
+          <div class="br-hud-top">
+            <div class="br-hud-song"><span id="hudTitle"></span> · <span id="hudTime">0:00 / 0:00</span></div>
+            <div class="br-hud-right">
+              <span class="br-hud-score" id="hudScore">0</span>
+              <span class="br-hud-mult" id="hudMult">x1</span>
+              <span class="br-hud-acc" id="hudAcc">100%</span>
+            </div>
+          </div>
+          <div class="br-health-bar"><div class="br-health-fill" id="healthFill"></div></div>
+          <div class="br-opponent-panel" id="opponentPanel" style="display:none">
+            <div class="br-opp-name" id="oppName">Opponent</div>
+            <div class="br-opp-score" id="oppScore">0</div>
+            <div class="br-health-bar small"><div class="br-health-fill" id="oppHealthFill"></div></div>
+            <div class="br-opp-combo" id="oppCombo"></div>
+          </div>
+          <div class="br-judge" id="judgeText"></div>
+        </div>
+      </section>
+
+      <!-- RESULTS -->
+      <section class="br-screen" id="screenResults" style="display:none">
+        <div class="br-panel br-results">
+          <div class="br-rank" id="resultRank">S</div>
+          <div class="br-result-score" id="resultScore">0</div>
+          <div class="br-result-stats">
+            <span>Accuracy: <b id="resultAcc">0%</b></span>
+            <span>Max Combo: <b id="resultCombo">0</b></span>
+            <span id="resultFC" class="br-fc-badge" style="display:none">FULL COMBO</span>
+          </div>
+          <div class="br-breakdown" id="resultBreakdown"></div>
+          <div class="br-pvp-compare" id="pvpCompare" style="display:none"></div>
+          <div class="br-result-actions">
+            <button class="btn btn-accent" id="btnPlayAgain">Play Again</button>
+            <button class="btn btn-back" id="btnBackHub">Back to Hub</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="br-rules-modal" id="rulesModal" style="display:none">
+        <div class="br-rules-card">
+          <h3>How to Play</h3>
+          <p>Slash the incoming blocks in the direction their arrow points, exactly as they reach the glowing hit line.</p>
+          <p><b>Arrow keys</b> = up/down/left/right slash. <b>Q/E/Z/C</b> = diagonal slashes. <b>Space</b> = dot notes (any direction).</p>
+          <p>Avoid slashing bombs (dark spiked orbs). Missing a note or hitting a bomb drains your health and resets your combo multiplier.</p>
+          <p>In PvP, both players race the same note map — highest score wins.</p>
+          <button class="btn btn-sm" id="btnCloseRules">Close</button>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="beatrush.js"></script>
+</body>
+</html>
