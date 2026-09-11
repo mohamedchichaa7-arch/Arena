@@ -168,6 +168,19 @@ body::before {
 .br-judge.show { animation: judgePop .5s ease-out; }
 @keyframes judgePop { 0% { opacity: 0; transform: translate(-50%,-40%) scale(.6); } 30% { opacity: 1; transform: translate(-50%,-50%) scale(1.1); } 100% { opacity: 0; transform: translate(-50%,-60%) scale(1); } }
 
+.br-keygrid {
+  position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+  display: grid; grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(3, 34px); gap: 4px;
+}
+.br-key {
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(0,255,255,.3); border-radius: 6px;
+  font-family: 'Orbitron', sans-serif; font-size: .8rem; color: var(--text-dim);
+  transition: background .1s, color .1s, transform .1s;
+}
+.br-key-dot i { font-style: normal; font-size: .6rem; margin-left: 2px; color: var(--neon-cyan); }
+.br-key.active { background: var(--neon-cyan); color: #000; transform: scale(1.1); box-shadow: 0 0 12px var(--neon-cyan); }
+
 /* Results */
 .br-results { max-width: 480px; margin: 1rem auto; text-align: center; }
 .br-rank { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 5rem; color: var(--neon-gold); text-shadow: 0 0 30px var(--neon-gold); }

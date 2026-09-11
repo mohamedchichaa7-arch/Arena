@@ -332,10 +332,12 @@ const MIRROR = { left: 'right', right: 'left', 'up-left': 'up-right', 'up-right'
 function last3Same(arr, lane) { return arr.length >= 3 && arr.every(l => l === lane); }
 
 function buildDifficultyMap(beats, energies, rng, opts) {
-  const { minEnergy, directions, allowBombs, allowDouble } = opts;
+  const { minEnergy, directions, allowBombs, allowDouble, minGap } = opts;
   const notes = [];
   const lastLanes = [];
+  let lastNoteTime = -Infinity;
   for (let i = 0; i < beats.length; i++) {
+    if (beats[i] - lastNoteTime < minGap) continue; // keep note groups spaced apart so hit windows don't overlap
     const e = energies[i];
     let count = 0;
     if (e > 0.7) count = 2;
@@ -343,6 +345,7 @@ function buildDifficultyMap(beats, energies, rng, opts) {
     else if (e >= minEnergy && rng() < 0.4) count = 1;
     if (e < minEnergy) count = 0;
     if (count === 0) continue;
+    lastNoteTime = beats[i];
 
     for (let n = 0; n < count; n++) {
       let lane, attempts = 0;
@@ -370,9 +373,9 @@ function buildDifficultyMap(beats, energies, rng, opts) {
 function generateNoteMaps(beats, energies, seedStr) {
   const rng = mulberry32(strHash(seedStr));
   return {
-    easy: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0.7, directions: DIRECTIONS_4, allowBombs: false, allowDouble: false }), timingWindow: 0.15 },
-    normal: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0.4, directions: DIRECTIONS_8, allowBombs: true, allowDouble: true }), timingWindow: 0.10 },
-    hard: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0, directions: DIRECTIONS_8, allowBombs: true, allowDouble: true }), timingWindow: 0.07 },
+    easy: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0.7, directions: DIRECTIONS_4, allowBombs: false, allowDouble: false, minGap: 0.5 }), timingWindow: 0.15 },
+    normal: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0.4, directions: DIRECTIONS_8, allowBombs: true, allowDouble: true, minGap: 0.35 }), timingWindow: 0.10 },
+    hard: { notes: buildDifficultyMap(beats, energies, rng, { minEnergy: 0, directions: DIRECTIONS_8, allowBombs: true, allowDouble: true, minGap: 0.25 }), timingWindow: 0.07 },
   };
 }
 

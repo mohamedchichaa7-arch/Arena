@@ -315,11 +315,11 @@ function startCountdown(msg) {
 
 // ── Gameplay state ──────────────────────────────────────────────────
 const LANE_X = [-1.5, -0.5, 0.5, 1.5];
-const TRAVEL_TIME = 2.6; // seconds from spawn to hit zone
+const TRAVEL_TIME = 3.0; // seconds from spawn to hit zone
 const HIT_Z = 2;
 const SPAWN_Z = -50;
 let scene, camera, renderer, clock;
-let laneObjects = [], starField, wallGrids = [];
+let laneObjects = [], starField, wallGrids = [], hitRings = [];
 let activeNotes = [];
 let noteMap = null, timingWindow = 0.1;
 let songDuration = 0, opponentExists = false;
@@ -362,10 +362,22 @@ function initThree() {
 
   // Hit zone plane
   const hitGeo = new THREE.PlaneGeometry(6, 3);
-  const hitMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.06, side: THREE.DoubleSide });
+  const hitMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, side: THREE.DoubleSide });
   const hitPlane = new THREE.Mesh(hitGeo, hitMat);
   hitPlane.position.set(0, 0.4, HIT_Z);
   scene.add(hitPlane);
+
+  // Per-lane target rings — brighten/pulse exactly when a note is inside its
+  // hit window, so timing is read directly off the ring instead of guessed.
+  hitRings = [];
+  for (const x of LANE_X) {
+    const ringGeo = new THREE.RingGeometry(0.62, 0.78, 40);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x2299aa, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.set(x, 0.4, HIT_Z + 0.01);
+    scene.add(ring);
+    hitRings.push(ring);
+  }
 
   // Star field
   const starGeo = new THREE.BufferGeometry();
@@ -580,12 +592,22 @@ function judgeBomb(note) {
   updateHud();
 }
 
-const KEY_DIR = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', q: 'up-left', e: 'up-right', z: 'down-left', c: 'down-right', ' ': 'dot' };
+// Spatial 3x3 keyboard grid — each key sits where its direction points
+// (Q=up-left, W=up, E=up-right / A=left, S=dot, D=right / Z=down-left, X=down, C=down-right).
+// Arrow keys remain a cardinal-only alternate binding.
+const KEY_DIR = {
+  q: 'up-left', w: 'up', e: 'up-right',
+  a: 'left', s: 'dot', d: 'right',
+  z: 'down-left', x: 'down', c: 'down-right',
+  ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', ' ': 'dot',
+};
 window.addEventListener('keydown', (e) => {
   if (gamePhase !== 'playing') return;
   const dir = KEY_DIR[e.key] || KEY_DIR[e.key.toLowerCase()];
   if (!dir) return;
   e.preventDefault();
+  const keyEl = document.querySelector(`.br-key[data-key="${e.key.toLowerCase()}"]`);
+  if (keyEl) { keyEl.classList.add('active'); setTimeout(() => keyEl.classList.remove('active'), 120); }
   attemptSlash(dir);
 });
 
@@ -619,6 +641,26 @@ function animate() {
     note.mesh.position.z = z;
     note.mesh.rotation.y = Math.min(1, progress) * Math.PI * 0.5;
     if (songTime - note.time > timingWindow) judgeMiss(note);
+  }
+
+  // Light up each lane's hit ring exactly while a note is inside its real
+  // hit window — this is the actual "click now" signal, not a guess.
+  const laneHot = [null, null, null, null];
+  for (const note of activeNotes) {
+    if (note.judged) continue;
+    if (Math.abs(songTime - note.time) <= timingWindow) laneHot[note.lane] = note.type === 'bomb' ? 0xff3333 : 0xffffff;
+  }
+  for (let i = 0; i < hitRings.length; i++) {
+    const ring = hitRings[i];
+    if (laneHot[i] !== null) {
+      ring.material.color.setHex(laneHot[i]);
+      ring.material.opacity = 0.85 + Math.sin(performance.now() * 0.03) * 0.15;
+      ring.scale.setScalar(1.3);
+    } else {
+      ring.material.color.setHex(0x2299aa);
+      ring.material.opacity = 0.5;
+      ring.scale.setScalar(1);
+    }
   }
 
   // subtle camera bob + beat pulse on tunnel walls
