@@ -327,7 +327,6 @@ function mulberry32(seed) {
 
 const DIRECTIONS_8 = ['up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right'];
 const DIRECTIONS_4 = ['up', 'down', 'left', 'right'];
-const MIRROR = { left: 'right', right: 'left', 'up-left': 'up-right', 'up-right': 'up-left', 'down-left': 'down-right', 'down-right': 'down-left', up: 'up', down: 'down' };
 
 function last3Same(arr, lane) { return arr.length >= 3 && arr.every(l => l === lane); }
 
@@ -347,6 +346,20 @@ function buildDifficultyMap(beats, energies, rng, opts) {
     if (count === 0) continue;
     lastNoteTime = beats[i];
 
+    // Notes that land on the same beat must get distinct directions — a single
+    // keypress can only resolve one note (there's no lane targeting), so two
+    // simultaneous notes needing the same direction would make one unhittable.
+    const usedDirs = [];
+    function pickDirection() {
+      let d, attempts = 0;
+      do {
+        d = rng() < 0.12 ? 'dot' : directions[Math.floor(rng() * directions.length)];
+        attempts++;
+      } while (usedDirs.includes(d) && attempts < 12);
+      usedDirs.push(d);
+      return d;
+    }
+
     for (let n = 0; n < count; n++) {
       let lane, attempts = 0;
       do { lane = Math.floor(rng() * 4); attempts++; } while (last3Same(lastLanes, lane) && attempts < 10);
@@ -357,13 +370,14 @@ function buildDifficultyMap(beats, energies, rng, opts) {
       if (allowBombs && roll < 0.10) type = 'bomb';
       else if (allowDouble && roll < 0.15) type = 'double';
 
-      let direction = directions[Math.floor(rng() * directions.length)];
-      if (type !== 'bomb' && rng() < 0.12) direction = 'dot';
+      // bomb direction is cosmetic only (any key press resolves a bomb), so
+      // it doesn't need to compete for a unique slot in usedDirs
+      const direction = type === 'bomb' ? directions[Math.floor(rng() * directions.length)] : pickDirection();
 
       notes.push({ time: beats[i], lane, direction, type });
       if (type === 'double') {
         let lane2; do { lane2 = Math.floor(rng() * 4); } while (lane2 === lane);
-        notes.push({ time: beats[i], lane: lane2, direction: MIRROR[direction] || direction, type: 'normal' });
+        notes.push({ time: beats[i], lane: lane2, direction: pickDirection(), type: 'normal' });
       }
     }
   }

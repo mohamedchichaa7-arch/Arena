@@ -464,7 +464,9 @@ function spawnNoteMesh(note) {
     const spriteMat = new THREE.SpriteMaterial({ map: makeArrowTexture(note.direction), depthTest: false });
     const sprite = new THREE.Sprite(spriteMat);
     sprite.scale.set(0.95, 0.95, 0.95);
-    sprite.position.z = 0.6;
+    // kept at the cube's local origin — any z-offset here would swing sideways
+    // as the cube rotates during approach (sprites billboard, but their parent
+    // transform still applies to position), which is what caused the drift.
     mesh.add(sprite);
   }
   mesh.position.set(LANE_X[note.lane], LANE_Y, SPAWN_Z);
