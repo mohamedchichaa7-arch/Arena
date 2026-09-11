@@ -84,7 +84,7 @@ function handleMsg(msg) {
       renderDifficultySelection();
       break;
     case 'beat-player-ready':
-      updateReadyHint();
+      updateReadyHint(msg.readyCount, msg.total);
       break;
     case 'beat-go':
       startCountdown(msg);
@@ -109,10 +109,11 @@ function handleMsg(msg) {
   }
 }
 
-function updateReadyHint() {
+function updateReadyHint(readyCount, total) {
   const hint = $('readyHint');
   if (!hint) return;
-  if (players.size === 1) hint.textContent = 'Ready up to play solo.';
+  if (players.size === 1) { hint.textContent = 'Ready up to play solo.'; return; }
+  if (readyCount != null) hint.textContent = `Waiting for players to ready up… (${readyCount}/${total || players.size})`;
   else hint.textContent = 'Both players must ready up to start the race.';
 }
 
@@ -315,9 +316,11 @@ function startCountdown(msg) {
 
 // ── Gameplay state ──────────────────────────────────────────────────
 const LANE_X = [-1.5, -0.5, 0.5, 1.5];
+const LANE_Y = 0.4;
 const TRAVEL_TIME = 3.0; // seconds from spawn to hit zone
 const HIT_Z = 2;
 const SPAWN_Z = -50;
+const CAMERA_Y = 5.5;
 let scene, camera, renderer, clock;
 let laneObjects = [], starField, wallGrids = [], hitRings = [];
 let activeNotes = [];
@@ -336,9 +339,11 @@ function initThree() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050508);
   scene.fog = new THREE.Fog(0x050508, 40, 100);
-  camera = new THREE.PerspectiveCamera(70, 1, 0.1, 200);
-  camera.position.set(0, 0.5, 4.5);
-  camera.lookAt(0, 0.3, -10);
+  camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
+  // Elevated, downward-angled view (Guitar Hero / DDR style) — notes approach
+  // from the top of the screen and pass underneath the camera at the hit zone.
+  camera.position.set(0, CAMERA_Y, 8);
+  camera.lookAt(0, -1, -25);
 
   scene.add(new THREE.AmbientLight(0x334455, 1.2));
   const hitLight = new THREE.PointLight(0x00ffff, 2, 15);
@@ -360,21 +365,23 @@ function initThree() {
     scene.add(new THREE.Line(geo, laneMat));
   }
 
-  // Hit zone plane
-  const hitGeo = new THREE.PlaneGeometry(6, 3);
-  const hitMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, side: THREE.DoubleSide });
+  // Hit zone band, flat on the lane floor
+  const hitGeo = new THREE.PlaneGeometry(6, 1.6);
+  const hitMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, side: THREE.DoubleSide });
   const hitPlane = new THREE.Mesh(hitGeo, hitMat);
-  hitPlane.position.set(0, 0.4, HIT_Z);
+  hitPlane.rotation.x = -Math.PI / 2;
+  hitPlane.position.set(0, LANE_Y - 0.05, HIT_Z);
   scene.add(hitPlane);
 
-  // Per-lane target rings — brighten/pulse exactly when a note is inside its
-  // hit window, so timing is read directly off the ring instead of guessed.
+  // Per-lane target rings, flat on the floor — brighten/pulse exactly when a
+  // note is inside its hit window, so timing is read off the ring, not guessed.
   hitRings = [];
   for (const x of LANE_X) {
-    const ringGeo = new THREE.RingGeometry(0.62, 0.78, 40);
+    const ringGeo = new THREE.RingGeometry(0.28, 0.38, 40);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0x2299aa, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
     const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.position.set(x, 0.4, HIT_Z + 0.01);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, LANE_Y - 0.04, HIT_Z);
     scene.add(ring);
     hitRings.push(ring);
   }
@@ -460,7 +467,7 @@ function spawnNoteMesh(note) {
     sprite.position.z = 0.6;
     mesh.add(sprite);
   }
-  mesh.position.set(LANE_X[note.lane], 0.4, SPAWN_Z);
+  mesh.position.set(LANE_X[note.lane], LANE_Y, SPAWN_Z);
   const light = new THREE.PointLight(note.type === 'bomb' ? 0xff0000 : (note.lane % 2 === 0 ? 0xff3366 : 0x3366ff), 1.5, 8);
   mesh.add(light);
   scene.add(mesh);
@@ -668,7 +675,7 @@ function animate() {
   const beatInterval = 60 / bpm;
   const phase = (songTime % beatInterval) / beatInterval;
   const pulse = Math.max(0, 1 - phase * 4);
-  camera.position.y = 0.5 + Math.sin(songTime * 2) * 0.02;
+  camera.position.y = CAMERA_Y + Math.sin(songTime * 2) * 0.05;
   for (const g of wallGrids) g.scale.setScalar(1 + pulse * 0.03);
   if (starField) starField.rotation.z += 0.0003;
 

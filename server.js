@@ -288,10 +288,9 @@ const httpServer = http.createServer((req, res) => {
     const ext = path.extname(session.filePath).toLowerCase();
     const contentType = ext === '.mp3' ? 'audio/mpeg' : ext === '.ogg' ? 'audio/ogg' : 'audio/wav';
     res.writeHead(200, { 'Content-Type': contentType });
-    const stream = fs.createReadStream(session.filePath);
-    stream.pipe(res);
-    stream.on('close', () => beatgame.cleanupSession(sessionId));
-    stream.on('error', () => beatgame.cleanupSession(sessionId));
+    // Don't delete on stream close: in PvP both players fetch the same session
+    // independently — cleanup relies solely on the 5-minute TTL in registerSession.
+    fs.createReadStream(session.filePath).pipe(res);
     return;
   }
 
@@ -1029,6 +1028,12 @@ wss.on('connection', (ws, req) => {
         // Send current Domino lobby config to the joiner
         if (room.type === 'domino' && room.dominoConfig) {
           send(ws, { type: 'domino-config', target: room.dominoConfig.target });
+        }
+        // Catch up a Beat Rush joiner who arrived after the host already prepared a song
+        if (room.type === 'beatrush' && room.beatrush?.song) {
+          const s = room.beatrush.song;
+          send(ws, { type: 'beat-song-ready', title: s.title, artist: s.artist, thumbnail: s.thumbnail, bpm: s.bpm, duration: s.duration, sessionId: s.sessionId, noteMaps: s.noteMaps });
+          send(ws, { type: 'beat-difficulty', difficulty: room.beatrush.difficulty });
         }
 
         // Restore BR hand on reconnect
@@ -3256,7 +3261,7 @@ wss.on('connection', (ws, req) => {
         if (room.beatrush?.active) break;
         room.beatrush = {
           active: false, ready: new Set(), difficulty: 'normal', scores: {}, finals: {},
-          song: { title: msg.title, artist: msg.artist || null, thumbnail: msg.thumbnail || null, bpm: msg.bpm, duration: msg.duration, sessionId: msg.sessionId },
+          song: { title: msg.title, artist: msg.artist || null, thumbnail: msg.thumbnail || null, bpm: msg.bpm, duration: msg.duration, sessionId: msg.sessionId, noteMaps: msg.noteMaps },
         };
         broadcastRoom(room.id, { type: 'beat-song-ready', title: msg.title, artist: msg.artist || null, thumbnail: msg.thumbnail || null, bpm: msg.bpm, duration: msg.duration, sessionId: msg.sessionId, noteMaps: msg.noteMaps });
         log('info', 'beat-song-ready', { roomId: room.id, title: msg.title });
@@ -3277,7 +3282,7 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(conn.roomId);
         if (!room || room.type !== 'beatrush' || !room.beatrush || room.beatrush.active) break;
         room.beatrush.ready.add(id);
-        broadcastRoom(room.id, { type: 'beat-player-ready', id }, id);
+        broadcastRoom(room.id, { type: 'beat-player-ready', id, readyCount: room.beatrush.ready.size, total: room.players.size });
         const soloStart = room.players.size === 1 && room.beatrush.ready.size === 1;
         const pvpStart = room.players.size >= 2 && room.beatrush.ready.size >= room.players.size;
         if (soloStart || pvpStart) {
