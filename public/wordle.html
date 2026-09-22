@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Wordle — Game Arena</title>
+<link rel="stylesheet" href="wordle.css">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&family=Roboto+Mono:wght@700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="/firebase-init.js"></script>
+<script>
+  async function postScore(game, score) {
+    try {
+      const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+      if (!token) return;
+      await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+    } catch {}
+  }
+  function reportScore(game, score) { postScore(game, score); }
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h3>Players</h3>
+      <span class="player-count" id="playerCount">0</span>
+    </div>
+    <div class="player-grid" id="playerList"></div>
+    <div class="wd-stats-card">
+      <h4>Your Stats</h4>
+      <div class="wd-stat-row"><span>Streak</span><span id="statStreak">0</span></div>
+      <div class="wd-stat-row"><span>Win Rate</span><span id="statWinRate">0%</span></div>
+      <div class="wd-stat-row"><span>Games</span><span id="statGames">0</span></div>
+    </div>
+    <button class="btn btn-sm" id="btnFullStats" style="margin-top:.6rem;width:100%">📊 Full Stats</button>
+  </aside>
+
+  <main class="main-content">
+    <header class="game-header">
+      <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+      <button class="btn btn-mobile-toggle" id="btnToggleSidebar">👥</button>
+      <h1 class="logo logo-sm">WORDLE ⬛🟨🟩</h1>
+      <span class="room-badge" id="roomBadge"></span>
+      <button class="btn btn-sm" id="btnSettings">⚙️</button>
+      <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+    </header>
+
+    <div class="status-bar" id="status">Connecting…</div>
+
+    <!-- LOBBY / HUB -->
+    <section class="phase-panel" id="phaselobby">
+      <div class="wd-hub-card">
+        <div class="wd-mode-buttons">
+          <button class="wd-mode-btn" id="btnModeDaily">
+            <span class="wd-mode-icon">📅</span><span>Daily Challenge</span>
+            <small id="dailyStatus">Not played today</small>
+          </button>
+          <button class="wd-mode-btn" id="btnModeSolo">
+            <span class="wd-mode-icon">🧍</span><span>Solo Unlimited</span>
+          </button>
+          <button class="wd-mode-btn" id="btnModeRace">
+            <span class="wd-mode-icon">🏁</span><span>PvP Race</span>
+          </button>
+        </div>
+
+        <div class="wd-setup-row" id="difficultyRow">
+          <label>Difficulty</label>
+          <div class="wd-pill-group" id="difficultyPicker">
+            <button class="wd-pill active" data-diff="easy">🟢 Easy</button>
+            <button class="wd-pill" data-diff="normal">🟡 Normal</button>
+            <button class="wd-pill" data-diff="hard">🔴 Hard</button>
+            <button class="wd-pill" data-diff="expert">💀 Expert</button>
+          </div>
+        </div>
+        <div class="wd-setup-row" id="roundsRow" style="display:none">
+          <label>Rounds (best of)</label>
+          <div class="wd-pill-group" id="roundsPicker">
+            <button class="wd-pill" data-rounds="3">3</button>
+            <button class="wd-pill active" data-rounds="5">5</button>
+            <button class="wd-pill" data-rounds="7">7</button>
+          </div>
+        </div>
+        <div class="wd-setup-row">
+          <label class="wd-check"><input type="checkbox" id="vHardMode"> Hard Mode (must reuse revealed letters)</label>
+        </div>
+
+        <button class="btn btn-primary btn-lg" id="btnStart">Start</button>
+        <p class="wd-hint-text" id="lobbyHint">Waiting for host to start…</p>
+      </div>
+    </section>
+
+    <!-- GAME SCREEN -->
+    <section class="phase-panel" id="phasegame" style="display:none">
+      <div class="wd-top-bar">
+        <div class="wd-diff-badge" id="diffBadge"></div>
+        <div class="wd-round-ind" id="roundIndicator"></div>
+        <div class="wd-round-dots" id="roundDots"></div>
+      </div>
+      <div class="wd-game-grid">
+        <div class="wd-my-area">
+          <div class="wd-grid" id="myGrid"></div>
+          <div id="wordRevealRow" class="wd-reveal-row" style="display:none"></div>
+          <div class="wd-keyboard" id="keyboard"></div>
+        </div>
+        <aside class="wd-opponent-panel" id="opponentPanel" style="display:none">
+          <h4>Opponent</h4>
+          <div class="wd-opp-grid" id="oppGrid"></div>
+          <div class="wd-opp-guesses" id="oppGuesses">0 guesses used</div>
+          <div class="wd-opp-status" id="oppStatus"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- RESULTS (round/solo) -->
+    <section class="phase-panel" id="phaseresults" style="display:none">
+      <div class="wd-results-card">
+        <h1 class="wd-results-header" id="resultsHeader"></h1>
+        <div class="wd-results-word" id="resultsWord"></div>
+        <div class="wd-results-stats" id="resultsStats"></div>
+        <div class="wd-share-block" id="shareBlock" style="display:none">
+          <pre id="shareGrid"></pre>
+          <button class="btn btn-sm" id="btnCopyShare">📋 Copy Result</button>
+        </div>
+        <div class="wd-results-actions">
+          <button class="btn btn-primary" id="btnPlayAgain">Next Word</button>
+          <button class="btn btn-accent" id="btnBackHub">Back to Setup</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MATCH OVER (PvP) -->
+    <section class="phase-panel" id="phasematchover" style="display:none">
+      <div class="wd-results-card">
+        <h1 class="wd-results-header" id="matchHeader"></h1>
+        <div class="wd-match-scores" id="matchScores"></div>
+        <div class="wd-results-actions">
+          <button class="btn btn-primary" id="btnRematch">Rematch</button>
+          <button class="btn btn-accent" id="btnLobbyReturn">Back to Lobby</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- FULL STATS -->
+    <section class="phase-panel" id="phasestats" style="display:none">
+      <div class="wd-stats-full-card">
+        <h2>📊 Statistics</h2>
+        <div class="wd-stats-grid" id="statsGrid"></div>
+        <h3>Guess Distribution</h3>
+        <div class="wd-dist-chart" id="distChart"></div>
+        <button class="btn btn-accent" id="btnCloseStats">Close</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-overlay" id="settingsModal" style="display:none">
+  <div class="modal-card">
+    <h2>⚙️ Settings</h2>
+    <label class="wd-check"><input type="checkbox" id="vColorBlind"> Color-blind mode (orange/blue)</label>
+    <button class="btn btn-primary" id="btnCloseSettings">Done</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="rulesModal" style="display:none">
+  <div class="modal-card">
+    <h2>📜 How to Play Wordle</h2>
+    <p>Guess the hidden 5-letter word in 6 tries. After each guess, tiles reveal color feedback:</p>
+    <ul>
+      <li>🟩 Green — correct letter, correct position</li>
+      <li>🟨 Yellow — correct letter, wrong position</li>
+      <li>⬛ Grey — letter not in the word</li>
+    </ul>
+    <p><b>PvP Race</b>: both players get the same word. Fewer guesses wins; ties broken by speed.</p>
+    <button class="btn btn-primary" id="btnCloseRules">Got it</button>
+  </div>
+</div>
+
+<script src="wordle.js"></script>
+</body>
+</html>
