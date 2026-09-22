@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Hangman — Game Arena</title>
+<link rel="stylesheet" href="hangman.css">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="/firebase-init.js"></script>
+<script>
+  async function postScore(game, score) {
+    try {
+      const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+      if (!token) return;
+      await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+    } catch {}
+  }
+  function reportScore(game, score) { postScore(game, score); }
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h3>Players</h3>
+      <span class="player-count" id="playerCount">0</span>
+    </div>
+    <div class="player-grid" id="playerList"></div>
+    <div class="hm-stats-card" id="statsCard">
+      <h4>Your Stats</h4>
+      <div class="hm-stat-row"><span>Best Streak</span><span id="statStreak">0</span></div>
+      <div class="hm-stat-row"><span>Win Rate</span><span id="statWinRate">0%</span></div>
+      <div class="hm-stat-row"><span>Games Played</span><span id="statGames">0</span></div>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <header class="game-header">
+      <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+      <button class="btn btn-mobile-toggle" id="btnToggleSidebar">👥</button>
+      <h1 class="logo logo-sm">HANGMAN 🪢</h1>
+      <span class="room-badge" id="roomBadge"></span>
+      <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+    </header>
+
+    <div class="status-bar" id="status">Connecting…</div>
+
+    <!-- LOBBY / SETUP -->
+    <section class="phase-panel" id="phaselobby">
+      <div class="hm-setup-card">
+        <h2>Game Setup</h2>
+        <div class="hm-setup-row">
+          <label>Mode</label>
+          <div class="hm-pill-group" id="modePicker">
+            <button class="hm-pill active" data-mode="solo">🧍 Solo</button>
+            <button class="hm-pill" data-mode="race">🏁 PvP Race</button>
+            <button class="hm-pill" data-mode="host">😈 Host vs Guesser</button>
+          </div>
+        </div>
+        <div class="hm-setup-row">
+          <label>Difficulty</label>
+          <div class="hm-pill-group" id="difficultyPicker">
+            <button class="hm-pill active" data-diff="easy">Easy</button>
+            <button class="hm-pill" data-diff="medium">Medium</button>
+            <button class="hm-pill" data-diff="hard">Hard</button>
+            <button class="hm-pill" data-diff="expert">Expert</button>
+          </div>
+        </div>
+        <div class="hm-setup-row">
+          <label>Category</label>
+          <div class="hm-category-grid" id="categoryPicker">
+            <button class="hm-cat-card active" data-cat="all"><span>🎲</span>All</button>
+            <button class="hm-cat-card" data-cat="animals"><span>🐾</span>Animals</button>
+            <button class="hm-cat-card" data-cat="countries"><span>🌍</span>Countries</button>
+            <button class="hm-cat-card" data-cat="food"><span>🍕</span>Food</button>
+            <button class="hm-cat-card" data-cat="science"><span>🔬</span>Science</button>
+            <button class="hm-cat-card" data-cat="movies"><span>🎬</span>Movies</button>
+            <button class="hm-cat-card" data-cat="sports"><span>🏆</span>Sports</button>
+            <button class="hm-cat-card" data-cat="tech"><span>💻</span>Tech</button>
+            <button class="hm-cat-card" data-cat="nature"><span>🌿</span>Nature</button>
+            <button class="hm-cat-card" data-cat="tunisian"><span>🇹🇳</span>Tunisian</button>
+          </div>
+        </div>
+        <div class="hm-setup-row">
+          <label>Variants</label>
+          <div class="hm-variant-group">
+            <label class="hm-check"><input type="checkbox" id="vHidden"> Hidden Category</label>
+            <label class="hm-check"><input type="checkbox" id="vSpeed"> Speed Mode (10s/guess)</label>
+            <label class="hm-check"><input type="checkbox" id="vBlind"> Blind Mode (hide gallows)</label>
+            <label class="hm-check"><input type="checkbox" id="vArabic"> Arabic Mode (Tunisian words)</label>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-lg" id="btnStart">Start Game</button>
+        <p class="hm-hint-text" id="lobbyHint">Waiting for host to start…</p>
+      </div>
+    </section>
+
+    <!-- GAME SCREEN -->
+    <section class="phase-panel" id="phasegame" style="display:none">
+      <div class="hm-top-bar">
+        <div class="hm-round-ind" id="roundIndicator"></div>
+        <div class="hm-score-live" id="scoreLive"></div>
+        <div class="hm-guess-timer" id="guessTimerWrap" style="display:none">⏱ <span id="guessTimer">10</span>s</div>
+      </div>
+      <div class="hm-game-grid">
+        <div class="hm-left-panel" id="leftPanel">
+          <div class="hm-gallows-wrap">
+            <svg viewBox="0 0 200 220" class="hm-gallows" id="gallowsSvg">
+              <g class="hm-gallows-frame" id="gallowsFrame">
+                <line x1="20" y1="210" x2="120" y2="210" />
+                <line x1="45" y1="210" x2="45" y2="20" />
+                <line x1="45" y1="20" x2="130" y2="20" />
+                <line x1="130" y1="20" x2="130" y2="45" class="hm-rope" id="ropeLine" />
+              </g>
+              <g class="hm-figure" id="hmFigure">
+                <circle cx="130" cy="60" r="15" class="hm-part" id="pHead" />
+                <line x1="130" y1="75" x2="130" y2="130" class="hm-part" id="pBody" />
+                <line x1="130" y1="90" x2="108" y2="115" class="hm-part" id="pArmL" />
+                <line x1="130" y1="90" x2="152" y2="115" class="hm-part" id="pArmR" />
+                <line x1="130" y1="130" x2="112" y2="165" class="hm-part" id="pLegL" />
+                <line x1="130" y1="130" x2="148" y2="165" class="hm-part" id="pLegR" />
+                <circle cx="108" cy="115" r="3" class="hm-part hm-detail" id="pHandL" />
+                <circle cx="152" cy="115" r="3" class="hm-part hm-detail" id="pHandR" />
+                <line x1="112" y1="165" x2="104" y2="170" class="hm-part hm-detail" id="pFootL" />
+                <line x1="148" y1="165" x2="156" y2="170" class="hm-part hm-detail" id="pFootR" />
+                <circle cx="125" cy="57" r="1.6" class="hm-part hm-detail hm-eye" id="pEyeL" />
+                <circle cx="135" cy="57" r="1.6" class="hm-part hm-detail hm-eye" id="pEyeR" />
+                <path d="M124,66 Q130,62 136,66" class="hm-part hm-detail hm-mouth" id="pMouth" />
+                <path d="M122,52 L128,48 M138,52 L132,48" class="hm-part hm-detail hm-eyex" id="pEyeX" style="display:none" />
+                <path d="M133,50 L128,44" class="hm-part hm-detail hm-tear" id="pTear" />
+                <path d="M120,47 L122,42 M126,45 L127,40 M132,45 L134,40" class="hm-part hm-detail hm-hair" id="pHair" />
+                <path d="M130,40 L124,30 L136,30 Z" class="hm-part hm-hat" id="pHat" />
+              </g>
+            </svg>
+            <div class="hm-blind-cover" id="blindCover" style="display:none">🙈 Blind Mode — figure hidden</div>
+          </div>
+          <div class="hm-tries-display" id="triesDisplay">X wrong guesses allowed</div>
+          <button class="hm-breakdown-toggle" id="btnBreakdown">📐 Show tries breakdown</button>
+          <div class="hm-breakdown" id="breakdownPanel" style="display:none"></div>
+          <div class="hm-hint-actions" id="hintActions">
+            <button class="btn btn-sm hm-hint-btn" id="btnHintLetter">💡 Reveal Letter <span id="hintsLeftBadge">2</span></button>
+            <button class="btn btn-sm hm-hint-btn" id="btnHintWord">📖 Show Hint</button>
+          </div>
+        </div>
+        <div class="hm-right-panel">
+          <div class="hm-word-meta">
+            <span class="hm-category-badge" id="categoryBadge">Category: ❓</span>
+          </div>
+          <div class="hm-word-display" id="wordDisplay"></div>
+          <div class="hm-length-label" id="lengthLabel"></div>
+          <div class="hm-keyboard" id="keyboard"></div>
+        </div>
+        <aside class="hm-opponent-panel" id="opponentPanel" style="display:none">
+          <h4 id="opponentPanelTitle">Opponent</h4>
+          <div class="hm-opp-blanks" id="oppBlanks"></div>
+          <div class="hm-opp-wrong" id="oppWrong">Wrong: 0</div>
+          <div class="hm-opp-banner" id="oppBanner" style="display:none">THEY GOT IT!</div>
+        </aside>
+        <aside class="hm-host-panel" id="hostPanel" style="display:none">
+          <h4>You are the Host 😈</h4>
+          <div class="hm-host-word" id="hostWordView"></div>
+          <div class="hm-host-keyboard" id="hostKeyboardView"></div>
+          <div class="hm-host-msg" id="hostAutoMsg"></div>
+          <div class="hm-taunt-buttons">
+            <button class="btn btn-sm" id="btnTauntRedHerring">😈 Red Herring</button>
+            <button class="btn btn-sm" id="btnTauntTime">⏱️ Time Pressure</button>
+          </div>
+        </aside>
+        <div class="hm-host-word-input" id="hostWordInputPanel" style="display:none">
+          <h3>Type a secret word</h3>
+          <input type="text" id="hostWordField" maxlength="20" placeholder="LETTERS ONLY">
+          <button class="btn btn-primary" id="btnSubmitHostWord">Lock In Word</button>
+        </div>
+        <div class="hm-waiting-panel" id="waitingForHostPanel" style="display:none">
+          <p id="waitingForHostMsg">Waiting for host to pick a word…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- RESULTS -->
+    <section class="phase-panel" id="phaseresults" style="display:none">
+      <div class="hm-results-card">
+        <h1 class="hm-results-header" id="resultsHeader"></h1>
+        <div class="hm-results-word" id="resultsWord"></div>
+        <div class="hm-results-hint" id="resultsHint"></div>
+        <div class="hm-results-stars" id="resultsStars"></div>
+        <div class="hm-results-stats" id="resultsStats"></div>
+        <div class="hm-results-actions">
+          <button class="btn btn-primary" id="btnPlayAgain">Play Again</button>
+          <button class="btn btn-accent" id="btnBackHub">Back to Setup</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MATCH OVER (PvP) -->
+    <section class="phase-panel" id="phasematchover" style="display:none">
+      <div class="hm-results-card">
+        <h1 class="hm-results-header" id="matchHeader"></h1>
+        <div class="hm-match-scores" id="matchScores"></div>
+        <div class="hm-results-actions">
+          <button class="btn btn-primary" id="btnRematch">Rematch</button>
+          <button class="btn btn-accent" id="btnLobbyReturn">Back to Lobby</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-overlay" id="rulesModal" style="display:none">
+  <div class="modal-card">
+    <h2>📜 How to Play Hangman</h2>
+    <p>Guess the hidden word one letter at a time before running out of tries. The number of tries is calculated dynamically from the word's length and letter rarity — short common words are harder, long obscure words give more room to breathe.</p>
+    <ul>
+      <li><b>Solo</b> — pick category &amp; difficulty, guess at your own pace.</li>
+      <li><b>PvP Race</b> — same word, both players guess simultaneously. First to solve wins the round. Best of 5.</li>
+      <li><b>Host vs Guesser</b> — one player picks a secret word, the other guesses while the host can taunt. Roles swap each round. Best of 6.</li>
+    </ul>
+    <button class="btn btn-primary" id="btnCloseRules">Got it</button>
+  </div>
+</div>
+
+<script src="hangman.js"></script>
+</body>
+</html>

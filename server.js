@@ -115,9 +115,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'cryptogram_easy', 'cryptogram_normal', 'cryptogram_hard', 'cryptogram_expert', 'domino', 'beatrush']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'cryptogram_easy', 'cryptogram_normal', 'cryptogram_hard', 'cryptogram_expert', 'domino', 'beatrush', 'hangman']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'domino']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'domino', 'hangman']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -146,7 +146,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html', '/memoryduel': '/memoryduel.html', '/cryptogram': '/cryptogram.html', '/domino': '/domino.html', '/beatrush': '/beatrush.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html', '/memoryduel': '/memoryduel.html', '/cryptogram': '/cryptogram.html', '/domino': '/domino.html', '/beatrush': '/beatrush.html', '/hangman': '/hangman.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -759,6 +759,18 @@ function removeFromRoom(conn) {
       broadcastLobby();
     }
   }
+  if (room.hangman && room.hangman.active) {
+    if (room.hangman.roundTimer) { clearTimeout(room.hangman.roundTimer); room.hangman.roundTimer = null; }
+    if (room.hangman.taunt?.timer) { clearTimeout(room.hangman.taunt.timer); }
+    if (room.players.size === 0) {
+      room.hangman = null;
+    } else {
+      room.hangman.active = false;
+      room.status = 'waiting';
+      broadcastRoom(room.id, { type: 'hm-opponent-left' });
+      broadcastLobby();
+    }
+  }
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -766,7 +778,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active) || (room.md?.active) || (room.cg?.active) || (room.domino?.active) || (room.beatrush?.active);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active) || (room.md?.active) || (room.cg?.active) || (room.domino?.active) || (room.beatrush?.active) || (room.hangman?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -862,9 +874,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : msg.gameType === 'memoryduel' ? 'memoryduel' : msg.gameType === 'cryptogram' ? 'cryptogram' : msg.gameType === 'domino' ? 'domino' : msg.gameType === 'beatrush' ? 'beatrush' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : msg.gameType === 'memoryduel' ? 'memoryduel' : msg.gameType === 'cryptogram' ? 'cryptogram' : msg.gameType === 'domino' ? 'domino' : msg.gameType === 'beatrush' ? 'beatrush' : msg.gameType === 'hangman' ? 'hangman' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' || type === 'memoryduel' || type === 'cryptogram' || type === 'beatrush' ? 2 : type === 'domino' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' || type === 'memoryduel' || type === 'cryptogram' || type === 'beatrush' || type === 'hangman' ? 2 : type === 'domino' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -998,6 +1010,10 @@ wss.on('connection', (ws, req) => {
         if (room.status === 'playing' && room.type === 'beatrush') {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
+        // Lock hangman rooms while game is running (except solo re-entry)
+        if (room.status === 'playing' && room.type === 'hangman' && room.players.size >= 2) {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
 
         removeFromRoom(conn); // leave any existing room
         conn.mode = 'room';
@@ -1034,6 +1050,10 @@ wss.on('connection', (ws, req) => {
           const s = room.beatrush.song;
           send(ws, { type: 'beat-song-ready', title: s.title, artist: s.artist, thumbnail: s.thumbnail, bpm: s.bpm, duration: s.duration, sessionId: s.sessionId, noteMaps: s.noteMaps });
           send(ws, { type: 'beat-difficulty', difficulty: room.beatrush.difficulty });
+        }
+        // Send current Hangman lobby config to the joiner
+        if (room.type === 'hangman' && room.hangmanConfig) {
+          send(ws, { type: 'hm-lobby-config', ...room.hangmanConfig });
         }
 
         // Restore BR hand on reconnect
@@ -3339,6 +3359,194 @@ wss.on('connection', (ws, req) => {
         break;
       }
       // ── End Beat Rush ────────────────────────────────────────────────────────
+
+      // ── Hangman ──────────────────────────────────────────────────────────────
+      case 'hm-lobby-config': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'hangman') break;
+        if (room.players.keys().next().value !== id) break;
+        const difficulty = ['easy', 'medium', 'hard', 'expert'].includes(msg.difficulty) ? msg.difficulty : 'medium';
+        const category = typeof msg.category === 'string' ? msg.category.slice(0, 20) : 'all';
+        const mode = ['solo', 'race', 'host'].includes(msg.mode) ? msg.mode : 'solo';
+        const variants = {
+          hiddenCategory: !!msg.variants?.hiddenCategory, speedMode: !!msg.variants?.speedMode,
+          blindMode: !!msg.variants?.blindMode, arabicMode: !!msg.variants?.arabicMode,
+        };
+        room.hangmanConfig = { difficulty, category, mode, variants };
+        broadcastRoom(room.id, { type: 'hm-lobby-config', ...room.hangmanConfig }, id);
+        break;
+      }
+      case 'hm-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'hangman') break;
+        if (room.players.keys().next().value !== id) break;
+        if (room.hangman?.active) break;
+        const mode = ['solo', 'race', 'host'].includes(msg.mode) ? msg.mode : 'solo';
+        if (mode !== 'solo' && room.players.size < 2) { send(ws, { type: 'error', msg: 'Need 2 players for this mode' }); break; }
+        const difficulty = ['easy', 'medium', 'hard', 'expert'].includes(msg.difficulty) ? msg.difficulty : 'medium';
+        const category = typeof msg.category === 'string' ? msg.category.slice(0, 20) : 'all';
+        const variants = {
+          hiddenCategory: !!msg.variants?.hiddenCategory, speedMode: !!msg.variants?.speedMode,
+          blindMode: !!msg.variants?.blindMode, arabicMode: !!msg.variants?.arabicMode,
+        };
+        room.hangman = {
+          active: true, mode, difficulty, category, variants,
+          round: 0, totalRounds: mode === 'race' ? 5 : mode === 'host' ? 6 : null,
+          usedWords: new Set(), roundWins: {}, scores: {}, players: {},
+          roundActive: false, roundTimer: null, word: null, hostId: null, guesserId: null, taunt: null,
+        };
+        room.status = 'playing';
+        broadcastLobby();
+        log('info', 'hm-start', { by: conn.name, roomId: room.id, mode, difficulty, category });
+        if (mode === 'host') hmBeginHostRound(room); else hmBeginRound(room);
+        break;
+      }
+      case 'hm-host-word': {
+        const room = rooms.get(conn.roomId);
+        const g = room?.hangman;
+        if (!g || !g.active || g.mode !== 'host' || g.hostId !== id || g.roundActive) break;
+        const word = String(msg.word || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 20);
+        if (word.length < 1) { send(ws, { type: 'error', msg: 'Word must contain only letters' }); break; }
+        const { tries, breakdown } = calcHangmanTries(word, g.difficulty);
+        g.word = word;
+        g.hintText = null;
+        g.wordCategory = 'custom';
+        g.triesBudget = tries;
+        g.breakdown = breakdown;
+        g.startedAt = Date.now();
+        g.roundActive = true;
+        g.taunt = { used: 0, timer: null };
+        const gp = hmNewPlayerState();
+        gp.revealed = new Array(word.length).fill(false);
+        gp.hintsLeft = HM_HINTS_BUDGET[g.difficulty] || 0;
+        g.players[g.guesserId] = gp;
+        const hostP = room.players.get(g.hostId), guesserP = room.players.get(g.guesserId);
+        if (hostP) send(hostP.ws, { type: 'hm-go', mode: 'host', role: 'host', round: g.round, totalRounds: g.totalRounds, word, wordLength: word.length, difficulty: g.difficulty, triesBudget: tries, breakdown, variants: g.variants });
+        if (guesserP) send(guesserP.ws, { type: 'hm-go', mode: 'host', role: 'guesser', round: g.round, totalRounds: g.totalRounds, wordLength: word.length, difficulty: g.difficulty, triesBudget: tries, breakdown, variants: g.variants, hintsLeft: gp.hintsLeft });
+        break;
+      }
+      case 'hm-guess': {
+        const room = rooms.get(conn.roomId);
+        const g = room?.hangman;
+        if (!g || !g.active || !g.roundActive) break;
+        if (g.mode === 'host' && id !== g.guesserId) break;
+        const ps = g.players[id];
+        if (!ps || ps.solved || ps.wrong >= g.triesBudget) break;
+        const letter = String(msg.letter || '').toUpperCase().slice(0, 1);
+        if (!/^[A-Z]$/.test(letter) || ps.guessedLetters.has(letter)) break;
+        ps.guessedLetters.add(letter);
+        if (g.taunt?.timer) { clearTimeout(g.taunt.timer); g.taunt.timer = null; }
+        const positions = [];
+        for (let i = 0; i < g.word.length; i++) { if (g.word[i] === letter) { ps.revealed[i] = true; positions.push(i); } }
+        const correct = positions.length > 0;
+        if (!correct) ps.wrong++;
+        const wordComplete = ps.revealed.every(Boolean);
+        if (wordComplete) ps.solved = true;
+        send(ws, {
+          type: 'hm-guess-result', letter, correct, positions, wrongCount: ps.wrong,
+          triesLeft: g.triesBudget - ps.wrong, wordComplete, revealedWord: wordComplete ? g.word : null,
+        });
+        if (g.mode === 'race') {
+          broadcastRoom(room.id, { type: 'hm-opponent-update', id, blanksRemaining: hmBlanksRemaining(ps, g.word), wrongGuesses: ps.wrong, wordComplete }, id);
+          if (wordComplete) { hmResolveRaceRound(room, id); break; }
+          if (ps.wrong >= g.triesBudget) {
+            ps.failed = true;
+            const others = [...room.players.keys()].filter(pid => pid !== id);
+            const allDone = others.every(pid => g.players[pid]?.solved || g.players[pid]?.wrong >= g.triesBudget);
+            if (allDone) hmResolveRaceRound(room, null);
+          }
+        } else if (g.mode === 'host') {
+          const hostP = room.players.get(g.hostId);
+          if (hostP) send(hostP.ws, { type: 'hm-host-view-update', letter, correct, wrongCount: ps.wrong, wordComplete });
+          if (wordComplete) { hmResolveHostRound(room, g.guesserId); }
+          else if (ps.wrong >= g.triesBudget) { hmResolveHostRound(room, g.hostId); }
+        } else {
+          if (wordComplete || ps.wrong >= g.triesBudget) hmResolveSoloRound(room, id, wordComplete);
+        }
+        break;
+      }
+      case 'hm-hint': {
+        const room = rooms.get(conn.roomId);
+        const g = room?.hangman;
+        if (!g || !g.active || !g.roundActive) break;
+        const ps = g.players[id];
+        if (!ps || ps.solved || ps.hintsLeft <= 0) break;
+        const hintType = msg.hintType === 'word' ? 'word' : 'letter';
+        ps.hintsLeft--; ps.hintsUsed++;
+        if (hintType === 'word') {
+          if (!g.hintText) { ps.hintsLeft++; ps.hintsUsed--; send(ws, { type: 'error', msg: 'No hint available for this word' }); break; }
+          send(ws, { type: 'hm-hint-result', hintType: 'word', hintText: g.hintText, hintsLeft: ps.hintsLeft });
+        } else {
+          const hidden = [];
+          for (let i = 0; i < g.word.length; i++) { if (!ps.revealed[i]) hidden.push(i); }
+          if (hidden.length === 0) { ps.hintsLeft++; ps.hintsUsed--; break; }
+          const counts = {};
+          for (const i of hidden) counts[g.word[i]] = (counts[g.word[i]] || 0) + 1;
+          const bestLetter = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+          const positions = [];
+          for (let i = 0; i < g.word.length; i++) { if (g.word[i] === bestLetter) { ps.revealed[i] = true; positions.push(i); } }
+          ps.guessedLetters.add(bestLetter);
+          const wordComplete = ps.revealed.every(Boolean);
+          if (wordComplete) ps.solved = true;
+          send(ws, { type: 'hm-hint-result', hintType: 'letter', letter: bestLetter, positions, hintsLeft: ps.hintsLeft, wordComplete });
+          if (wordComplete) {
+            if (g.mode === 'race') hmResolveRaceRound(room, id);
+            else if (g.mode === 'host') hmResolveHostRound(room, g.guesserId);
+            else hmResolveSoloRound(room, id, true);
+          }
+        }
+        break;
+      }
+      case 'hm-taunt': {
+        const room = rooms.get(conn.roomId);
+        const g = room?.hangman;
+        if (!g || !g.active || g.mode !== 'host' || g.hostId !== id || !g.roundActive) break;
+        if (!g.taunt || g.taunt.used >= 2) break;
+        const guesserP = room.players.get(g.guesserId);
+        const gp = g.players[g.guesserId];
+        if (!gp || !guesserP) break;
+        g.taunt.used++;
+        if (msg.taunt === 'redherring') {
+          const unused = g.word.split('').filter(ch => !gp.guessedLetters.has(ch));
+          const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(ch => !g.word.includes(ch) && !gp.guessedLetters.has(ch));
+          const fakeLetter = alphabet[Math.floor(Math.random() * alphabet.length)];
+          if (fakeLetter) send(guesserP.ws, { type: 'hm-taunt-applied', taunt: 'redherring', letter: fakeLetter });
+        } else if (msg.taunt === 'time') {
+          send(guesserP.ws, { type: 'hm-taunt-applied', taunt: 'time', durationMs: 30000 });
+          g.taunt.timer = setTimeout(() => {
+            const r2 = rooms.get(room.id); const g2 = r2?.hangman;
+            if (!g2 || !g2.roundActive || g2.mode !== 'host') return;
+            const gp2 = g2.players[g2.guesserId];
+            if (!gp2 || gp2.solved) return;
+            gp2.wrong++;
+            const guesserWs = room.players.get(g2.guesserId)?.ws;
+            if (guesserWs) send(guesserWs, { type: 'hm-guess-result', letter: null, correct: false, positions: [], wrongCount: gp2.wrong, triesLeft: g2.triesBudget - gp2.wrong, wordComplete: false, timeout: true });
+            const hostWs = room.players.get(g2.hostId)?.ws;
+            if (hostWs) send(hostWs, { type: 'hm-host-view-update', letter: null, correct: false, wrongCount: gp2.wrong, wordComplete: false });
+            if (gp2.wrong >= g2.triesBudget) hmResolveHostRound(r2, g2.hostId);
+          }, 30000);
+        }
+        break;
+      }
+      case 'hm-cancel-taunt': {
+        const room = rooms.get(conn.roomId);
+        const g = room?.hangman;
+        if (!g || !g.active || g.mode !== 'host' || id !== g.guesserId) break;
+        const gp = g.players[id];
+        if (!gp || gp.hintsLeft <= 0 || !g.taunt?.timer) break;
+        gp.hintsLeft--;
+        clearTimeout(g.taunt.timer); g.taunt.timer = null;
+        send(ws, { type: 'hm-taunt-cancelled', hintsLeft: gp.hintsLeft });
+        break;
+      }
+      case 'hm-next': {
+        const room = rooms.get(conn.roomId);
+        const g = room?.hangman;
+        if (!g || !g.active || g.mode !== 'solo' || g.roundActive) break;
+        hmBeginRound(room);
+        break;
+      }
+      // ── End Hangman ──────────────────────────────────────────────────────────
 
       case 'game-over': {
         const room = rooms.get(conn.roomId);
@@ -8472,6 +8680,283 @@ const GEO_DB = [
   { lat: -38.1368, lng: 176.2497, country: 'New Zealand', city: 'Rotorua', difficulty: 'hard', title: 'Rotorua Geysers' },
   { lat: -37.8136, lng: 144.9631, country: 'Australia', city: 'Melbourne', difficulty: 'medium', title: 'Melbourne CBD' },
 ];
+
+// ── Hangman helpers ───────────────────────────────────────────────
+const HM_COMMON = new Set(['E','T','A','O','I','N','S','R']);
+const HM_UNCOMMON = new Set(['H','L','D','C','U','M','F','P','G','W','Y','B']);
+const HM_RARE = new Set(['V','K','X','J','Q','Z']);
+const HM_DIFF_MULT = { easy: 1.3, medium: 1.0, hard: 0.8, expert: 0.65 };
+const HM_SCORE_MULT = { easy: 1.0, medium: 1.5, hard: 2.5, expert: 4.0 };
+const HM_HINTS_BUDGET = { easy: 2, medium: 2, hard: 1, expert: 0 };
+
+function calcHangmanTries(word, difficultyTier) {
+  const w = word.toUpperCase();
+  const base = Math.floor(w.length * 0.8);
+  const unique = new Set(w.split(''));
+  let bonusRaw = 0;
+  for (const ch of unique) {
+    if (HM_RARE.has(ch)) bonusRaw += 0.7;
+    else if (HM_UNCOMMON.has(ch)) bonusRaw += 0.3;
+  }
+  const bonus = Math.round(bonusRaw);
+  const counts = {};
+  for (const ch of w) counts[ch] = (counts[ch] || 0) + 1;
+  let penaltyRaw = 0;
+  for (const ch in counts) { if (counts[ch] > 1) penaltyRaw += (counts[ch] - 1) * 0.3; }
+  const penalty = Math.max(0, Math.round(penaltyRaw));
+  const mult = HM_DIFF_MULT[difficultyTier] || 1.0;
+  let tries = Math.round((base + bonus - penalty) * mult);
+  tries = Math.max(3, Math.min(14, tries));
+  return { tries, breakdown: { base, bonus, penalty, mult } };
+}
+
+function calcHangmanScore({ wrong, maxWrong, hintsUsed, elapsedSeconds, difficulty, won }) {
+  if (!won) return 0;
+  const base = 1000;
+  const wrongPenalty = wrong * (100 / Math.max(1, maxWrong)) * 0.8;
+  const hintPenalty = hintsUsed * 200;
+  const speedBonus = Math.max(0, 500 - elapsedSeconds * 5);
+  const mult = HM_SCORE_MULT[difficulty] || 1.0;
+  return Math.max(50, Math.round((base - wrongPenalty - hintPenalty + speedBonus) * mult));
+}
+
+function hangmanRating(wrong, maxWrong, won) {
+  if (!won) return { stars: 0, label: '💀 Lost' };
+  if (wrong === 0) return { stars: 3, label: '⭐⭐⭐ Perfect' };
+  if (wrong <= 2) return { stars: 3, label: '⭐⭐⭐ Excellent' };
+  if (wrong <= 4) return { stars: 2, label: '⭐⭐ Good' };
+  if (wrong <= 6) return { stars: 1, label: '⭐ Survived' };
+  if (wrong > maxWrong / 2) return { stars: 1, label: '😅 Close Call' };
+  return { stars: 1, label: '⭐ Survived' };
+}
+
+function hw(word, category, difficulty, lang) {
+  return { word: word.toUpperCase(), category, difficulty, lang: lang || 'en' };
+}
+function hwList(category, difficulty, words, lang) {
+  return words.map(w => hw(w, category, difficulty, lang));
+}
+
+const HANGMAN_HINTS = {
+  CAT: 'A small domesticated feline', DOG: "Man's best friend", LION: 'King of the jungle',
+  TIGER: 'Largest wild cat with orange stripes', ELEPHANT: 'Largest land mammal with a trunk',
+  GIRAFFE: 'Tallest land animal with a long neck', DOLPHIN: 'Intelligent marine mammal that clicks and whistles',
+  CHEETAH: 'The fastest land animal', KANGAROO: 'Australian marsupial that hops', KOALA: 'Eucalyptus-eating Australian marsupial',
+  OCTOPUS: 'Eight-armed sea creature', PENGUIN: 'Flightless bird that lives in cold climates',
+  CHINA: 'Most populous country in Asia', JAPAN: 'Island nation known as the Land of the Rising Sun',
+  EGYPT: 'Home of the ancient pyramids', TUNISIA: 'North African country on the Mediterranean',
+  MOROCCO: 'North African kingdom famous for its medinas', BRAZIL: 'Largest country in South America',
+  AUSTRALIA: 'Country and continent known for kangaroos', CHAD: 'Landlocked African country, short name',
+  OMAN: 'Gulf country on the Arabian Peninsula', FIJI: 'Pacific island nation',
+  PIZZA: 'Italian dish with cheese and toppings on dough', SUSHI: 'Japanese dish with vinegared rice and fish',
+  HUMMUS: 'Chickpea dip popular in the Middle East', FALAFEL: 'Fried chickpea balls',
+  BAKLAVA: 'Sweet layered pastry with nuts and honey', TIRAMISU: 'Italian coffee-flavored dessert',
+  PHOTOSYNTHESIS: 'Process plants use to convert light into energy', GRAVITY: 'Force that pulls objects toward each other',
+  MITOCHONDRIA: "The cell's powerhouse", EVOLUTION: 'Gradual change of species over time',
+  ECOSYSTEM: 'A community of organisms and their environment', VOLCANO: 'Mountain that can erupt with lava',
+  TITANIC: 'Movie about a doomed ocean liner', AVATAR: 'Blue aliens on the moon Pandora',
+  FROZEN: 'Animated movie with Elsa and Anna', JOKER: 'Gotham villain origin story film',
+  INCEPTION: 'A movie about dreams within dreams', GRAVITY: 'Space survival film starring Sandra Bullock',
+  SOCCER: 'The world\'s most popular sport played with a ball and feet', BASKETBALL: 'Sport played by shooting a ball through a hoop',
+  TENNIS: 'Racket sport played on a court with a net', MARATHON: 'A 42-kilometer long-distance race',
+  COMPUTER: 'Electronic device for processing data', INTERNET: 'Global network connecting computers',
+  ALGORITHM: 'A step-by-step procedure for solving a problem', BLOCKCHAIN: 'Distributed digital ledger technology',
+  MOUNTAIN: 'A large natural elevation of land', WATERFALL: 'Water falling from a height',
+  HURRICANE: 'A powerful rotating tropical storm', RAINBOW: 'Colorful arc in the sky after rain',
+  BRIK: 'Crispy Tunisian pastry filled with egg and tuna', HARISSA: 'Spicy Tunisian chili paste',
+  COUSCOUS: 'Steamed semolina dish, a Tunisian staple', TAJINE: 'Slow-cooked North African stew',
+  LABLABI: 'Tunisian chickpea soup with bread and harissa', SFAX: "Tunisia's second-largest city",
+  TUNIS: 'Capital city of Tunisia', SOUSSE: 'Coastal Tunisian city with a historic medina',
+  DJERBA: 'Tunisian island known for its beaches', KAIROUAN: 'Holy city of Tunisia with a great mosque',
+  MEDINA: 'Historic old quarter of a North African city', KASBAH: 'Fortress or citadel in North Africa',
+  CARTHAGE: 'Ancient city near Tunis founded by the Phoenicians', SIDIBOUSAID: 'Blue and white village near Tunis',
+};
+
+const HANGMAN_WORDS = [
+  ...hwList('animals', 'easy', ['CAT','DOG','LION','TIGER','BEAR','WOLF','FOX','DEER','HORSE','ZEBRA','GIRAFFE','ELEPHANT','MONKEY','GORILLA','RABBIT','SHEEP','GOAT','EAGLE','HAWK','OWL','PARROT','PENGUIN','DOLPHIN','WHALE','SHARK','OCTOPUS','CRAB','LOBSTER','SNAKE','LIZARD','FROG','TURTLE','BUTTERFLY','DUCK','COW','PIG','RAT']),
+  ...hwList('animals', 'medium', ['CHEETAH','LEOPARD','PANTHER','JAGUAR','HIPPOPOTAMUS','RHINOCEROS','KANGAROO','KOALA','PLATYPUS','ARMADILLO','PORCUPINE','HEDGEHOG','RACCOON','SQUIRREL','CHIPMUNK','BEAVER','OTTER','WALRUS','SEAL','FLAMINGO','PEACOCK','VULTURE','FALCON','CONDOR','STINGRAY']),
+  ...hwList('countries', 'easy', ['CHINA','JAPAN','INDIA','BRAZIL','CANADA','MEXICO','EGYPT','FRANCE','ITALY','SPAIN','GERMANY','RUSSIA','TUNISIA','MOROCCO','ALGERIA','TURKEY','GREECE','AUSTRALIA','ARGENTINA','NIGERIA']),
+  ...hwList('countries', 'medium', ['PORTUGAL','NETHERLANDS','BELGIUM','SWITZERLAND','AUSTRIA','POLAND','UKRAINE','SWEDEN','NORWAY','FINLAND','DENMARK','IRELAND','SCOTLAND','THAILAND','VIETNAM','INDONESIA','MALAYSIA','PHILIPPINES','PAKISTAN','BANGLADESH','KENYA','ETHIOPIA','SENEGAL','LEBANON','JORDAN','SYRIA','IRAQ','IRAN','COLOMBIA','PERU']),
+  ...hwList('countries', 'hard', ['CHAD','OMAN','FIJI','TOGO','LAOS','YEMEN','MALTA','QATAR','KIRIBATI','VANUATU']),
+  ...hwList('food', 'easy', ['PIZZA','BURGER','PASTA','RICE','BREAD','CHEESE','APPLE','BANANA','ORANGE','GRAPE','MANGO','POTATO','TOMATO','CARROT','ONION','GARLIC','CHICKEN','BEEF','FISH','SHRIMP','SALAD','SOUP','SANDWICH','TACO','BURRITO','SUSHI','NOODLES','PANCAKE','WAFFLE','DONUT']),
+  ...hwList('food', 'medium', ['SPAGHETTI','LASAGNA','RISOTTO','PAELLA','CROISSANT','BAGUETTE','HUMMUS','FALAFEL','SHAWARMA','KEBAB','CURRY','DUMPLING','TERIYAKI','CEVICHE','GUACAMOLE','QUESADILLA','ENCHILADA','RAVIOLI','GNOCCHI','TIRAMISU']),
+  ...hwList('food', 'hard', ['BOUILLABAISSE','CASSOULET','RATATOUILLE','JAMBALAYA','MOUSSAKA','BAKLAVA','SHAKSHUKA','TABBOULEH','GAZPACHO','PROSCIUTTO']),
+  ...hwList('science', 'medium', ['GRAVITY','ENERGY','ATOM','MOLECULE','PLANET','GALAXY','VOLCANO','EARTHQUAKE','BACTERIA','VIRUS','VACCINE','ELECTRON','MAGNET','PRESSURE','VELOCITY']),
+  ...hwList('science', 'hard', ['PHOTOSYNTHESIS','EVOLUTION','GENETICS','CHROMOSOME','ECOSYSTEM','RADIATION','ELECTRICITY','THERMODYNAMICS','ASTEROID','SUPERNOVA','GRAVITATION','CATALYST','ENZYME','HORMONE','ANTIBODY','NEURON','SYNAPSE','METABOLISM','OSMOSIS','DIFFRACTION','ISOTOPE','POLYMER','CRYSTALLIZATION','SEDIMENTARY','PALEONTOLOGY']),
+  ...hwList('science', 'expert', ['MITOCHONDRIA','CHLOROPHYLL','ELECTROMAGNETISM','QUANTUM','RELATIVITY','THERMODYNAMIC','BIOLUMINESCENCE','PHOTORECEPTOR','NEUROTRANSMITTER','MICROORGANISM','CRYSTALLOGRAPHY','THERMONUCLEAR','PARTHENOGENESIS','MAGNETOSPHERE']),
+  ...hwList('movies', 'easy', ['TITANIC','AVATAR','FROZEN','JOKER','GLADIATOR','JAWS','ROCKY','ALIENS','PREDATOR','TWISTER','SPEED','GHOST','PSYCHO','VERTIGO','CHINATOWN','SCARFACE','HEAT','CASINO','SEVEN','GATTACA']),
+  ...hwList('movies', 'medium', ['INTERSTELLAR','WHIPLASH','PARASITE','MOONLIGHT','ARRIVAL','DUNKIRK','TENET','INCEPTION','MEMENTO','BRAVEHEART','SIDEWAYS','TRAFFIC','CRASH','BABEL','AMELIE','OLDBOY','COCO','BRAVE','SOUL','LUCA','ONWARD','ENCANTO','MOANA','ZOOTOPIA']),
+  ...hwList('movies', 'hard', ['MAGNOLIA','SYRIANA','TRAINSPOTTING','PHILADELPHIA','UNFORGIVEN','GOODFELLAS','PLATOON','AMADEUS','CASABLANCA','DELICATESSEN']),
+  ...hwList('sports', 'easy', ['SOCCER','FOOTBALL','BASKETBALL','BASEBALL','TENNIS','GOLF','HOCKEY','BOXING','SWIMMING','CYCLING','RUNNING','VOLLEYBALL','CRICKET','RUGBY','SKIING','SURFING','BOWLING','ARCHERY','WRESTLING','KARATE','JUDO','FENCING','ROWING','SAILING','CLIMBING','SKATING','DIVING','DARTS','BILLIARDS','CURLING']),
+  ...hwList('sports', 'medium', ['BADMINTON','HANDBALL','LACROSSE','TRIATHLON','MARATHON','DECATHLON','PENTATHLON','GYMNASTICS','WEIGHTLIFTING','POWERLIFTING','SNOWBOARDING','TAEKWONDO','PARKOUR','MOTOCROSS','PADDLEBOARD','BOBSLEIGH','SHORTSTOP','QUARTERBACK','GOALKEEPER','MIDFIELDER']),
+  ...hwList('sports', 'hard', ['STEEPLECHASE','DRESSAGE','BIATHLON','SEPAKTAKRAW','KABADDI']),
+  ...hwList('tech', 'easy', ['COMPUTER','LAPTOP','KEYBOARD','MOUSE','MONITOR','INTERNET','WEBSITE','SOFTWARE','HARDWARE','PROGRAM','ROBOT','PHONE','TABLET','CAMERA','PRINTER','ROUTER','BATTERY','CABLE','SPEAKER','HEADPHONES']),
+  ...hwList('tech', 'medium', ['ALGORITHM','DATABASE','NETWORK','ENCRYPTION','FIREWALL','BLUETOOTH','PROCESSOR','MOTHERBOARD','GRAPHICS','BANDWIDTH','DOWNLOAD','UPLOAD','STREAMING','BROWSER','PROTOCOL','INTERFACE','COMPILER','DEBUGGING','FRAMEWORK','VARIABLE','FUNCTION','ITERATION','RECURSION','BOOLEAN','JAVASCRIPT']),
+  ...hwList('tech', 'hard', ['CYBERSECURITY','VIRTUALIZATION','BLOCKCHAIN','MICROPROCESSOR','AUTHENTICATION','MULTITHREADING','CRYPTOGRAPHY','KUBERNETES','MIDDLEWARE','POLYMORPHISM']),
+  ...hwList('nature', 'easy', ['TREE','FLOWER','RIVER','MOUNTAIN','OCEAN','FOREST','DESERT','BEACH','ISLAND','VALLEY','CLOUD','RAIN','SNOW','WIND','STORM','SUNSET','SUNRISE','RAINBOW','WATERFALL','FJORD','GLACIER','CANYON','JUNGLE','MEADOW','LAKE']),
+  ...hwList('nature', 'medium', ['AVALANCHE','HURRICANE','TORNADO','TSUNAMI','DROUGHT','WETLAND','SAVANNA','TUNDRA','PLATEAU','ESTUARY','LAGOON','ARCHIPELAGO','PENINSULA','ISTHMUS','STALACTITE','STALAGMITE','PERMAFROST','BIODIVERSITY','DEFORESTATION','POLLINATION']),
+  ...hwList('nature', 'hard', ['SEDIMENTATION','BIOACCUMULATION','DESERTIFICATION','EUTROPHICATION','MICROCLIMATE','GEOTHERMAL','TOPOGRAPHY','TROPOSPHERE','STRATOSPHERE','THERMOCLINE']),
+  ...hwList('tunisian', 'easy', ['BRIK','HARISSA','COUSCOUS','TAJINE','LABLABI','OJJA','MAKROUD','BAMBALOUNI','MLOUKHIA','MERGUEZ','SFAX','TUNIS','SOUSSE','DJERBA','KAIROUAN','BIZERTE','GABES','GAFSA','MEDINA','KASBAH','SOUK','JASMINE','HENNA','JEBBA','CHECHIA'], 'arabic_transliterated'),
+  ...hwList('tunisian', 'medium', ['CARTHAGE','DOUGGA','BULLAREGIA','ELJEM','MATMATA','TOZEUR','NEFTA','ZARZIS','TATAOUINE','KERKENNAH','UTICA','HAMMAMET','MONASTIR','NABEUL','KEBILI','SBEITLA','ZAGHOUAN','BEJA','JENDOUBA','SILIANA','KASSERINE','MAHDIA','ARIANA','MANOUBA','SIDIBOUSAID'], 'arabic_transliterated'),
+  ...hwList('tunisian', 'hard', ['CHENINI','DOUIRET','GHOMRASSEN','OUDHREF','TAKROUNA','GHARDIMAOU','FERNANA','AINDRAHAM','TABARKA','ZRAOUA'], 'arabic_transliterated'),
+];
+for (const w of HANGMAN_WORDS) { if (HANGMAN_HINTS[w.word]) w.hint = HANGMAN_HINTS[w.word]; }
+
+const HANGMAN_CATEGORY_ICONS = { animals: '🐾', countries: '🌍', food: '🍕', science: '🔬', movies: '🎬', sports: '🏆', tech: '💻', nature: '🌿', tunisian: '🇹🇳' };
+
+function pickHangmanWord(room, difficulty, category, arabicMode) {
+  let pool = HANGMAN_WORDS.filter(w => w.difficulty === difficulty);
+  if (arabicMode) pool = pool.filter(w => w.lang === 'arabic_transliterated');
+  else if (category && category !== 'all') pool = pool.filter(w => w.category === category);
+  if (pool.length === 0) pool = HANGMAN_WORDS.filter(w => w.difficulty === difficulty);
+  let fresh = pool.filter(w => !room.hangman.usedWords.has(w.word));
+  if (fresh.length === 0) { room.hangman.usedWords.clear(); fresh = pool; }
+  const entry = fresh[Math.floor(Math.random() * fresh.length)];
+  room.hangman.usedWords.add(entry.word);
+  return entry;
+}
+
+function hmNewPlayerState() {
+  return { wrong: 0, guessedLetters: new Set(), revealed: null, solved: false, solveTime: null, hintsUsed: 0, hintsLeft: 0 };
+}
+
+function hmBlanksRemaining(pstate, word) {
+  if (!pstate.revealed) return word.length;
+  return pstate.revealed.filter(r => !r).length;
+}
+
+function hmPublicWord(word, revealed) {
+  return word.split('').map((ch, i) => revealed[i] ? ch : '_').join('');
+}
+
+// Starts a fresh word/round for solo or race mode
+function hmBeginRound(room) {
+  const g = room.hangman;
+  const entry = pickHangmanWord(room, g.difficulty, g.category, g.variants.arabicMode);
+  const { tries, breakdown } = calcHangmanTries(entry.word, g.difficulty);
+  g.word = entry.word;
+  g.wordCategory = entry.category;
+  g.hintText = entry.hint || null;
+  g.triesBudget = tries;
+  g.breakdown = breakdown;
+  g.startedAt = Date.now();
+  g.roundActive = true;
+  for (const [pid] of room.players) {
+    const ps = hmNewPlayerState();
+    ps.revealed = new Array(entry.word.length).fill(false);
+    ps.hintsLeft = HM_HINTS_BUDGET[g.difficulty] || 0;
+    g.players[pid] = ps;
+  }
+  for (const [pid, p] of room.players) {
+    send(p.ws, {
+      type: 'hm-go', mode: g.mode, round: g.round, totalRounds: g.totalRounds,
+      wordLength: entry.word.length, category: g.variants.hiddenCategory ? null : entry.category,
+      categoryIcon: HANGMAN_CATEGORY_ICONS[entry.category] || '❓',
+      difficulty: g.difficulty, triesBudget: tries, breakdown, variants: g.variants,
+      hintsLeft: g.players[pid].hintsLeft,
+    });
+  }
+  broadcastLobby();
+}
+
+// Starts a host-vs-guesser round — waits for host to submit a word
+function hmBeginHostRound(room) {
+  const g = room.hangman;
+  const ids = [...room.players.keys()];
+  const hostIdx = g.round % 2;
+  g.hostId = ids[hostIdx];
+  g.guesserId = ids[1 - hostIdx];
+  g.word = null;
+  g.roundActive = false;
+  g.taunt = { used: 0, timer: null };
+  const hostP = room.players.get(g.hostId);
+  const guesserP = room.players.get(g.guesserId);
+  if (hostP) send(hostP.ws, { type: 'hm-your-turn-to-host', round: g.round + 1, totalRounds: g.totalRounds, difficulty: g.difficulty });
+  if (guesserP) send(guesserP.ws, { type: 'hm-waiting-for-host', round: g.round + 1, totalRounds: g.totalRounds, hostName: hostP ? hostP.name : '?' });
+}
+
+function hmResolveSoloRound(room, id, won) {
+  const g = room.hangman;
+  g.roundActive = false;
+  const ps = g.players[id];
+  const elapsed = (Date.now() - g.startedAt) / 1000;
+  const score = calcHangmanScore({ wrong: ps.wrong, maxWrong: g.triesBudget, hintsUsed: ps.hintsUsed, elapsedSeconds: elapsed, difficulty: g.difficulty, won });
+  const rating = hangmanRating(ps.wrong, g.triesBudget, won);
+  g.round++;
+  const p = room.players.get(id);
+  if (p) send(p.ws, {
+    type: 'hm-round-over', mode: 'solo', won, word: g.word, hint: g.hintText,
+    wrong: ps.wrong, triesBudget: g.triesBudget, score, rating: rating.label, stars: rating.stars,
+    category: g.wordCategory, round: g.round,
+  });
+}
+
+function hmResolveRaceRound(room, forcedWinnerId) {
+  const g = room.hangman;
+  if (!g.roundActive) return;
+  g.roundActive = false;
+  const elapsed = (Date.now() - g.startedAt) / 1000;
+  const stats = {};
+  let winnerId = forcedWinnerId;
+  for (const [pid, ps] of Object.entries(g.players)) {
+    const won = !!ps.solved;
+    const score = calcHangmanScore({ wrong: ps.wrong, maxWrong: g.triesBudget, hintsUsed: ps.hintsUsed, elapsedSeconds: elapsed, difficulty: g.difficulty, won });
+    g.scores[pid] = (g.scores[pid] || 0) + score;
+    stats[pid] = { wrong: ps.wrong, solved: won, score, cumulativeScore: g.scores[pid] };
+  }
+  if (winnerId === null) {
+    const entries = Object.entries(g.players);
+    const [aId, aPs] = entries[0], [bId, bPs] = entries[1] || [null, null];
+    if (bPs && aPs.wrong !== bPs.wrong) winnerId = aPs.wrong < bPs.wrong ? aId : bId;
+    else winnerId = null; // draw
+  }
+  if (winnerId) g.roundWins[winnerId] = (g.roundWins[winnerId] || 0) + 1;
+  g.round++;
+  broadcastRoom(room.id, {
+    type: 'hm-round-over', mode: 'race', winnerId, word: g.word, hint: g.hintText,
+    category: g.wordCategory, stats, roundWins: g.roundWins, round: g.round, totalRounds: g.totalRounds,
+  });
+  const majority = Math.ceil(g.totalRounds / 2);
+  const matchOver = g.round >= g.totalRounds || Object.values(g.roundWins).some(w => w >= majority);
+  if (matchOver) { hmEndMatch(room); return; }
+  g.roundTimer = setTimeout(() => { const r = rooms.get(room.id); if (r?.hangman?.active) hmBeginRound(r); }, 5000);
+}
+
+function hmResolveHostRound(room, winnerId) {
+  const g = room.hangman;
+  if (!g.roundActive) return;
+  g.roundActive = false;
+  if (g.taunt?.timer) { clearTimeout(g.taunt.timer); g.taunt.timer = null; }
+  const gp = g.players[g.guesserId];
+  const elapsed = (Date.now() - g.startedAt) / 1000;
+  const won = winnerId === g.guesserId;
+  const score = calcHangmanScore({ wrong: gp.wrong, maxWrong: g.triesBudget, hintsUsed: gp.hintsUsed, elapsedSeconds: elapsed, difficulty: g.difficulty, won });
+  g.scores[g.guesserId] = (g.scores[g.guesserId] || 0) + score;
+  g.roundWins[winnerId] = (g.roundWins[winnerId] || 0) + 1;
+  g.round++;
+  broadcastRoom(room.id, {
+    type: 'hm-round-over', mode: 'host', winnerId, word: g.word, hostId: g.hostId, guesserId: g.guesserId,
+    guesserWrong: gp.wrong, score, roundWins: g.roundWins, round: g.round, totalRounds: g.totalRounds,
+  });
+  if (g.round >= g.totalRounds) { hmEndMatch(room); return; }
+  g.roundTimer = setTimeout(() => { const r = rooms.get(room.id); if (r?.hangman?.active) hmBeginHostRound(r); }, 4000);
+}
+
+function hmEndMatch(room) {
+  const g = room.hangman;
+  g.active = false;
+  room.status = 'waiting';
+  let matchWinnerId = null, best = -1;
+  for (const [pid, w] of Object.entries(g.roundWins)) { if (w > best) { best = w; matchWinnerId = pid; } }
+  const tie = Object.values(g.roundWins).filter(w => w === best).length > 1;
+  broadcastRoom(room.id, {
+    type: 'hm-game-over', matchWinnerId: tie ? null : matchWinnerId, roundWins: g.roundWins, scores: g.scores,
+  });
+  broadcastLobby();
+  log('info', 'hm-game-over', { roomId: room.id, matchWinnerId: tie ? null : matchWinnerId, roundWins: g.roundWins });
+}
+
+// ── End Hangman helpers ─────────────────────────────────────────
 
 // ── Start ───────────────────────────────────────────────────────
 beatgame.checkTools(log);
