@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Chess Stratego — Game Arena</title>
+<link rel="stylesheet" href="chessstratego.css">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="/firebase-init.js"></script>
+<script>
+  async function postScore(game, score) {
+    try {
+      const token = sessionStorage.getItem('arena-token') || (typeof fbAuth !== 'undefined' && fbAuth.currentUser ? await fbAuth.currentUser.getIdToken() : null);
+      if (!token) return;
+      await fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ game, score }) });
+    } catch {}
+  }
+  function reportScore(game, score) { postScore(game, score); }
+</script>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h3>Players</h3>
+      <span class="player-count" id="playerCount">0</span>
+    </div>
+    <div class="player-grid" id="playerList"></div>
+
+    <div class="cs-panel" id="remainingPanel">
+      <h4>Enemy unaccounted</h4>
+      <div class="cs-remaining" id="remainingList"></div>
+      <div class="cs-hidden-count" id="hiddenCount"></div>
+    </div>
+
+    <div class="cs-panel">
+      <h4>Legend</h4>
+      <ul class="cs-legend">
+        <li><span class="lg-dot legal"></span>Legal move</li>
+        <li><span class="lg-dot bluff"></span>Bluff (illegal) move</li>
+        <li><span class="lg-dot ep"></span>Possible en passant</li>
+        <li><span class="lg-dot castle"></span>Castle target</li>
+        <li><span class="lg-ring"></span>Revealed enemy piece</li>
+        <li><span class="lg-eye">&#x1F441;</span>Your piece the enemy knows</li>
+      </ul>
+      <p class="cs-tip">Tap a hidden enemy token to attach a private guess. Right-click works too.</p>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <header class="game-header">
+      <button class="btn btn-sm btn-back" id="btnBack">← Lobby</button>
+      <button class="btn btn-mobile-toggle" id="btnToggleSidebar">👥</button>
+      <h1 class="logo logo-sm">CHESS STRATEGO</h1>
+      <span class="room-badge" id="roomBadge"></span>
+      <button class="btn btn-mobile-toggle" id="btnToggleRail">🧾</button>
+      <button class="btn btn-sm btn-rules" id="btnRules">📜 Rules</button>
+    </header>
+
+    <div class="status-bar" id="status">Connecting…</div>
+
+    <!-- LOBBY -->
+    <section class="phase-panel" id="phaseLobby">
+      <div class="cs-lobby-card">
+        <div class="cs-lobby-hero">
+          <span class="cs-hero-token">?</span>
+          <div>
+            <h2>Hidden-identity chess</h2>
+            <p>Your pieces are secret. Bluff illegal moves. Call your opponent's bluffs. A wrong call costs you a random piece, and it might be your King.</p>
+          </div>
+        </div>
+        <div class="cs-setting-row"><label>Clock</label>
+          <div class="cs-pills" data-key="clock">
+            <button data-val="untimed">Untimed</button><button data-val="5+0">5+0</button><button data-val="10+0">10+0</button><button data-val="15+10">15+10</button>
+          </div>
+        </div>
+        <div class="cs-setting-row"><label>Call window</label>
+          <div class="cs-pills" data-key="callWindowSec">
+            <button data-val="10">10s</button><button data-val="15">15s</button><button data-val="20">20s</button><button data-val="30">30s</button>
+          </div>
+        </div>
+        <div class="cs-setting-row"><label>En passant</label>
+          <div class="cs-pills" data-key="enPassant"><button data-val="true">On</button><button data-val="false">Off</button></div>
+        </div>
+        <div class="cs-setting-row"><label>Reveal promotions</label>
+          <div class="cs-pills" data-key="revealPromotions"><button data-val="true">On</button><button data-val="false">Off</button></div>
+        </div>
+        <div class="cs-setting-row"><label>Host plays</label>
+          <div class="cs-pills" data-key="startColor"><button data-val="random">Random</button><button data-val="white">White</button><button data-val="black">Black</button></div>
+        </div>
+        <div class="cs-setting-row"><label>No-capture draw (moves each)</label>
+          <div class="cs-pills" data-key="drawMoves"><button data-val="0">Off</button><button data-val="25">25</button><button data-val="50">50</button><button data-val="75">75</button></div>
+        </div>
+        <button class="btn btn-primary btn-lg" id="btnStart">Start Match</button>
+        <p class="cs-hint" id="lobbyHint">Waiting for an opponent…</p>
+      </div>
+    </section>
+
+    <!-- GAME -->
+    <section class="phase-panel cs-game-grid" id="phaseGame" style="display:none">
+      <div class="cs-board-col">
+        <div class="cs-player-bar" id="oppBar">
+          <span class="cs-color-dot" id="oppDot"></span>
+          <span class="cs-pname" id="oppName">Opponent</span>
+          <span class="cs-tag" id="oppTag"></span>
+          <div class="cs-tray" id="oppTray" title="Pieces this player has lost"></div>
+          <span class="cs-clock" id="oppClock"></span>
+        </div>
+
+        <div class="cs-board-wrap" id="boardWrap">
+          <div class="cs-board" id="board"></div>
+          <div class="cs-chip" id="chip" hidden></div>
+          <div class="cs-board-msg" id="boardMsg" hidden></div>
+          <div class="cs-banner" id="banner" hidden><div class="cs-banner-title" id="bannerTitle"></div><div class="cs-banner-sub" id="bannerSub"></div></div>
+          <div class="cs-ghost-layer" id="ghostLayer"></div>
+          <svg class="cs-lens" id="lensLayer" viewBox="0 0 8 8" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div class="cs-lens-pill" id="lensPill" hidden></div>
+        </div>
+
+        <div class="cs-player-bar me" id="myBar">
+          <span class="cs-color-dot" id="myDot"></span>
+          <span class="cs-pname" id="myNameEl">You</span>
+          <span class="cs-tag" id="myTag"></span>
+          <div class="cs-tray" id="myTray" title="Pieces you have lost"></div>
+          <span class="cs-clock" id="myClock"></span>
+        </div>
+
+        <!-- Play controls -->
+        <div class="cs-controls" id="playControls" hidden>
+          <button class="cs-bluff-toggle" id="btnBluff" aria-pressed="false"><span class="tg"></span>Bluff Mode <kbd>B</kbd></button>
+          <button class="cs-call-btn" id="btnCall" hidden>
+            <svg viewBox="0 0 60 60" aria-hidden="true"><circle class="bg" cx="30" cy="30" r="26"/><circle class="fg" id="callRing" cx="30" cy="30" r="26"/></svg>
+            <span class="lbl">CALL BLUFF</span><span class="secs" id="callSecs"></span>
+          </button>
+          <div class="cs-ctrl-right">
+            <span class="cs-nocap" id="noCapInfo"></span>
+            <button class="btn btn-sm btn-ghost" id="btnDraw">½ Offer Draw</button>
+            <button class="btn btn-sm btn-danger" id="btnResign">🏳 Resign</button>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-accent" id="btnShowResult" hidden>Show Result</button>
+      </div>
+
+      <div class="cs-side">
+        <!-- Setup controls -->
+        <div class="cs-setup-panel" id="setupPanel" hidden>
+          <div class="cs-setup-top">
+            <span>Arrange your army on your first two ranks</span>
+            <span class="cs-setup-timer" id="setupTimer">60</span>
+          </div>
+          <div class="cs-setup-tray" id="setupTray"></div>
+          <div class="cs-setup-btns">
+            <button class="btn btn-sm btn-ghost" id="btnRandomize">🎲 Randomize</button>
+            <button class="btn btn-sm btn-ghost" id="btnClassic">♜ Classic</button>
+            <button class="btn btn-sm btn-ghost" id="btnSaveLayout">💾 Save</button>
+            <button class="btn btn-sm btn-ghost" id="btnLoadLayout">📂 Load</button>
+            <button class="btn btn-sm btn-ghost" id="btnClear">✕ Clear</button>
+          </div>
+          <button class="btn btn-primary cs-ready-btn" id="btnReady">✔ Ready</button>
+          <div class="cs-setup-status" id="setupStatus"></div>
+        </div>
+
+        <aside class="right-rail" id="rail">
+          <h4>Move Log</h4>
+          <div class="cs-log" id="moveLog"></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Promotion picker -->
+<div class="modal-overlay" id="promoModal" style="display:none">
+  <div class="modal-card cs-promo-card">
+    <h3>Promote to</h3>
+    <div class="cs-promo-btns" id="promoBtns"></div>
+  </div>
+</div>
+
+<!-- King captured: call or concede -->
+<div class="modal-overlay" id="kingModal" style="display:none">
+  <div class="modal-card cs-king-card">
+    <div class="cs-king-icon" id="kingIcon"></div>
+    <h2>Your King was captured!</h2>
+    <p>Was that move legal? Call the bluff to find out. If it was illegal, your King comes back. If it was legal, you lose.</p>
+    <div class="cs-king-timer" id="kingTimer"></div>
+    <div class="cs-modal-actions">
+      <button class="btn btn-danger btn-lg" id="btnKingCall">⚠ Call Bluff</button>
+      <button class="btn btn-ghost" id="btnKingAccept">Accept defeat</button>
+    </div>
+  </div>
+</div>
+
+<!-- Draw offer -->
+<div class="modal-overlay" id="drawModal" style="display:none">
+  <div class="modal-card">
+    <h3>Your opponent offers a draw</h3>
+    <div class="cs-modal-actions">
+      <button class="btn btn-primary" id="btnDrawAccept">Accept</button>
+      <button class="btn btn-ghost" id="btnDrawDecline">Decline</button>
+    </div>
+  </div>
+</div>
+
+<!-- Result -->
+<div class="modal-overlay" id="resultModal" style="display:none">
+  <div class="modal-card cs-result-card">
+    <div class="cs-lucky" id="resultLucky" hidden>🍀 LUCKY GUESS</div>
+    <h1 class="cs-result-title" id="resultTitle"></h1>
+    <p class="cs-result-reason" id="resultReason"></p>
+    <div class="cs-result-meta" id="resultMeta"></div>
+    <table class="cs-stats-table" id="resultStats"></table>
+    <div class="cs-modal-actions">
+      <button class="btn btn-primary" id="btnRematch">Rematch</button>
+      <button class="btn btn-accent" id="btnViewBoard">View Board</button>
+      <button class="btn btn-ghost" id="btnBackRoom">Back to Room</button>
+    </div>
+    <p class="cs-hint" id="rematchHint"></p>
+  </div>
+</div>
+
+<!-- Deduction note popover -->
+<div class="cs-note-pop" id="notePop" hidden></div>
+
+<!-- Toast -->
+<div class="cs-toast" id="toast" hidden></div>
+
+<!-- Rules -->
+<div class="modal-overlay" id="rulesModal" style="display:none">
+  <div class="modal-card cs-rules">
+    <h2>📜 Chess Stratego</h2>
+    <p>Orthodox chess, except you can't see your opponent's pieces, and you're allowed to lie.</p>
+    <h4>Setup</h4>
+    <ul>
+      <li>Arrange all 16 pieces anywhere on your first two ranks (60s). Your opponent sees 16 identical tokens.</li>
+      <li>A pawn on your first rank can still double-step on its first move.</li>
+    </ul>
+    <h4>Moving</h4>
+    <ul>
+      <li>Pieces move and capture like normal chess. There is <b>no check</b>. You can walk into attacks.</li>
+      <li>Captured pieces are revealed. The capturing piece stays hidden.</li>
+      <li><b>Castling (any distance):</b> select your King, then click a Rook on the same rank. The Rook slides next to the King and the King hops over it. Both must be unmoved, with empty squares between. Castling reveals both pieces.</li>
+    </ul>
+    <h4>Bluffing</h4>
+    <ul>
+      <li>Turn on <b>Bluff Mode</b> (B) to move any piece to any square not holding your own piece. It looks exactly like a legal move.</li>
+      <li>After every move, the opponent can <b>Call Bluff</b> until the call timer runs out or they move.</li>
+      <li><b>Caught:</b> the bluffing piece is revealed and removed, and the move is undone.</li>
+      <li><b>False accusation:</b> the piece is revealed and the move stands. The accused then removes one of the caller's tokens <b>blind</b>. If it's the King, that's a <b>lucky guess</b> win.</li>
+    </ul>
+    <h4>Winning</h4>
+    <ul>
+      <li>Capture the King. The victim gets one last chance to call bluff on the capturing move.</li>
+      <li>Find the King with a blind pick, or catch a bluff made by the King.</li>
+      <li>Resignation, timeout, or a disconnect longer than 60 seconds.</li>
+    </ul>
+    <button class="btn btn-primary" id="btnCloseRules">Got it</button>
+  </div>
+</div>
+
+<script src="chessstratego.js"></script>
+</body>
+</html>

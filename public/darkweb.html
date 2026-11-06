@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#030504">
+  <title>Welcome to the Dark - Game Arena</title>
+  <link rel="stylesheet" href="darkweb.css">
+</head>
+<body>
+  <main id="gameShell" class="game-shell">
+    <section id="warningScreen" class="entry-screen">
+      <div class="warning-mark" aria-hidden="true">&#x25C9;</div>
+      <p class="entry-kicker">GAME ARENA // SOLO EXPERIENCE</p>
+      <h1>WELCOME TO THE DARK</h1>
+      <p class="warning-copy">This game contains disturbing themes, flashing visuals, sudden sounds, and psychological horror. It is intended for mature players.</p>
+      <fieldset class="difficulty-picker">
+        <legend>Choose your exposure</legend>
+        <label><input type="radio" name="difficulty" value="curious"><span><b>CURIOUS</b><small>Longer warnings, five-minute grace period, checkpoint protection</small></span></label>
+        <label><input type="radio" name="difficulty" value="paranoid" checked><span><b>PARANOID</b><small>The intended experience</small></span></label>
+        <label><input type="radio" name="difficulty" value="hunted"><span><b>HUNTED</b><small>Short intervals, fast responses, no checkpoints</small></span></label>
+      </fieldset>
+      <div class="entry-actions">
+        <button id="enterGame" class="danger-button">ENTER</button>
+        <button id="backFromWarning" class="text-button">BACK</button>
+      </div>
+      <button id="continueGame" class="continue-button" hidden>CONTINUE SAVED SESSION</button>
+    </section>
+
+    <section id="bootScreen" class="boot-screen" hidden aria-live="polite">
+      <div class="bios-copy" id="biosCopy"></div>
+      <div class="boot-progress"><span id="bootProgress"></span></div>
+    </section>
+
+    <section id="desktop" class="desktop" hidden>
+      <div class="city" aria-hidden="true">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <div class="desktop-vignette"></div>
+      <button id="exitGame" class="exit-hint">ESC &mdash; BACK TO PLATFORM</button>
+
+      <div class="desktop-icons" aria-label="Desktop applications">
+        <button class="desktop-icon" data-open="browserWindow"><span class="osiris-icon">O</span><b>OSIRIS Browser</b></button>
+        <button class="desktop-icon" data-open="notepadWindow"><span class="file-icon">TXT</span><b>Notepad</b></button>
+        <button class="desktop-icon" data-open="taskWindow"><span class="task-icon">///</span><b>Task Manager</b></button>
+        <button class="desktop-icon" data-open="musicWindow"><span class="music-icon">&#9835;</span><b>Music Player</b></button>
+      </div>
+
+      <aside id="collectionPanel" class="collection-panel">
+        <button id="toggleCollection" class="collection-toggle" title="Collapse collected evidence">EVIDENCE <span>&#x25BC;</span></button>
+        <div id="collectionBody">
+          <div class="collection-meta"><span id="roomProgress">0 / 8 OPEN</span><span id="threatCount">0 SURVIVED</span></div>
+          <ol id="roomSlots" class="room-slots"></ol>
+          <h3>CAPTURED FRAGMENTS</h3>
+          <div id="fragmentList" class="fragment-list">No signal fragments captured.</div>
+        </div>
+      </aside>
+
+      <section id="browserWindow" class="os-window browser-window" data-app="OSIRIS Browser" style="left:12%;top:7%;width:min(980px,76vw);height:min(690px,80vh)">
+        <header class="window-titlebar">
+          <span class="window-title"><i class="title-led"></i> OSIRIS BROWSER // RELAY ENCRYPTED</span>
+          <div class="window-controls">
+            <button data-action="minimize" title="Minimize">_</button><button data-action="maximize" title="Maximize">&#9633;</button><button data-action="close" title="Close">X</button>
+          </div>
+        </header>
+        <div class="browser-toolbar">
+          <button id="browserBack" class="chrome-button" title="Back">&#8592;</button>
+          <button id="browserForward" class="chrome-button" title="Forward">&#8594;</button>
+          <button id="browserRefresh" class="chrome-button" title="Refresh">&#8635;</button>
+          <form id="addressForm" class="address-form"><span class="onion-lock">&#9679;</span><input id="addressBar" spellcheck="false" autocomplete="off" aria-label="OSIRIS address"></form>
+          <span id="relayState" class="relay-state">7 RELAYS</span>
+        </div>
+        <nav class="bookmark-bar">
+          <button data-url="http://void.search.onion/">VOID SEARCH</button>
+          <button data-url="http://ashenboard.onion/index">ASHEN BOARD</button>
+          <button data-url="http://redindex.onion/rooms">RED INDEX</button>
+          <button data-url="http://relaychat.onion/null">NULL CHAT</button>
+        </nav>
+        <div id="loadTrack" class="load-track"><span></span></div>
+        <div class="browser-body">
+          <article id="pageViewport" class="page-viewport"></article>
+        </div>
+        <footer class="browser-status"><span id="pageStatus">idle</span><span>javascript: restricted // cookies: poisoned</span></footer>
+      </section>
+
+      <section id="notepadWindow" class="os-window small-window" data-app="Notepad" hidden style="left:28%;top:16%;width:min(620px,68vw);height:min(470px,66vh)">
+        <header class="window-titlebar"><span class="window-title">notes.txt - Notepad</span><div class="window-controls"><button data-action="minimize">_</button><button data-action="maximize">&#9633;</button><button data-action="close">X</button></div></header>
+        <div class="notepad-menu">File&nbsp;&nbsp; Edit&nbsp;&nbsp; Format&nbsp;&nbsp; View</div>
+        <textarea id="notepad" class="notepad" spellcheck="false" placeholder="Record codes, URLs, names...\n\nDo not write your own name."></textarea>
+        <footer class="notepad-status">Ln <span id="noteLine">1</span>, Col <span id="noteCol">1</span> &nbsp; UTF-8</footer>
+      </section>
+
+      <section id="taskWindow" class="os-window small-window" data-app="Task Manager" hidden style="left:46%;top:13%;width:min(650px,72vw);height:min(500px,70vh)">
+        <header class="window-titlebar"><span class="window-title">Task Manager</span><div class="window-controls"><button data-action="minimize">_</button><button data-action="maximize">&#9633;</button><button data-action="close">X</button></div></header>
+        <div class="task-head"><b>Processes</b><span><strong id="cpuTotal">34%</strong> CPU</span><span><strong>61%</strong> Memory</span></div>
+        <div id="processList" class="process-list"></div>
+        <footer class="task-footer"><span id="processCount">72 background processes</span><button id="endWatcher" disabled>End task</button></footer>
+      </section>
+
+      <section id="musicWindow" class="os-window music-window" data-app="Music Player" hidden style="left:58%;top:49%;width:350px;height:210px">
+        <header class="window-titlebar"><span class="window-title">NOCTURNE PLAYER</span><div class="window-controls"><button data-action="minimize">_</button><button data-action="maximize">&#9633;</button><button data-action="close">X</button></div></header>
+        <div class="music-body"><div class="album-art"><span></span></div><div><small>NOW PLAYING</small><b id="trackName">null_signal.mp3</b><div class="music-time"><span></span></div><button id="toggleAudio" class="music-toggle">II</button></div></div>
+      </section>
+
+      <div id="taskbar" class="taskbar">
+        <button class="start-button" title="Start"><span></span><span></span><span></span><span></span></button>
+        <div id="taskButtons" class="task-buttons"></div>
+        <div class="system-tray"><span title="Connection unstable">&#9673;</span><span title="Volume">&#9835;</span><span title="Battery">&#9645;</span><time id="taskClock"></time></div>
+      </div>
+
+      <div id="threatLayer" class="threat-layer" hidden></div>
+      <div id="flickerLine" class="flicker-line"></div>
+    </section>
+
+    <section id="gameOverScreen" class="end-screen" hidden>
+      <div id="deathStatic" class="death-static"></div>
+      <div class="end-content">
+        <p class="found-you">THEY FOUND YOU.</p>
+        <h2>CONNECTION TERMINATED</h2>
+        <dl><div><dt>Cause</dt><dd id="deathCause"></dd></div><div><dt>Rooms opened</dt><dd id="deathRooms"></dd></div><div><dt>Time exposed</dt><dd id="deathTime"></dd></div></dl>
+        <div class="end-actions"><button id="resumeCheckpoint" class="danger-button">RESTORE CHECKPOINT</button><button id="restartGame" class="text-button">ERASE AND RESTART</button><button class="text-button return-lobby">RETURN TO PLATFORM</button></div>
+      </div>
+    </section>
+
+    <section id="winScreen" class="win-screen" hidden>
+      <div id="loreCrawl" class="lore-crawl"></div>
+      <article id="certificate" class="certificate" hidden>
+        <p>OSIRIS RELAY NETWORK</p><h2>CERTIFICATE OF IMPOSSIBLE ACCESS</h2><div class="cert-eye">&#x25C9;</div><p>This confirms that</p><strong id="certName">UNKNOWN</strong><p>opened all eight doors and returned.</p><dl><div><dt>Exposure</dt><dd id="winTime"></dd></div><div><dt>Threats survived</dt><dd id="winThreats"></dd></div><div><dt>Deaths</dt><dd id="winDeaths"></dd></div></dl><small>There is no record of this network. There is now a record of you.</small><button class="danger-button return-lobby">LEAVE</button>
+      </article>
+    </section>
+
+    <div id="exitModal" class="modal-backdrop" hidden>
+      <div class="confirm-dialog"><h2>BREAK CONNECTION?</h2><p>Progress since the last opened room may be lost. The clock will pause while this message is open.</p><div><button id="confirmExit" class="danger-button">EXIT</button><button id="cancelExit" class="text-button">STAY</button></div></div>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+  </main>
+  <script src="darkweb.js"></script>
+</body>
+</html>

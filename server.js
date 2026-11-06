@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
-const { createHmac } = require('crypto');
+const { createHmac, randomInt } = require('crypto');
 const admin = require('firebase-admin');
 const beatgame = require('./beatgame-audio');
 
@@ -115,9 +115,9 @@ async function ensureFirestoreIndexes() {
 
 
 // For maze: lower score (time) is better. For all others: higher is better.
-const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'cryptogram_easy', 'cryptogram_normal', 'cryptogram_hard', 'cryptogram_expert', 'domino', 'beatrush', 'hangman', 'wordle']);
+const VALID_GAMES = new Set(['maze', 'tetris', 'tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'minesweeper', 'barricade', 'td', 'ballescape', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'cryptogram_easy', 'cryptogram_normal', 'cryptogram_hard', 'cryptogram_expert', 'domino', 'beatrush', 'hangman', 'wordle', 'chessstratego']);
 const LOWER_IS_BETTER = new Set(['maze']);
-const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'domino', 'hangman', 'wordle']);
+const WIN_INCREMENT_GAMES = new Set(['tictactoe', 'bluffrummy', 'rami', 'pool', 'battleship', 'egame', 'snakesladders', 'uno', 'tanks', 'bomberman', 'barricade', 'td', 'sudoku', 'geoguessr', 'memoryduel', 'cryptogram', 'domino', 'hangman', 'wordle', 'chessstratego']);
 
 const ROOM_PW_SECRET = process.env.ROOM_PW_SECRET || 'arena-room-secret-default';
 function hashRoomPw(pw) { return createHmac('sha256', ROOM_PW_SECRET).update(pw).digest('hex'); }
@@ -146,7 +146,7 @@ const MIME = {
 const PUBLIC = path.join(__dirname, 'public');
 
 // Route /maze and /tetris to their HTML files
-const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html', '/memoryduel': '/memoryduel.html', '/cryptogram': '/cryptogram.html', '/domino': '/domino.html', '/beatrush': '/beatrush.html', '/hangman': '/hangman.html', '/wordle': '/wordle.html' };
+const ROUTES = { '/': '/lobby.html', '/maze': '/maze.html', '/tetris': '/tetris.html', '/tictactoe': '/tictactoe.html', '/bluffrummy': '/bluffrummy.html', '/rami': '/rami.html', '/pool': '/pool.html', '/battleship': '/battleship.html', '/egame': '/egame.html', '/snakesladders': '/snakesladders.html', '/uno': '/uno.html', '/tanks': '/tanks.html', '/bomberman': '/bomberman.html', '/minesweeper': '/minesweeper.html', '/barricade': '/barricade.html', '/td': '/td.html', '/ballescape': '/ballescape.html', '/darkweb': '/darkweb.html', '/sudoku': '/sudoku.html', '/geoguessr': '/geoguessr.html', '/memoryduel': '/memoryduel.html', '/cryptogram': '/cryptogram.html', '/domino': '/domino.html', '/beatrush': '/beatrush.html', '/hangman': '/hangman.html', '/wordle': '/wordle.html', '/chessstratego': '/chessstratego.html' };
 
 const httpServer = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -782,6 +782,7 @@ function removeFromRoom(conn) {
       broadcastLobby();
     }
   }
+  if (room.cs) csOnLeave(room, conn);
 
   // Remove empty rooms
   if (room.players.size === 0) {
@@ -789,7 +790,7 @@ function removeFromRoom(conn) {
     rooms.delete(conn.roomId);
   } else {
     // Don't reset status if an active game is still running
-    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active) || (room.md?.active) || (room.cg?.active) || (room.domino?.active) || (room.beatrush?.active) || (room.hangman?.active) || (room.wordle?.active);
+    const hasActiveGame = (room.uno?.active) || (room.br?.active) || (room.sl?.active) || (room.rami?.roundActive) || (room.tanks?.active) || (room.bomberman?.active) || (room.minesweeper?.active) || (room.barricade?.active) || (room.td?.active) || (room.sudoku?.active) || (room.geo?.active) || (room.md?.active) || (room.cg?.active) || (room.domino?.active) || (room.beatrush?.active) || (room.hangman?.active) || (room.wordle?.active) || (room.cs?.active);
     if (!hasActiveGame) room.status = 'waiting';
   }
   conn.mode = 'lobby';
@@ -885,9 +886,9 @@ wss.on('connection', (ws, req) => {
       }
 
       case 'create-room': {
-        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : msg.gameType === 'memoryduel' ? 'memoryduel' : msg.gameType === 'cryptogram' ? 'cryptogram' : msg.gameType === 'domino' ? 'domino' : msg.gameType === 'beatrush' ? 'beatrush' : msg.gameType === 'hangman' ? 'hangman' : msg.gameType === 'wordle' ? 'wordle' : 'maze';
+        const type = msg.gameType === 'tetris' ? 'tetris' : msg.gameType === 'tictactoe' ? 'tictactoe' : msg.gameType === 'bluffrummy' ? 'bluffrummy' : msg.gameType === 'rami' ? 'rami' : msg.gameType === 'pool' ? 'pool' : msg.gameType === 'battleship' ? 'battleship' : msg.gameType === 'egame' ? 'egame' : msg.gameType === 'snakesladders' ? 'snakesladders' : msg.gameType === 'uno' ? 'uno' : msg.gameType === 'tanks' ? 'tanks' : msg.gameType === 'bomberman' ? 'bomberman' : msg.gameType === 'minesweeper' ? 'minesweeper' : msg.gameType === 'barricade' ? 'barricade' : msg.gameType === 'td' ? 'td' : msg.gameType === 'sudoku' ? 'sudoku' : msg.gameType === 'geoguessr' ? 'geoguessr' : msg.gameType === 'memoryduel' ? 'memoryduel' : msg.gameType === 'cryptogram' ? 'cryptogram' : msg.gameType === 'domino' ? 'domino' : msg.gameType === 'beatrush' ? 'beatrush' : msg.gameType === 'hangman' ? 'hangman' : msg.gameType === 'wordle' ? 'wordle' : msg.gameType === 'chessstratego' ? 'chessstratego' : 'maze';
         const name = String(msg.roomName || conn.name + "'s Room").slice(0, 30);
-        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' || type === 'memoryduel' || type === 'cryptogram' || type === 'beatrush' || type === 'hangman' || type === 'wordle' ? 2 : type === 'domino' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
+        const max = type === 'tictactoe' || type === 'pool' || type === 'battleship' || type === 'egame' || type === 'geoguessr' || type === 'memoryduel' || type === 'cryptogram' || type === 'beatrush' || type === 'hangman' || type === 'wordle' || type === 'chessstratego' ? 2 : type === 'domino' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'bluffrummy' || type === 'snakesladders' || type === 'barricade' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'rami' ? Math.min(4, Math.max(1, parseInt(msg.maxPlayers) || 4)) : type === 'uno' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 6)) : type === 'tanks' || type === 'bomberman' || type === 'minesweeper' || type === 'td' ? Math.min(4, Math.max(2, parseInt(msg.maxPlayers) || 4)) : type === 'sudoku' ? Math.min(6, Math.max(2, parseInt(msg.maxPlayers) || 4)) : Math.min(8, Math.max(2, parseInt(msg.maxPlayers) || 6));
         const rawPw = msg.password ? String(msg.password).trim().slice(0, 30) : null;
         const passwordHash = rawPw ? hashRoomPw(rawPw) : null;
         const roomId = genRoomId();
@@ -1029,6 +1030,10 @@ wss.on('connection', (ws, req) => {
         if (room.status === 'playing' && room.type === 'wordle' && room.players.size >= 2) {
           send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
         }
+        // Lock Chess Stratego rooms mid-game, except for the disconnected player returning
+        if (room.type === 'chessstratego' && room.cs?.active && csFindRejoinSeat(room, conn) < 0) {
+          send(ws, { type: 'error', msg: 'Game in progress — this room is locked' }); break;
+        }
 
         removeFromRoom(conn); // leave any existing room
         conn.mode = 'room';
@@ -1074,6 +1079,8 @@ wss.on('connection', (ws, req) => {
         if (room.type === 'wordle' && room.wordleConfig) {
           send(ws, { type: 'wd-lobby-config', ...room.wordleConfig });
         }
+        // Chess Stratego: lobby config sync + seat rebind on reconnect
+        if (room.type === 'chessstratego') csOnJoin(room, conn, id);
 
         // Restore BR hand on reconnect
         if (isBrReconnect) {
@@ -3640,6 +3647,147 @@ wss.on('connection', (ws, req) => {
         break;
       }
       // ── End Wordle ───────────────────────────────────────────────────────────
+
+      // ── Chess Stratego ───────────────────────────────────────────────────────
+      case 'cs-config': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'chessstratego') break;
+        if (room.players.keys().next().value !== id || room.cs?.active) break;
+        room.csConfig = csSanitizeConfig(msg.config);
+        broadcastRoom(room.id, { type: 'cs-lobby-config', config: room.csConfig });
+        break;
+      }
+      case 'cs-start': {
+        const room = rooms.get(conn.roomId);
+        if (!room || room.type !== 'chessstratego') break;
+        if (room.players.keys().next().value !== id || room.cs?.active) break;
+        if (room.players.size !== 2) { csErr(ws, 'Need 2 players to start'); break; }
+        if (!room.csConfig) room.csConfig = csDefaultConfig();
+        csStartSetup(room, false);
+        break;
+      }
+      case 'cs-placement-submit': {
+        const room = rooms.get(conn.roomId);
+        const cs = room?.cs;
+        if (!cs || !cs.active || cs.phase !== 'setup' || cs.paused) break;
+        const seat = csSeatOf(cs, id);
+        if (seat < 0 || cs.ready[seat]) break;
+        const list = Array.isArray(msg.placements) ? msg.placements : [];
+        if (list.length > 16) { csErr(ws, 'Invalid layout'); break; }
+        const grid = new Array(64).fill(null), have = { K: 0, Q: 0, R: 0, B: 0, N: 0, P: 0 };
+        let ok = true;
+        for (const e of list) {
+          const sq = Number(e?.sq), t = e?.t;
+          if (!Number.isInteger(sq) || sq < 0 || sq > 63 || !csHome(seat, sq) || !csIsType(t) || grid[sq] || ++have[t] > CS_COUNTS[t]) { ok = false; break; }
+          grid[sq] = t;
+        }
+        if (!ok) { csErr(ws, 'Invalid layout'); break; }
+        if (msg.confirm && list.length !== 16) { csErr(ws, 'Place all 16 pieces first'); break; }
+        cs.placements[seat] = grid;
+        if (msg.confirm) {
+          cs.ready[seat] = true;
+          broadcastRoom(room.id, { type: 'cs-setup-ready', ready: cs.ready.slice() });
+          if (cs.ready[0] && cs.ready[1]) csBeginPlay(room);
+        }
+        break;
+      }
+      case 'cs-move-submit': {
+        const room = rooms.get(conn.roomId);
+        if (!room?.cs?.active) break;
+        const seat = csSeatOf(room.cs, id);
+        if (seat >= 0) csMove(room, seat, msg, ws);
+        break;
+      }
+      case 'cs-bluff-call': {
+        const room = rooms.get(conn.roomId);
+        if (!room?.cs?.active) break;
+        const seat = csSeatOf(room.cs, id);
+        if (seat < 0) break;
+        if (!room.cs.pending || room.cs.pending.mover === seat) { csErr(ws, 'Too late: there is no move to call'); break; }
+        csCall(room, seat);
+        break;
+      }
+      case 'cs-blind-pick': {
+        const room = rooms.get(conn.roomId);
+        const cs = room?.cs;
+        if (!cs?.active || cs.paused || !cs.blindPick) break;
+        const seat = csSeatOf(cs, id);
+        if (seat < 0 || cs.blindPick.picker !== seat) break;
+        const sq = Number(msg.square);
+        if (!csPickable(cs, seat).includes(sq)) { csErr(ws, 'Pick one of the glowing enemy tokens'); break; }
+        csDoPick(room, sq, false);
+        break;
+      }
+      case 'cs-accept-capture': {
+        const room = rooms.get(conn.roomId);
+        const cs = room?.cs;
+        if (!cs?.active || !cs.pending?.kingCapture) break;
+        if (csSeatOf(cs, id) !== cs.turn) break;
+        csGameOver(room, cs.pending.mover, 'king_captured');
+        break;
+      }
+      case 'cs-draw-offer': {
+        const room = rooms.get(conn.roomId);
+        const cs = room?.cs;
+        if (!cs?.active || cs.phase !== 'play' || cs.paused || cs.drawOffer !== null) break;
+        const seat = csSeatOf(cs, id);
+        if (seat < 0) break;
+        cs.drawOffer = seat;
+        csEmit(room, 'cs-draw-offer', { from: seat });
+        break;
+      }
+      case 'cs-draw-accept':
+      case 'cs-draw-decline': {
+        const room = rooms.get(conn.roomId);
+        const cs = room?.cs;
+        if (!cs?.active || cs.drawOffer === null) break;
+        const seat = csSeatOf(cs, id);
+        if (seat < 0 || cs.drawOffer !== 1 - seat) break;
+        if (msg.type === 'cs-draw-accept') {
+          broadcastRoom(room.id, { type: 'cs-draw-accepted' });
+          csGameOver(room, null, 'agreement');
+        } else {
+          cs.drawOffer = null;
+          csEmit(room, 'cs-draw-declined', { by: seat });
+        }
+        break;
+      }
+      case 'cs-resign': {
+        const room = rooms.get(conn.roomId);
+        const cs = room?.cs;
+        if (!cs?.active) break;
+        const seat = csSeatOf(cs, id);
+        if (seat >= 0) csGameOver(room, 1 - seat, 'resign');
+        break;
+      }
+      case 'cs-rematch-request': {
+        const room = rooms.get(conn.roomId);
+        const cs = room?.cs;
+        if (!cs || cs.active || cs.phase !== 'over') break;
+        const seat = csSeatOf(cs, id);
+        if (seat < 0 || !cs.seats.every(s => room.players.has(s.id))) break;
+        cs.rematch.add(seat);
+        if (cs.rematch.size === 2) {
+          broadcastRoom(room.id, { type: 'cs-rematch-accepted' });
+          csStartSetup(room, true);
+        } else {
+          broadcastRoom(room.id, { type: 'cs-rematch-request', from: seat }, id);
+        }
+        break;
+      }
+      case 'cs-lens-toggle': {
+        const room = rooms.get(conn.roomId);
+        const cs = room?.cs;
+        if (!cs || !conn.uid || !CS_LENS_UIDS.has(conn.uid)) break;
+        const seat = csSeatOf(cs, id);
+        if (seat < 0) break;
+        if (!room.csLens) room.csLens = new Set();
+        if (msg.on) room.csLens.add(conn.uid); else room.csLens.delete(conn.uid);
+        send(ws, { type: 'cs-lens-state', on: !!msg.on });
+        if (msg.on) csSendLens(room, seat, ws);
+        break;
+      }
+      // ── End Chess Stratego ───────────────────────────────────────────────────
 
       case 'game-over': {
         const room = rooms.get(conn.roomId);
@@ -10224,6 +10372,731 @@ function wdEndMatch(room) {
   log('info', 'wd-game-over', { roomId: room.id, matchWinnerId: tie ? null : matchWinnerId, roundWins: g.roundWins });
 }
 // ── End Wordle helpers ────────────────────────────────────────────
+
+// ── Chess Stratego helpers ──────────────────────────────────────
+// room.cs is the only source of truth. Clients only ever receive csView(cs, seat), which strips
+// enemy identities and all move-legality info. Seat index === color (0 = white, 1 = black).
+const CS_COUNTS = Object.freeze({ K: 1, Q: 1, R: 2, B: 2, N: 2, P: 8 });
+const CS_CLOCKS = Object.freeze({ untimed: null, '5+0': { base: 300000, inc: 0 }, '10+0': { base: 600000, inc: 0 }, '15+10': { base: 900000, inc: 10000 } });
+const CS_SETUP_MS = 60000;
+const CS_PICK_MS = 20000;
+const CS_RECONNECT_MS = 60000;
+const CS_PROMOS = ['Q', 'R', 'B', 'N'];
+const CS_KNIGHT = [[1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2]];
+const CS_ROOK_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const CS_BISHOP_DIRS = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+const CS_KING_DIRS = CS_ROOK_DIRS.concat(CS_BISHOP_DIRS);
+
+const csIsType = t => typeof t === 'string' && /^[KQRBNP]$/.test(t);
+const csHome = (c, sq) => (c === 0 ? sq < 16 : sq >= 48);
+const csNewStats = () => ({ moves: 0, bluffs: 0, caught: 0, calls: 0, correctCalls: 0, falseCalls: 0 });
+
+function csShuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) { const j = randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+function csDefaultConfig() {
+  return { clock: 'untimed', callWindowSec: 15, enPassant: true, revealPromotions: false, startColor: 'random', drawMoves: 0 };
+}
+
+function csSanitizeConfig(m) {
+  const d = csDefaultConfig();
+  if (!m || typeof m !== 'object') return d;
+  return {
+    clock: Object.prototype.hasOwnProperty.call(CS_CLOCKS, m.clock) ? m.clock : d.clock,
+    callWindowSec: [10, 15, 20, 30].includes(Number(m.callWindowSec)) ? Number(m.callWindowSec) : d.callWindowSec,
+    enPassant: m.enPassant === undefined ? d.enPassant : !!m.enPassant,
+    revealPromotions: !!m.revealPromotions,
+    startColor: ['random', 'white', 'black'].includes(m.startColor) ? m.startColor : d.startColor,
+    drawMoves: [0, 25, 50, 75].includes(Number(m.drawMoves)) ? Number(m.drawMoves) : d.drawMoves,
+  };
+}
+
+// Orthodox destinations for the piece on `from` (no check rules exist in this variant).
+// `ep` = { sq, victim, c } en-passant target or null.
+function csPieceTargets(board, from, ep) {
+  const p = board[from];
+  if (!p) return [];
+  const out = [];
+  const f0 = from & 7, r0 = from >> 3;
+  const on = (f, r) => f >= 0 && f < 8 && r >= 0 && r < 8;
+  if (p.t === 'P') {
+    const d = p.c === 0 ? 1 : -1, r1 = r0 + d;
+    if (on(f0, r1) && !board[r1 * 8 + f0]) {
+      out.push(r1 * 8 + f0);
+      const r2 = r0 + 2 * d;
+      if (!p.moved && on(f0, r2) && !board[r2 * 8 + f0]) out.push(r2 * 8 + f0);
+    }
+    for (const df of [-1, 1]) {
+      const f = f0 + df;
+      if (!on(f, r1)) continue;
+      const s = r1 * 8 + f;
+      if (board[s] && board[s].c !== p.c) out.push(s);
+      else if (!board[s] && ep && ep.sq === s && ep.c !== p.c) out.push(s);
+    }
+  } else if (p.t === 'N' || p.t === 'K') {
+    for (const [df, dr] of p.t === 'N' ? CS_KNIGHT : CS_KING_DIRS) {
+      const f = f0 + df, r = r0 + dr;
+      if (on(f, r) && (!board[r * 8 + f] || board[r * 8 + f].c !== p.c)) out.push(r * 8 + f);
+    }
+  } else {
+    const dirs = p.t === 'R' ? CS_ROOK_DIRS : p.t === 'B' ? CS_BISHOP_DIRS : CS_KING_DIRS;
+    for (const [df, dr] of dirs) {
+      let f = f0 + df, r = r0 + dr;
+      while (on(f, r)) {
+        const s = r * 8 + f;
+        if (board[s]) { if (board[s].c !== p.c) out.push(s); break; }
+        out.push(s);
+        f += df; r += dr;
+      }
+    }
+  }
+  return out;
+}
+
+// Castling geometry (any distance): rook slides next to the king, king hops over it.
+function csCastleGeom(board, k, s) {
+  const kp = board[k], rp = board[s];
+  if (!kp || !rp || kp.c !== rp.c || k === s || (k >> 3) !== (s >> 3)) return null;
+  const dir = (s & 7) > (k & 7) ? 1 : -1;
+  const kingFile = (k & 7) + 2 * dir;
+  if (kingFile < 0 || kingFile > 7) return null;
+  const rookTo = k + dir, kingTo = k + 2 * dir;
+  if ((board[rookTo] && rookTo !== s) || (board[kingTo] && kingTo !== s)) return null;
+  return { rookTo, kingTo };
+}
+
+function csCastleLegal(board, k, s) {
+  if (!csCastleGeom(board, k, s)) return false;
+  const kp = board[k], rp = board[s];
+  if (kp.t !== 'K' || rp.t !== 'R' || kp.moved || rp.moved) return false;
+  for (let x = Math.min(k, s) + 1; x < Math.max(k, s); x++) if (board[x]) return false;
+  return true;
+}
+
+function csSeatOf(cs, pid) { return cs.seats[0].id === pid ? 0 : cs.seats[1].id === pid ? 1 : -1; }
+function csSendSeat(room, seat, msg) {
+  const p = room.players.get(room.cs.seats[seat].id);
+  if (!p) return;
+  send(p.ws, msg);
+  if (msg.view && room.csLens?.has(room.cs.seats[seat].uid)) csSendLens(room, seat, p.ws);
+}
+function csAlive(room, cs) { return rooms.get(room.id) === room && room.cs === cs; }
+function csErr(ws, msg) { send(ws, { type: 'cs-error', msg }); }
+function csEmit(room, type, extra) {
+  for (let s = 0; s < 2; s++) {
+    csSendSeat(room, s, { type, ...(typeof extra === 'function' ? extra(s) : extra), view: csView(room.cs, s) });
+  }
+}
+
+// ── Clock ──
+function csCharge(cs) {
+  if (!cs.clocks || cs.running === null || cs.paused) return;
+  const now = Date.now();
+  cs.clocks[cs.running] -= now - cs.clockAt;
+  cs.clockAt = now;
+}
+function csRun(cs, seat) { csCharge(cs); cs.running = seat; cs.clockAt = Date.now(); }
+function csClocksNow(cs) {
+  if (!cs.clocks) return null;
+  const c = cs.clocks.slice();
+  if (cs.running !== null && !cs.paused && cs.phase === 'play') c[cs.running] -= Date.now() - cs.clockAt;
+  return c.map(v => Math.max(0, Math.round(v)));
+}
+function csFlagged(room) {
+  const cs = room.cs;
+  csCharge(cs);
+  if (cs.clocks && cs.running !== null && cs.clocks[cs.running] <= 0) { csGameOver(room, 1 - cs.running, 'timeout'); return true; }
+  return false;
+}
+
+// ── Timers ──
+function csClearTimers(cs) {
+  for (const k of Object.keys(cs.timers)) { clearTimeout(cs.timers[k]); cs.timers[k] = null; }
+}
+function csArm(room) {
+  const cs = room.cs;
+  csClearTimers(cs);
+  if (!cs.active || cs.paused) return;
+  const now = Date.now();
+  const guard = fn => () => { if (csAlive(room, cs) && cs.active && !cs.paused) fn(); };
+  if (cs.phase === 'setup') {
+    cs.timers.setup = setTimeout(guard(() => csBeginPlay(room)), Math.max(0, cs.setupDeadline - now));
+    return;
+  }
+  if (cs.pending) cs.timers.call = setTimeout(guard(() => csCallExpired(room)), Math.max(0, cs.pending.deadline - now));
+  if (cs.blindPick) cs.timers.pick = setTimeout(guard(() => csPickTimeout(room)), Math.max(0, cs.blindPick.deadline - now));
+  if (cs.clocks && cs.running !== null) {
+    cs.timers.flag = setTimeout(guard(() => { if (!csFlagged(room)) csArm(room); }), Math.max(0, cs.clocks[cs.running] - (now - cs.clockAt)) + 50);
+  }
+}
+function csPause(cs) {
+  if (cs.paused) return;
+  csCharge(cs);
+  cs.paused = Date.now();
+  csClearTimers(cs);
+}
+function csResume(room) {
+  const cs = room.cs;
+  if (!cs.paused) return;
+  const delta = Date.now() - cs.paused;
+  cs.paused = 0;
+  cs.setupDeadline += delta;
+  if (cs.pending) cs.pending.deadline += delta;
+  if (cs.blindPick) cs.blindPick.deadline += delta;
+  cs.clockAt = Date.now();
+  csArm(room);
+}
+
+// ── Per-player view (never contains hidden enemy identities or legality flags) ──
+function csPickable(cs, picker) {
+  const victim = 1 - picker, all = [], hidden = [];
+  cs.board.forEach((x, sq) => {
+    if (x && x.c === victim) { all.push(sq); if (!cs.revealed.has(x.id)) hidden.push(sq); }
+  });
+  return hidden.length ? hidden : all;
+}
+
+function csLogView(cs, seat) {
+  const over = cs.phase === 'over';
+  return cs.log.map(e => {
+    if (e.kind !== 'move') return e;
+    const known = over || e.c === seat || cs.revealed.has(e.pid);
+    const o = { kind: 'move', n: e.n, c: e.c, from: e.from, to: e.to, t: known ? e.t : null, cap: e.cap, castle: e.castle, called: e.called };
+    if (over || e.c === seat) o.bluff = e.bluff;
+    if (e.promo && (known || cs.config.revealPromotions)) o.promo = e.promo;
+    return o;
+  });
+}
+
+function csView(cs, seat) {
+  const over = cs.phase === 'over';
+  const now = cs.paused || Date.now();
+  const board = cs.board.map(x => {
+    if (!x) return null;
+    const own = x.c === seat, rv = cs.revealed.has(x.id);
+    const o = { id: x.id, c: x.c, t: own || rv || over ? x.t : null, rv };
+    if (own) o.mv = x.moved;
+    return o;
+  });
+  const v = {
+    phase: cs.phase, gameNo: cs.gameNo, color: seat, turn: cs.turn, config: cs.config,
+    names: cs.seats.map(s => s.name), connected: cs.seats.map(s => s.connected),
+    board, captured: cs.captured.map(l => l.map(x => x.t)),
+    clocks: csClocksNow(cs), running: cs.phase === 'play' && !cs.paused ? cs.running : null,
+    lastMove: cs.lastMove, moveNo: cs.moveNo, noCapture: cs.noCapture, drawOffer: cs.drawOffer, paused: !!cs.paused,
+    pending: cs.pending ? { mover: cs.pending.mover, from: cs.pending.from, to: cs.pending.to, kingCapture: cs.pending.kingCapture, remainingMs: Math.max(0, cs.pending.deadline - now) } : null,
+    blindPick: cs.blindPick ? { picker: cs.blindPick.picker, remainingMs: Math.max(0, cs.blindPick.deadline - now), tokens: cs.blindPick.picker === seat ? csPickable(cs, seat) : null } : null,
+    log: csLogView(cs, seat),
+  };
+  if (cs.phase === 'setup') v.setup = { placements: cs.placements[seat], ready: cs.ready.slice(), remainingMs: Math.max(0, cs.setupDeadline - now) };
+  if (cs.phase === 'play' && cs.turn === seat && !cs.blindPick && !cs.pending?.kingCapture) {
+    // Legal moves derived only from public occupancy + own pieces; en passant is offered only when
+    // the double-stepping token is known to be a pawn, otherwise it is flagged as "maybe".
+    const legal = {}, castles = [], epMaybe = [];
+    cs.board.forEach((x, sq) => {
+      if (!x || x.c !== seat) return;
+      const t = csPieceTargets(cs.board, sq, null);
+      if (t.length) legal[sq] = t;
+      if (x.t === 'K') cs.board.forEach((y, s) => { if (y && y.c === seat && y.t === 'R' && csCastleLegal(cs.board, sq, s)) castles.push({ from: sq, to: s }); });
+    });
+    const lm = cs.lastMove;
+    if (cs.config.enPassant && lm && lm.c !== seat && !lm.castle && (lm.from & 7) === (lm.to & 7) && (lm.to >> 3) - (lm.from >> 3) === (lm.c === 0 ? 2 : -2)) {
+      const mid = (lm.from + lm.to) / 2, tok = cs.board[lm.to];
+      if (!cs.board[mid] && tok && tok.c !== seat) {
+        const known = cs.revealed.has(tok.id);
+        if (!known || tok.t === 'P') {
+          for (const df of [-1, 1]) {
+            const f = (lm.to & 7) + df;
+            if (f < 0 || f > 7) continue;
+            const s = (lm.to & ~7) + f, y = cs.board[s];
+            if (!y || y.c !== seat || y.t !== 'P') continue;
+            if (known) (legal[s] = legal[s] || []).push(mid);
+            else epMaybe.push({ from: s, to: mid });
+          }
+        }
+      }
+    }
+    v.legal = legal; v.castles = castles; v.epMaybe = epMaybe;
+  }
+  return v;
+}
+
+// ── Lifecycle ──
+function csStartSetup(room, rematch) {
+  const prev = room.cs;
+  if (prev) { csClearTimers(prev); if (prev.discTimer) clearTimeout(prev.discTimer); }
+  let order;
+  if (rematch && prev) {
+    order = [prev.seats[1].id, prev.seats[0].id];
+  } else {
+    const [host, guest] = [...room.players.keys()];
+    const sc = room.csConfig.startColor;
+    const hostWhite = sc === 'white' ? true : sc === 'black' ? false : randomInt(2) === 0;
+    order = hostWhite ? [host, guest] : [guest, host];
+  }
+  const config = { ...room.csConfig };
+  const clk = CS_CLOCKS[config.clock];
+  const cs = room.cs = {
+    active: true, phase: 'setup', config, gameNo: (prev?.gameNo || 0) + 1,
+    seats: order.map(pid => ({ id: pid, name: room.players.get(pid).name, uid: conns.get(pid)?.uid || null, connected: true })),
+    board: new Array(64).fill(null), captured: [[], []], revealed: new Set(),
+    placements: [new Array(64).fill(null), new Array(64).fill(null)], ready: [false, false],
+    setupDeadline: Date.now() + CS_SETUP_MS,
+    turn: 0, ep: null, pending: null, blindPick: null, lastMove: null, drawOffer: null, rematch: new Set(),
+    clocks: clk ? [clk.base, clk.base] : null, inc: clk ? clk.inc : 0, running: null, clockAt: 0,
+    paused: 0, timers: {}, discTimer: null,
+    moveNo: 0, noCapture: 0, log: [], stats: [csNewStats(), csNewStats()], luckyGuess: false,
+    startedAt: Date.now(), result: null,
+  };
+  room.status = 'playing';
+  broadcastLobby();
+  csEmit(room, rematch ? 'cs-rematch-start' : 'cs-setup-start', { setupMs: CS_SETUP_MS });
+  csArm(room);
+  log('info', 'cs-setup', { roomId: room.id, white: cs.seats[0].name, black: cs.seats[1].name, rematch: !!rematch, clock: config.clock });
+}
+
+function csFillLayout(grid, seat) {
+  const have = { K: 0, Q: 0, R: 0, B: 0, N: 0, P: 0 };
+  for (const t of grid) if (t) have[t]++;
+  const missing = [];
+  for (const t of Object.keys(CS_COUNTS)) for (let i = have[t]; i < CS_COUNTS[t]; i++) missing.push(t);
+  const empty = [];
+  for (let s = 0; s < 64; s++) if (csHome(seat, s) && !grid[s]) empty.push(s);
+  csShuffle(empty);
+  missing.forEach((t, i) => { grid[empty[i]] = t; });
+}
+
+function csBeginPlay(room) {
+  const cs = room.cs;
+  if (cs.phase !== 'setup') return;
+  for (let s = 0; s < 2; s++) csFillLayout(cs.placements[s], s);
+  // Token ids are shuffled so they can never correlate with piece type or placement order
+  const ids = csShuffle(Array.from({ length: 32 }, (_, i) => i + 1));
+  let k = 0;
+  for (let s = 0; s < 2; s++) {
+    for (let sq = 0; sq < 64; sq++) {
+      const t = cs.placements[s][sq];
+      if (t) cs.board[sq] = { id: ids[k++], c: s, t, moved: false };
+    }
+  }
+  cs.phase = 'play';
+  cs.ready = [true, true];
+  cs.turn = 0;
+  csRun(cs, 0);
+  cs.log.push({ kind: 'sys', text: 'Game started. White moves first.' });
+  csEmit(room, 'cs-game-start', { firstTurn: 0 });
+  csArm(room);
+  log('info', 'cs-play', { roomId: room.id });
+}
+
+function csMove(room, seat, msg, ws) {
+  const cs = room.cs;
+  if (cs.phase !== 'play' || cs.paused || cs.turn !== seat || cs.blindPick || cs.pending?.kingCapture) return csErr(ws, 'You cannot move right now');
+  if (csFlagged(room)) return;
+  const from = Number(msg.from), to = Number(msg.to);
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || from > 63 || to < 0 || to > 63 || from === to) return csErr(ws, 'Invalid move');
+  const board = cs.board, p = board[from];
+  if (!p || p.c !== seat) return csErr(ws, 'That is not your piece');
+  const castle = !!msg.castle;
+  const geom = castle ? csCastleGeom(board, from, to) : null;
+  if (castle && !geom) return csErr(ws, 'Castling is not possible there');
+  if (!castle && board[to] && board[to].c === seat) return csErr(ws, 'You cannot move onto your own piece');
+
+  cs.pending = null; // moving silently accepts the opponent's previous move
+  const ep = cs.config.enPassant ? cs.ep : null;
+  const wasLegal = castle ? csCastleLegal(board, from, to) : csPieceTargets(board, from, ep).includes(to);
+  const snapshot = structuredClone({ board, captured: cs.captured });
+  const typeBefore = p.t;
+  const revealedIds = [];
+  let captured = null, castleInfo = null, promo = null, dest = to;
+  if (castle) {
+    const r = board[to];
+    board[from] = null; board[to] = null;
+    board[geom.rookTo] = r; board[geom.kingTo] = p;
+    p.moved = true; r.moved = true;
+    dest = geom.kingTo;
+    castleInfo = { kFrom: from, kTo: geom.kingTo, rFrom: to, rTo: geom.rookTo };
+    revealedIds.push(p.id, r.id);
+  } else {
+    let capSq = board[to] ? to : -1;
+    if (capSq < 0 && wasLegal && p.t === 'P' && ep && to === ep.sq) capSq = ep.victim;
+    if (capSq >= 0) {
+      const v = board[capSq];
+      board[capSq] = null;
+      captured = { sq: capSq, t: v.t, c: v.c, id: v.id };
+      cs.captured[v.c].push({ id: v.id, t: v.t });
+      revealedIds.push(v.id);
+    }
+    board[from] = null; board[to] = p; p.moved = true;
+    if (p.t === 'P' && (to >> 3) === (seat === 0 ? 7 : 0)) {
+      promo = CS_PROMOS.includes(msg.promotion) ? msg.promotion : 'Q';
+      p.t = promo;
+      if (cs.config.revealPromotions) revealedIds.push(p.id);
+    }
+  }
+  for (const rid of revealedIds) cs.revealed.add(rid);
+  const dr = (to >> 3) - (from >> 3);
+  cs.ep = !castle && !promo && typeBefore === 'P' && (to & 7) === (from & 7) && dr === (seat === 0 ? 2 : -2)
+    ? { sq: (from + to) / 2, victim: to, c: seat } : null;
+  cs.noCapture = captured ? 0 : cs.noCapture + 1;
+  cs.moveNo++;
+  cs.lastMove = { from, to: dest, c: seat, castle: castleInfo };
+  cs.drawOffer = null;
+  const logIdx = cs.log.push({
+    kind: 'move', n: cs.moveNo, c: seat, from, to: dest, pid: p.id, t: typeBefore, promo,
+    cap: captured && { t: captured.t, c: captured.c },
+    castle: castleInfo && { rFrom: castleInfo.rFrom, rTo: castleInfo.rTo, rt: board[geom.rookTo].t },
+    bluff: !wasLegal, called: null,
+  }) - 1;
+  cs.stats[seat].moves++;
+  if (!wasLegal) cs.stats[seat].bluffs++;
+  if (cs.clocks) cs.clocks[seat] += cs.inc;
+  cs.turn = 1 - seat;
+  csRun(cs, cs.turn);
+  const kingCapture = captured?.t === 'K';
+  const callWindowMs = cs.config.callWindowSec * 1000;
+  cs.pending = { mover: seat, from, to: dest, pieceId: p.id, wasLegal, snapshot, revealedIds, logIdx, kingCapture, deadline: Date.now() + callWindowMs };
+  csEmit(room, 'cs-move-result', s => ({
+    from, to: dest, castle: castleInfo, captured, revealed: revealedIds, kingCaptured: kingCapture, callWindowMs,
+    promoted: promo && (s === seat || cs.config.revealPromotions) ? promo : null,
+  }));
+  if (!kingCapture && cs.config.drawMoves && cs.noCapture >= cs.config.drawMoves * 2) { csGameOver(room, null, 'no_capture'); return; }
+  csArm(room);
+}
+
+function csCall(room, seat) {
+  const cs = room.cs, pd = cs.pending;
+  if (cs.phase !== 'play' || cs.paused || !pd || pd.mover === seat || cs.turn !== seat || cs.blindPick) return;
+  if (csFlagged(room)) return;
+  cs.pending = null;
+  const mover = pd.mover;
+  const entry = cs.log[pd.logIdx];
+  cs.stats[seat].calls++;
+  if (!pd.wasLegal) {
+    // Bluff caught: undo the move, then remove the bluffing piece. Turn stays with the caller.
+    cs.board = pd.snapshot.board;
+    cs.captured = pd.snapshot.captured;
+    cs.ep = null; cs.noCapture = 0; cs.lastMove = null;
+    const sq = cs.board.findIndex(x => x && x.id === pd.pieceId);
+    const piece = cs.board[sq];
+    cs.board[sq] = null;
+    cs.revealed.add(piece.id);
+    cs.captured[mover].push({ id: piece.id, t: piece.t });
+    entry.called = 'caught';
+    cs.stats[seat].correctCalls++;
+    cs.stats[mover].caught++;
+    cs.log.push({ kind: 'call', c: seat, outcome: 'caught', t: piece.t, sq });
+    const info = { sq, t: piece.t, c: mover, id: piece.id };
+    const over = piece.t === 'K';
+    csEmit(room, 'cs-bluff-resolved', { outcome: 'caught', revealedPiece: info, removedPiece: info, gameOver: over });
+    if (over) csGameOver(room, seat, 'bluff_caught_king');
+    else csArm(room);
+    return;
+  }
+  // False accusation: the move stands, the moved piece is revealed, the accused takes a blind pick.
+  const sq = cs.board.findIndex(x => x && x.id === pd.pieceId);
+  const piece = cs.board[sq];
+  cs.revealed.add(piece.id);
+  entry.called = 'legal';
+  cs.stats[seat].falseCalls++;
+  cs.log.push({ kind: 'call', c: seat, outcome: 'false_call', t: piece.t, sq });
+  const info = { sq, t: piece.t, c: mover, id: piece.id };
+  if (pd.kingCapture) {
+    csEmit(room, 'cs-bluff-resolved', { outcome: 'false_call', revealedPiece: info, removedPiece: null, gameOver: true });
+    csGameOver(room, mover, 'king_captured');
+    return;
+  }
+  csRun(cs, null);
+  cs.blindPick = { picker: mover, deadline: Date.now() + CS_PICK_MS };
+  csEmit(room, 'cs-bluff-resolved', { outcome: 'false_call', revealedPiece: info, removedPiece: null, gameOver: false });
+  csSendSeat(room, mover, { type: 'cs-blind-pick-request', tokens: csPickable(cs, mover), timeMs: CS_PICK_MS });
+  csArm(room);
+}
+
+function csDoPick(room, sq, auto) {
+  const cs = room.cs, picker = cs.blindPick.picker, victim = 1 - picker;
+  cs.blindPick = null;
+  const piece = cs.board[sq];
+  cs.board[sq] = null;
+  cs.revealed.add(piece.id);
+  cs.captured[victim].push({ id: piece.id, t: piece.t });
+  cs.noCapture = 0;
+  const lucky = piece.t === 'K';
+  cs.log.push({ kind: 'pick', c: picker, t: piece.t, sq, auto: !!auto, lucky });
+  if (lucky) cs.luckyGuess = true;
+  else csRun(cs, cs.turn);
+  csEmit(room, 'cs-blind-pick-result', { removedPiece: { sq, t: piece.t, c: victim, id: piece.id }, auto: !!auto, lucky, gameOver: lucky });
+  if (lucky) csGameOver(room, picker, 'lucky_guess');
+  else csArm(room);
+}
+
+function csPickTimeout(room) {
+  const cs = room.cs;
+  if (!cs.blindPick) return;
+  const opts = csPickable(cs, cs.blindPick.picker);
+  csDoPick(room, opts[randomInt(opts.length)], true);
+}
+
+function csCallExpired(room) {
+  const cs = room.cs, pd = cs.pending;
+  if (!pd) return;
+  if (pd.kingCapture) { csGameOver(room, pd.mover, 'king_captured'); return; }
+  cs.pending = null;
+  csEmit(room, 'cs-call-window-closed', {});
+  csArm(room);
+}
+
+function csGameOver(room, winner, reason) {
+  const cs = room.cs;
+  if (!cs || cs.phase === 'over') return;
+  csCharge(cs);
+  cs.running = null;
+  cs.phase = 'over';
+  cs.active = false;
+  cs.pending = null; cs.blindPick = null; cs.drawOffer = null; cs.paused = 0;
+  csClearTimers(cs);
+  if (cs.discTimer) { clearTimeout(cs.discTimer); cs.discTimer = null; }
+  cs.rematch = new Set();
+  cs.log.push({ kind: 'end', winner, reason });
+  room.status = 'waiting';
+  broadcastLobby();
+  cs.result = {
+    winner, winnerName: winner === null ? null : cs.seats[winner].name, reason,
+    finalBoard: cs.board.map(x => x && { id: x.id, c: x.c, t: x.t }),
+    stats: cs.stats, moveCount: cs.moveNo, luckyGuess: cs.luckyGuess, durationMs: Date.now() - cs.startedAt,
+  };
+  csEmit(room, 'cs-game-over', cs.result);
+  log('info', 'cs-game-over', { roomId: room.id, winner: cs.result.winnerName, reason, moves: cs.moveNo });
+}
+
+// ── Disconnect / reconnect (60s window, game paused meanwhile) ──
+function csFindRejoinSeat(room, conn) {
+  const cs = room.cs;
+  let best = -1;
+  for (let i = 0; i < 2; i++) {
+    const s = cs.seats[i];
+    if (room.players.has(s.id) || !conn.uid || s.uid !== conn.uid) continue;
+    if (best < 0 || s.name === conn.name) best = i;
+  }
+  return best;
+}
+
+function csOnLeave(room, conn) {
+  const cs = room.cs;
+  if (!cs) return;
+  if (room.players.size === 0) {
+    csClearTimers(cs);
+    if (cs.discTimer) clearTimeout(cs.discTimer);
+    room.cs = null;
+    return;
+  }
+  const seat = csSeatOf(cs, conn.id);
+  if (seat < 0) return;
+  if (!cs.active) {
+    if (cs.rematch.size) { cs.rematch.clear(); broadcastRoom(room.id, { type: 'cs-rematch-cancelled' }); }
+    return;
+  }
+  cs.seats[seat].connected = false;
+  csPause(cs);
+  if (cs.discTimer) clearTimeout(cs.discTimer);
+  cs.discTimer = setTimeout(() => {
+    if (csAlive(room, cs) && cs.active && !cs.seats[seat].connected) csGameOver(room, 1 - seat, 'disconnect');
+  }, CS_RECONNECT_MS);
+  csEmit(room, 'cs-opponent-disconnected', { name: conn.name, reconnectMs: CS_RECONNECT_MS });
+  log('info', 'cs-disconnect', { roomId: room.id, name: conn.name });
+}
+
+function csOnJoin(room, conn, pid) {
+  send(conn.ws, { type: 'cs-lobby-config', config: room.csConfig || csDefaultConfig() });
+  const cs = room.cs;
+  if (!cs) return;
+  const seat = csFindRejoinSeat(room, conn);
+  if (seat < 0) return;
+  const s = cs.seats[seat];
+  const wasDisconnected = !s.connected;
+  s.id = pid; s.connected = true; s.name = conn.name;
+  if (!cs.active) {
+    if (cs.result) csSendSeat(room, seat, { type: 'cs-game-over', ...cs.result, rejoin: true, view: csView(cs, seat) });
+    return;
+  }
+  if (wasDisconnected) {
+    if (cs.discTimer) { clearTimeout(cs.discTimer); cs.discTimer = null; }
+    if (cs.seats.every(x => x.connected)) csResume(room);
+    csSendSeat(room, 1 - seat, { type: 'cs-opponent-reconnected', name: conn.name, view: csView(cs, 1 - seat) });
+  }
+  csSendSeat(room, seat, { type: 'cs-state', view: csView(cs, seat) });
+  log('info', 'cs-reconnect', { roomId: room.id, name: conn.name });
+}
+
+// ── Lens: hidden full-knowledge move advisor ──
+// Only accounts listed in CS_LENS_UIDS (comma-separated Firebase UIDs) can enable it; the client
+// trigger is public JS, so the allow-list is the real gate. Everyone else is silently ignored.
+const CS_LENS_UIDS = new Set(String(process.env.CS_LENS_UIDS || '').split(',').map(s => s.trim()).filter(Boolean));
+const CS_VALUE = { K: 1000, Q: 9, R: 5, B: 3, N: 3, P: 1 };
+const CS_WIN = 100000;
+const CS_LENS_NODE_CAP = 150000;
+
+function csLensEval(b, side) {
+  let s = 0;
+  for (let i = 0; i < 64; i++) {
+    const p = b[i];
+    if (!p) continue;
+    let v = CS_VALUE[p.t];
+    if (p.t === 'P') v += 0.08 * (p.c === 0 ? i >> 3 : 7 - (i >> 3));
+    else if (p.t !== 'K') v += 0.15 - 0.04 * (Math.abs((i & 7) - 3.5) + Math.abs((i >> 3) - 3.5));
+    s += p.c === side ? v : -v;
+  }
+  return s;
+}
+
+function csLensGen(b, side, capturesOnly) {
+  const out = [];
+  for (let sq = 0; sq < 64; sq++) {
+    if (!b[sq] || b[sq].c !== side) continue;
+    for (const to of csPieceTargets(b, sq, null)) {
+      const v = b[to] ? CS_VALUE[b[to].t] : 0;
+      if (v || !capturesOnly) out.push({ from: sq, to, v });
+    }
+  }
+  return out.sort((x, y) => y.v - x.v);
+}
+
+function csLensDo(b, from, to) {
+  const p = b[from], u = { p, cap: b[to], t: p.t, moved: p.moved };
+  b[to] = p; b[from] = null; p.moved = true;
+  if (p.t === 'P' && (to >> 3) === (p.c === 0 ? 7 : 0)) p.t = 'Q';
+  return u;
+}
+function csLensUndo(b, from, to, u) { b[from] = u.p; b[to] = u.cap; u.p.t = u.t; u.p.moved = u.moved; }
+
+function csLensQuiesce(b, side, alpha, beta, qd, ctx) {
+  ctx.nodes++;
+  const stand = csLensEval(b, side);
+  if (qd === 0 || ctx.nodes > CS_LENS_NODE_CAP) return stand;
+  if (stand >= beta) return stand;
+  if (stand > alpha) alpha = stand;
+  for (const m of csLensGen(b, side, true)) {
+    if (m.v === CS_VALUE.K) return CS_WIN;
+    const u = csLensDo(b, m.from, m.to);
+    const v = -csLensQuiesce(b, 1 - side, -beta, -alpha, qd - 1, ctx);
+    csLensUndo(b, m.from, m.to, u);
+    if (v >= beta) return v;
+    if (v > alpha) alpha = v;
+  }
+  return alpha;
+}
+
+// Perfect-information negamax: assumes the opponent sees everything, so suggestions are conservative.
+function csLensSearch(b, side, depth, alpha, beta, ctx) {
+  if (depth === 0 || ctx.nodes > CS_LENS_NODE_CAP) return csLensQuiesce(b, side, alpha, beta, 4, ctx);
+  ctx.nodes++;
+  const moves = csLensGen(b, side, false);
+  if (!moves.length) return csLensEval(b, side);
+  if (moves[0].v === CS_VALUE.K) return CS_WIN + depth;
+  let best = -Infinity;
+  for (const m of moves) {
+    const u = csLensDo(b, m.from, m.to);
+    const v = -csLensSearch(b, 1 - side, depth - 1, -beta, -alpha, ctx);
+    csLensUndo(b, m.from, m.to, u);
+    if (v > best) best = v;
+    if (v > alpha) alpha = v;
+    if (alpha >= beta) break;
+  }
+  return best;
+}
+
+function csLensBest(cs, s) {
+  const b = cs.board.map(x => x && { c: x.c, t: x.t, moved: x.moved });
+  const ep = cs.config.enPassant ? cs.ep : null;
+  const ctx = { nodes: 0 };
+  const base = csLensEval(b, s);
+  const scored = [];
+  const roots = [];
+  for (let from = 0; from < 64; from++) {
+    const p = b[from];
+    if (!p || p.c !== s) continue;
+    for (const to of csPieceTargets(b, from, ep)) {
+      const epSq = p.t === 'P' && !b[to] && ep && to === ep.sq ? ep.victim : -1;
+      const victim = epSq >= 0 ? b[epSq] : b[to];
+      roots.push({ from, to, epSq, capT: victim ? victim.t : null, v: victim ? CS_VALUE[victim.t] : 0 });
+    }
+    if (p.t === 'K') {
+      for (let r = 0; r < 64; r++) {
+        if (b[r] && b[r].c === s && b[r].t === 'R' && csCastleLegal(b, from, r)) roots.push({ from, to: r, castle: true, v: 0 });
+      }
+    }
+  }
+  roots.sort((x, y) => y.v - x.v);
+  for (const m of roots) {
+    let score;
+    if (m.capT === 'K') score = CS_WIN;
+    else if (m.castle) {
+      const k = b[m.from], rook = b[m.to], g = csCastleGeom(b, m.from, m.to);
+      b[m.from] = null; b[m.to] = null; b[g.rookTo] = rook; b[g.kingTo] = k;
+      // Castling reveals the King's square, so it carries a flat penalty
+      score = -csLensSearch(b, 1 - s, 2, -Infinity, Infinity, ctx) - 1.5;
+      b[g.rookTo] = null; b[g.kingTo] = null; b[m.from] = k; b[m.to] = rook;
+      m.kTo = g.kingTo;
+    } else {
+      const held = m.epSq >= 0 ? b[m.epSq] : null;
+      if (held) b[m.epSq] = null;
+      const u = csLensDo(b, m.from, m.to);
+      score = -csLensSearch(b, 1 - s, 2, -Infinity, Infinity, ctx);
+      csLensUndo(b, m.from, m.to, u);
+      if (held) b[m.epSq] = held;
+    }
+    scored.push({ from: m.from, to: m.to, castle: !!m.castle, kTo: m.kTo, capT: m.capT || null,
+      score: Math.abs(score) >= CS_WIN / 2 ? Math.sign(score) * CS_WIN : Math.round((score - base) * 10) / 10 });
+  }
+  scored.sort((x, y) => y.score - x.score);
+  return { moves: scored.slice(0, 3), b };
+}
+
+// Illegal capture of a big piece that looks like a legal move for a type the opponent can't rule out.
+function csLensBluff(cs, s, b) {
+  const known = { K: 0, Q: 0, R: 0, B: 0, N: 0, P: 0 };
+  for (const x of cs.captured[s]) known[x.t]++;
+  cs.board.forEach(x => { if (x && x.c === s && cs.revealed.has(x.id)) known[x.t]++; });
+  let best = null;
+  cs.board.forEach((x, from) => {
+    if (!x || x.c !== s || x.t === 'K' || cs.revealed.has(x.id)) return;
+    const legal = new Set(csPieceTargets(b, from, null));
+    for (const as of ['Q', 'R', 'B', 'N', 'P']) {
+      if (as === x.t || known[as] >= CS_COUNTS[as]) continue;
+      b[from].t = as;
+      const targets = csPieceTargets(b, from, null);
+      b[from].t = x.t;
+      for (const to of targets) {
+        const v = b[to];
+        if (legal.has(to) || !v || v.c === s || v.t === 'K') continue;
+        const gain = CS_VALUE[v.t] - CS_VALUE[x.t];
+        if (gain >= 3 && (!best || gain > best.gain)) best = { from, to, as, gain, capT: v.t };
+      }
+    }
+  });
+  return best;
+}
+
+function csSendLens(room, s, ws) {
+  const cs = room.cs;
+  const out = { type: 'cs-lens', moves: [], bluff: null, call: null, pick: null };
+  if (cs.phase === 'play' && !cs.paused) {
+    if (cs.pending && cs.pending.mover !== s) out.call = !cs.pending.wasLegal;
+    if (cs.blindPick && cs.blindPick.picker === s) {
+      const opts = csPickable(cs, s);
+      out.pick = opts.reduce((a, sq) => (CS_VALUE[cs.board[sq].t] > CS_VALUE[cs.board[a].t] ? sq : a), opts[0]);
+      out.pickT = cs.board[out.pick].t;
+    } else if (cs.turn === s && !cs.pending?.kingCapture) {
+      const { moves, b } = csLensBest(cs, s);
+      out.moves = moves;
+      out.bluff = csLensBluff(cs, s, b);
+    }
+  }
+  send(ws, out);
+}
+// ── End Chess Stratego helpers ──────────────────────────────────
 
 // ── Start ───────────────────────────────────────────────────────
 beatgame.checkTools(log);

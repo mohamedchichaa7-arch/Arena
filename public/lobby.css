@@ -302,6 +302,20 @@ input[type=password]:focus {
   filter: drop-shadow(0 2px 4px rgba(0,0,0,.3))
 }
 
+.darkweb-card .gpc-icon {
+  color: #ef3948;
+  text-shadow: 2px 0 #7f101d, -2px 0 #0a6559;
+  filter: drop-shadow(0 0 7px rgba(239,57,72,.55));
+  animation: darkweb-eye-glitch 3.8s steps(2) infinite
+}
+
+@keyframes darkweb-eye-glitch {
+  0%, 92%, 100% { transform: translate(0) }
+  93% { transform: translate(2px, -1px) skewX(7deg) }
+  95% { transform: translate(-2px, 1px) }
+  97% { transform: translate(1px, 0) }
+}
+
 .gpc-label {
   font-family: 'Orbitron', sans-serif;
   font-size: .55rem;
