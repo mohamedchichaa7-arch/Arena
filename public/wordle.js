@@ -170,20 +170,21 @@ function showPhase(p) {
 function buildGrid() {
   const grid = $('myGrid');
   grid.innerHTML = '';
-  for (let r = 0; r < 6; r++) {
-    const row = document.createElement('div');
-    row.className = 'wd-grid-row';
-    row.id = 'row' + r;
-    for (let c = 0; c < 5; c++) {
-      const tile = document.createElement('div');
-      tile.className = 'wd-tile';
-      tile.id = `t${r}_${c}`;
-      row.appendChild(tile);
-    }
-    grid.appendChild(row);
-  }
+  for (let r = 0; r < 6; r++) addGridRow(r);
   curRow = 0; curGuess = '';
   $('wordRevealRow').style.display = 'none';
+}
+function addGridRow(r) {
+  const row = document.createElement('div');
+  row.className = 'wd-grid-row';
+  row.id = 'row' + r;
+  for (let c = 0; c < 5; c++) {
+    const tile = document.createElement('div');
+    tile.className = 'wd-tile';
+    tile.id = `t${r}_${c}`;
+    row.appendChild(tile);
+  }
+  $('myGrid').appendChild(row);
 }
 
 function renderCurRow() {
@@ -308,16 +309,17 @@ function renderRoundDots(roundWins) {
 function buildOppGrid() {
   const el = $('oppGrid');
   el.innerHTML = '';
-  for (let r = 0; r < 6; r++) {
-    const row = document.createElement('div');
-    row.className = 'wd-opp-row';
-    for (let c = 0; c < 5; c++) {
-      const t = document.createElement('div');
-      t.className = 'wd-opp-tile';
-      row.appendChild(t);
-    }
-    el.appendChild(row);
+  for (let r = 0; r < 6; r++) addOppRow();
+}
+function addOppRow() {
+  const row = document.createElement('div');
+  row.className = 'wd-opp-row';
+  for (let c = 0; c < 5; c++) {
+    const t = document.createElement('div');
+    t.className = 'wd-opp-tile';
+    row.appendChild(t);
   }
+  $('oppGrid').appendChild(row);
 }
 
 // ── Guess result (flip animation) ────────────────────────────────
@@ -338,6 +340,8 @@ function applyGuessResult(msg) {
   const totalFlipMs = 100 * 4 + 500;
   setTimeout(() => {
     curRow++; curGuess = '';
+    if (round.mode === 'race' && !$('row' + curRow)) addGridRow(curRow);
+    $('row' + curRow)?.scrollIntoView({ block: 'nearest' });
     if (msg.gameOver) {
       round.active = false;
       if (msg.solved) winSequence();
@@ -507,7 +511,9 @@ function handleMsg(msg) {
     }
     case 'wd-opponent-update': {
       const rowIdx = msg.guessNumber - 1;
+      while ($('oppGrid').children.length <= rowIdx) addOppRow();
       const row = $('oppGrid').children[rowIdx];
+      row?.scrollIntoView({ block: 'nearest' });
       if (row) { [...row.children].forEach((t, i) => { if (msg.greenPositions[i]) t.classList.add('green'); }); }
       $('oppGuesses').textContent = `${msg.guessNumber} guesses used`;
       if (msg.solved) {
@@ -548,7 +554,6 @@ function handleMsg(msg) {
     }
     case 'error': {
       if (msg.hardModeViolation) shakeRow(true);
-      else if (msg.msg === 'Not a word') shakeRow(false);
       else alert(msg.msg);
       break;
     }

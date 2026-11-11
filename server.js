@@ -3615,10 +3615,10 @@ wss.on('connection', (ws, req) => {
         const g = room?.wordle;
         if (!g || !g.active || !g.roundActive) break;
         const ps = g.players[id];
-        if (!ps || ps.solved || ps.guessCount >= 6) break;
+        const maxGuesses = g.mode === 'race' ? Infinity : 6;
+        if (!ps || ps.solved || ps.guessCount >= maxGuesses) break;
         const guess = String(msg.guess || '').toLowerCase();
-        if (!/^[a-z]{5}$/.test(guess)) { send(ws, { type: 'error', msg: 'Must be a 5-letter word' }); break; }
-        if (!WORDLE_VALID_SET.has(guess)) { send(ws, { type: 'error', msg: 'Not a word' }); break; }
+        if (!/^[a-z]{5}$/.test(guess)) { send(ws, { type: 'error', msg: 'Must be 5 letters' }); break; }
         if (g.hardMode) {
           const violation = wdCheckHardMode(ps.feedbacks, guess);
           if (violation) { send(ws, { type: 'error', msg: violation, hardModeViolation: true }); break; }
@@ -3629,13 +3629,13 @@ wss.on('connection', (ws, req) => {
         ps.guessCount++;
         const solved = guess === g.word;
         if (solved) { ps.solved = true; ps.solveTime = Date.now() - g.startedAt; }
-        send(ws, { type: 'wd-guess-result', guess, feedback, guessNumber: ps.guessCount, solved, gameOver: solved || ps.guessCount >= 6 });
+        send(ws, { type: 'wd-guess-result', guess, feedback, guessNumber: ps.guessCount, solved, gameOver: solved || ps.guessCount >= maxGuesses });
         if (g.mode === 'race') {
           const greenPositions = feedback.map(f => f.state === 'correct');
-          broadcastRoom(room.id, { type: 'wd-opponent-update', guessNumber: ps.guessCount, greenPositions, solved, failed: !solved && ps.guessCount >= 6 }, id);
+          broadcastRoom(room.id, { type: 'wd-opponent-update', guessNumber: ps.guessCount, greenPositions, solved, failed: false }, id);
           wdMaybeEndRound(room);
         } else {
-          if (solved || ps.guessCount >= 6) wdResolveSoloRound(room, id, solved);
+          if (solved || ps.guessCount >= maxGuesses) wdResolveSoloRound(room, id, solved);
         }
         break;
       }
@@ -10226,7 +10226,6 @@ function classifyWordleWord(word) {
   return 'hard';
 }
 
-const WORDLE_VALID_SET = new Set(WORDLE_WORDS);
 const WORDLE_TIERS = { easy: [], normal: [], hard: [], expert: [] };
 for (const w of WORDLE_WORDS) { WORDLE_TIERS[classifyWordleWord(w)].push(w); }
 log('info', 'wordle-bank-loaded', {
@@ -10322,9 +10321,8 @@ function wdResolveSoloRound(room, id, won) {
 
 function wdMaybeEndRound(room) {
   const g = room.wordle;
-  const ids = Object.keys(g.players);
-  const allDone = ids.length >= 2 && ids.every(pid => g.players[pid].solved || g.players[pid].guessCount >= 6);
-  if (allDone) wdResolveRaceRound(room);
+  // Unlimited guesses: the round ends the moment either player solves it
+  if (Object.values(g.players).some(p => p.solved)) wdResolveRaceRound(room);
 }
 
 function wdResolveRaceRound(room) {
